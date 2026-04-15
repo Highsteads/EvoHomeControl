@@ -1,6 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MenuItems>
 
+    <MenuItem id="menuStartTimedBoost1h">
+        <Name>Start Timed Boost (1 hour)</Name>
+        <CallbackMethod>menuStartTimedBoost1h</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="menuStartTimedBoost2h">
+        <Name>Start Timed Boost (2 hours)</Name>
+        <CallbackMethod>menuStartTimedBoost2h</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="menuCancelTimedBoost">
+        <Name>Cancel Timed Boost</Name>
+        <CallbackMethod>menuCancelTimedBoost</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="sep0" isSeparator="true"/>
+
     <MenuItem id="menuRunCycleNow">
         <Name>Run Heating Cycle Now</Name>
         <CallbackMethod>menuRunCycleNow</CallbackMethod>

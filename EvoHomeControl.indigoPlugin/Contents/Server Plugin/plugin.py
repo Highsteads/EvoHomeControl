@@ -955,6 +955,21 @@ class Plugin(indigo.PluginBase):
     # Menu callbacks
     # -----------------------------------------------------------------------
 
+    def menuStartTimedBoost1h(self, values_dict=None, type_id=None):
+        """Menu: Start 1-hour timed boost."""
+        self._start_timed_boost(hours=1)
+        return True
+
+    def menuStartTimedBoost2h(self, values_dict=None, type_id=None):
+        """Menu: Start 2-hour timed boost."""
+        self._start_timed_boost(hours=2)
+        return True
+
+    def menuCancelTimedBoost(self, values_dict=None, type_id=None):
+        """Menu: Cancel timed boost immediately."""
+        self._cancel_timed_boost(reason="menu cancel")
+        return True
+
     def menuRunCycleNow(self, values_dict=None, type_id=None):
         """Menu: Run heating cycle now."""
         _log("[Menu] Manual heating cycle triggered")
