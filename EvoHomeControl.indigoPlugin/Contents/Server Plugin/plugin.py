@@ -955,13 +955,13 @@ class Plugin(indigo.PluginBase):
     # Menu callbacks
     # -----------------------------------------------------------------------
 
-    def menuRunCycleNow(self, values_dict, type_id):
+    def menuRunCycleNow(self, values_dict=None, type_id=None):
         """Menu: Run heating cycle now."""
         _log("[Menu] Manual heating cycle triggered")
         self.store["last_heating_cycle"] = 0.0
         return True
 
-    def menuShowStatus(self, values_dict, type_id):
+    def menuShowStatus(self, values_dict=None, type_id=None):
         """Menu: Show current heating controller status."""
         _log("=== EvoHome Heating Controller Status ===")
         _log(f"  Away mode:           {self.store['is_away']}")
@@ -977,7 +977,7 @@ class Plugin(indigo.PluginBase):
             _log(f"  Overheating rooms:   {', '.join(rooms) if rooms else 'None'}")
         return True
 
-    def menuShowOverheatStatus(self, values_dict, type_id):
+    def menuShowOverheatStatus(self, values_dict=None, type_id=None):
         """Menu: Show overheat monitor status."""
         if self.overheat:
             for line in self.overheat.get_status_summary().split("\n"):
@@ -986,7 +986,7 @@ class Plugin(indigo.PluginBase):
             _log("[OverheatMonitor] Not yet initialised")
         return True
 
-    def menuShowTimedBoostStatus(self, values_dict, type_id):
+    def menuShowTimedBoostStatus(self, values_dict=None, type_id=None):
         """Menu: Show timed boost status."""
         if self.store["timed_boost_active"]:
             expiry = self.store.get("timed_boost_expiry")
@@ -999,7 +999,7 @@ class Plugin(indigo.PluginBase):
             _log("[TimedBoost] Not active")
         return True
 
-    def menuToggleDebug(self, values_dict, type_id):
+    def menuToggleDebug(self, values_dict=None, type_id=None):
         """Menu: Toggle debug logging."""
         self.debug = not self.debug
         self.pluginPrefs["showDebugInfo"] = self.debug
