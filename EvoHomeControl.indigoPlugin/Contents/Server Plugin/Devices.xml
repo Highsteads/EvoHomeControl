@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Devices>
+
+    <Device type="custom" id="heatingController">
+        <Name>Heating Controller</Name>
+        <ConfigUI>
+            <Field id="info" type="label">
+                <Label>Monitors and controls all 12 Evohome TRV zones. Managed automatically by the plugin — no configuration required here.</Label>
+            </Field>
+        </ConfigUI>
+        <States>
+            <State id="activeMode">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Active mode changed</TriggerLabel>
+                <ControlPageLabel>Active Mode</ControlPageLabel>
+            </State>
+            <State id="outdoorTempC">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Outdoor temp changed</TriggerLabel>
+                <ControlPageLabel>Outdoor Temp (degC)</ControlPageLabel>
+            </State>
+            <State id="tempOffset">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Temp offset changed</TriggerLabel>
+                <ControlPageLabel>Temp Offset (degC)</ControlPageLabel>
+            </State>
+            <State id="isAway">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Away mode changed</TriggerLabel>
+                <ControlPageLabel>Away Mode Active</ControlPageLabel>
+            </State>
+            <State id="isBothOut">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Both-out mode changed</TriggerLabel>
+                <ControlPageLabel>Both-Out Active</ControlPageLabel>
+            </State>
+            <State id="isBoost">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Global boost changed</TriggerLabel>
+                <ControlPageLabel>Global Boost Active</ControlPageLabel>
+            </State>
+            <State id="timedBoostActive">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Timed boost changed</TriggerLabel>
+                <ControlPageLabel>Timed Boost Active</ControlPageLabel>
+            </State>
+            <State id="timedBoostExpiry">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Timed boost expiry changed</TriggerLabel>
+                <ControlPageLabel>Timed Boost Expiry</ControlPageLabel>
+            </State>
+            <State id="enSuiteMorningActive">
+                <ValueType>String</ValueType>
+                <TriggerLabel>En Suite morning mode changed</TriggerLabel>
+                <ControlPageLabel>En Suite Morning Active</ControlPageLabel>
+            </State>
+            <State id="overheatRooms">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Overheating rooms changed</TriggerLabel>
+                <ControlPageLabel>Rooms Overheating</ControlPageLabel>
+            </State>
+            <State id="lastCycleTime">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Last cycle time changed</TriggerLabel>
+                <ControlPageLabel>Last Cycle</ControlPageLabel>
+            </State>
+            <State id="lastUpdate">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Last update changed</TriggerLabel>
+                <ControlPageLabel>Last Update</ControlPageLabel>
+            </State>
+        </States>
+        <UiDisplayStateId>activeMode</UiDisplayStateId>
+    </Device>
+
+</Devices>

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PluginConfig>
+
+    <SupportURL>https://github.com/Highsteads/EvoHomeControl</SupportURL>
+
+    <Field id="sep_owm" type="separator"/>
+    <Field id="lbl_owm" type="label">
+        <Label>OPENWEATHERMAP</Label>
+    </Field>
+    <Field id="owmApiKey" type="textfield" defaultValue="">
+        <Label>OWM API key (leave blank to use secrets.py):</Label>
+    </Field>
+    <Field id="owmLatitude" type="textfield" defaultValue="54.882">
+        <Label>Latitude:</Label>
+    </Field>
+    <Field id="owmLongitude" type="textfield" defaultValue="-1.818">
+        <Label>Longitude:</Label>
+    </Field>
+
+    <Field id="sep_weather" type="separator"/>
+    <Field id="lbl_weather" type="label">
+        <Label>WEATHER SOURCE</Label>
+    </Field>
+    <Field id="weatherBypass" type="checkbox" defaultValue="true">
+        <Label>Use OWM temperature (bypass Ecowitt — enable when Ecowitt is unavailable):</Label>
+    </Field>
+    <Field id="weatherBypassTemp" type="textfield" defaultValue="6.0">
+        <Label>Fallback temperature when OWM also unavailable (degC):</Label>
+    </Field>
+
+    <Field id="sep_notify" type="separator"/>
+    <Field id="lbl_notify" type="label">
+        <Label>OVERHEAT ALERTS</Label>
+    </Field>
+    <Field id="pushoverUserKey" type="textfield" defaultValue="">
+        <Label>Pushover user key (leave blank to use secrets.py):</Label>
+    </Field>
+    <Field id="alertEmailAddress" type="textfield" defaultValue="overheat-alert@strudwick.co.uk">
+        <Label>Overheat alert email address:</Label>
+    </Field>
+
+    <Field id="sep_timing" type="separator"/>
+    <Field id="lbl_timing" type="label">
+        <Label>HEATING CYCLE</Label>
+    </Field>
+    <Field id="runIntervalMins" type="menu" defaultValue="5">
+        <Label>Heating cycle interval:</Label>
+        <List>
+            <Option value="5">5 minutes (recommended)</Option>
+            <Option value="10">10 minutes</Option>
+            <Option value="15">15 minutes</Option>
+        </List>
+    </Field>
+
+    <Field id="sep_debug" type="separator"/>
+    <Field id="showDebugInfo" type="checkbox" defaultValue="false">
+        <Label>Enable debug logging:</Label>
+    </Field>
+
+</PluginConfig>

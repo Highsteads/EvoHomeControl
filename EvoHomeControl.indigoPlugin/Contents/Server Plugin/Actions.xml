@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Actions>
+
+    <!-- Timed Boost: all 4 living rooms +2°C for 1 hour -->
+    <Action id="startTimedBoost1h" deviceFilter="self.heatingController" uiPath="DeviceActions">
+        <Name>Start Timed Boost (1 hour)</Name>
+        <CallbackMethod>actionStartTimedBoost1h</CallbackMethod>
+    </Action>
+
+    <!-- Timed Boost: all 4 living rooms +2°C for 2 hours -->
+    <Action id="startTimedBoost2h" deviceFilter="self.heatingController" uiPath="DeviceActions">
+        <Name>Start Timed Boost (2 hours)</Name>
+        <CallbackMethod>actionStartTimedBoost2h</CallbackMethod>
+    </Action>
+
+    <!-- Cancel timed boost immediately, revert to schedule -->
+    <Action id="cancelTimedBoost" deviceFilter="self.heatingController" uiPath="DeviceActions">
+        <Name>Cancel Timed Boost</Name>
+        <CallbackMethod>actionCancelTimedBoost</CallbackMethod>
+    </Action>
+
+    <!-- Force an immediate heating cycle (useful for testing) -->
+    <Action id="runCycleNow" deviceFilter="self.heatingController" uiPath="DeviceActions">
+        <Name>Run Heating Cycle Now</Name>
+        <CallbackMethod>actionRunCycleNow</CallbackMethod>
+    </Action>
+
+    <!-- Away mode toggle -->
+    <Action id="setAwayMode" deviceFilter="self.heatingController" uiPath="DeviceActions">
+        <Name>Set Away Mode</Name>
+        <CallbackMethod>actionSetAwayMode</CallbackMethod>
+        <ConfigUI>
+            <Field id="awayActive" type="menu" defaultValue="true">
+                <Label>Away mode:</Label>
+                <List>
+                    <Option value="true">Active (14°C all rooms)</Option>
+                    <Option value="false">Inactive (resume schedule)</Option>
+                </List>
+            </Field>
+        </ConfigUI>
+    </Action>
+
+</Actions>
