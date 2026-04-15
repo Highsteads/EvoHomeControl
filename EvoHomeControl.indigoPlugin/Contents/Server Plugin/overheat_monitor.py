@@ -107,7 +107,7 @@ class OverheatMonitor:
             }
 
     def update_room(self, room_name, is_overheating, overheat_amount,
-                    current_temp, target_temp, outdoor_temp):
+                    current_temp, target_temp, outdoor_temp, is_passive=False):
         """
         Update overheat tracking for a room and send alerts if thresholds crossed.
         Called every heating cycle for every room regardless of overheat state.
@@ -153,10 +153,17 @@ class OverheatMonitor:
                 alert_type   = "CRITICAL_PERSISTENT"
 
             if should_alert and not room_data["alert_sent"]:
-                if outdoor_temp is not None and outdoor_temp > self.outdoor_suppress_temp:
+                if is_passive:
+                    # Valve has been off 3+ cycles — passive warmth (solar/internal gain)
+                    # Not a TRV fault; suppress alert entirely
                     indigo.server.log(
                         f"[OverheatMonitor] {room_name}: alert suppressed "
-                        f"(outdoor {outdoor_temp:.1f}°C > {self.outdoor_suppress_temp}°C)"
+                        f"(passive warmth — valve off, solar/internal gain)"
+                    )
+                elif outdoor_temp is not None and outdoor_temp > self.outdoor_suppress_temp:
+                    indigo.server.log(
+                        f"[OverheatMonitor] {room_name}: alert suppressed "
+                        f"(outdoor {outdoor_temp:.1f}degC > {self.outdoor_suppress_temp}degC)"
                     )
                 else:
                     self.send_critical_alert(room_name, alert_type, overheat_amount)
@@ -331,20 +338,25 @@ class OverheatMonitor:
 
     def get_status_summary(self):
         """Return a multi-line string summarising current overheat status."""
-        lines = ["Overheat Monitor Status", "=" * 50]
+        lines = ["Above-Target / Overheat Monitor Status", "=" * 50]
         found = False
         for room_name, data in sorted(self.history.items()):
             if data.get("consecutive_cycles", 0) > 0:
                 found = True
-                hours = (data["consecutive_cycles"] * self.run_interval_mins) / 60.0
+                hours      = (data["consecutive_cycles"] * self.run_interval_mins) / 60.0
+                off_cycles = data.get("off_since_cycle", 0)
+                if off_cycles >= 3:
+                    label = "Above Target (solar/passive)"
+                else:
+                    label = "Overheating (radiator)"
                 lines.append(
-                    f"{room_name:<20s} - Overheating for {hours:.1f}h "
+                    f"{room_name:<20s} - {label} for {hours:.1f}h "
                     f"(max {data['max_overheat']:+.1f}degC)"
                 )
                 if data.get("alert_sent"):
                     lines.append(f"{'':20s}   Alert: {data['alert_type']}")
         if not found:
-            lines.append("No rooms currently overheating")
+            lines.append("No rooms above target")
         return "\n".join(lines)
 
     def get_overheating_rooms(self):

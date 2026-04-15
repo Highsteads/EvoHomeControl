@@ -120,8 +120,9 @@ OVERHEAT_EXCLUDED_ROOMS = {"Bedroom 3"}
 
 # Message codes that trigger an immediate event-log entry on non-hourly runs
 # 1=window open  2=both windows  3=door open  4=door+window  5=slide door closed
-# 17=overheat  19=window/door closed  20=window open (reduced)  21=door open (reduced)
-# 22=En Suite morning schedule
+# 17=overheat (radiator contributing)  19=window/door closed  20=window open (reduced)
+# 21=door open (reduced)  22=En Suite morning schedule
+# 23=above target (passive warmth — solar/internal gain, valve has been off 3+ cycles)
 ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22}
 
 # En Suite morning schedule temperature
@@ -356,6 +357,7 @@ def get_log_message(message_code, room_name, current_setpoint, new_temp,
         15: "Freeze protection",
         17: f"Overheat  {overheat_amount:>+5.1f}degC  (valve closed)" if overheat_amount is not None else "Overheat (valve closed)",
         18: "Capped at max temp",
+        23: f"Above Target {overheat_amount:>+5.1f}degC  (solar gain)" if overheat_amount is not None else "Above Target   (solar gain)",
         19: "Window/door closed  (valve restored)",
         20: "Window open        (valve reduced)",
         21: "Door open          (valve reduced)",
@@ -386,6 +388,8 @@ def get_reason_line(message_code, new_temp, overheat_amount=None):
         15: f"Set to {t} - Freeze protection active",
         17: (f"Reduced to {t} - Overheat +{overheat_amount:.1f}degC above target"
              if overheat_amount else f"Reduced to {t} - Overheat prevention"),
+        23: (f"Above target {t} - Solar/passive gain (+{overheat_amount:.1f}degC)"
+             if overheat_amount else f"Above target {t} - Passive warmth"),
         18: f"Capped at {t} - Maximum temperature limit reached",
         19: f"Restored to {t} - Window/door closed",
         20: f"Reduced to {t} - Window opened",
@@ -669,10 +673,15 @@ def process_room_temperature(
         is_overheating, adjusted_temp, overheat_amt = check_overheating(
             dev_temp, new_temp, room_name, overheat_monitor, run_interval_mins
         )
+        is_passive = False
         if is_overheating:
             new_temp        = adjusted_temp
             overheat_amount = overheat_amt
-            message         = 17
+            # Passive warmth: valve has been off 3+ cycles — solar/internal gain, not TRV issue
+            if overheat_monitor is not None:
+                off_cycles = overheat_monitor.history.get(room_name, {}).get("off_since_cycle", 0)
+                is_passive = off_cycles >= 3
+            message = 23 if is_passive else 17
 
         if overheat_monitor is not None:
             overheat_monitor.update_room(
@@ -682,6 +691,7 @@ def process_room_temperature(
                 current_temp    = dev_temp,
                 target_temp     = original_scheduled_temp,
                 outdoor_temp    = current_outdoor_temp,
+                is_passive      = is_passive,
             )
 
     # --- Special room rules ---
