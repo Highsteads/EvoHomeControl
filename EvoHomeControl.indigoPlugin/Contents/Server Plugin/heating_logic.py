@@ -564,6 +564,10 @@ def process_room_temperature(
         timed_boost_active=False, timed_boost_rooms=None,
         # Floor heat restore guard — only True when morning schedule is active
         floor_heat_restore_enabled=False,
+        # Override the temperature baseline used for overheat detection.
+        # When En Suite morning schedule is active, pass EN_SUITE_MORNING_TEMP (22°C)
+        # so the room is only flagged as overheating if it exceeds 22°C, not 18°C.
+        overheat_target_override=None,
 ):
     """
     Process temperature update for one room.
@@ -670,8 +674,11 @@ def process_room_temperature(
 
     # --- Overheat detection ---
     if dev_temp is not None and dev_temp > RADIATORS_OFF_TEMP:
+        # Use override target if provided (e.g. En Suite morning schedule sets 22°C —
+        # use that as the baseline so 21.9°C is not falsely flagged as overheating)
+        overheat_target = overheat_target_override if overheat_target_override is not None else new_temp
         is_overheating, adjusted_temp, overheat_amt = check_overheating(
-            dev_temp, new_temp, room_name, overheat_monitor, run_interval_mins
+            dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins
         )
         is_passive = False
         if is_overheating:

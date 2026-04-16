@@ -69,6 +69,7 @@ from heating_logic    import (
     DEV_HALL_BEDROOM_ID, DEV_HALL_KITCHEN_ID,
     DEV_LIVING_ROOM_DOOR_ID, DEV_LIVING_ROOM_FRONT_ID, DEV_UTILITY_ROOM_ID,
     OUTDOOR_TEMP_TRIGGER,
+    EN_SUITE_MORNING_TEMP,
 )
 import schedules
 
@@ -388,6 +389,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 5. En Suite (with morning schedule special rules + floor heating)
+        morning_active = self.store.get("en_suite_morning_active", False)
         process_room_temperature(
             room_name                  = "En Suite",
             room_schedule              = schedules.En_Suite,
@@ -395,7 +397,10 @@ class Plugin(indigo.PluginBase):
             floor_heat_device          = DEV_EN_SUITE_FLOOR_HEAT_ID,
             special_rules              = en_suite_rules,
             ha_device_id               = DEV_EN_SUITE_ID,
-            floor_heat_restore_enabled = self.store.get("en_suite_morning_active", False),
+            floor_heat_restore_enabled = morning_active,
+            # When morning schedule is active, use 22°C as the overheat baseline
+            # so the room is not falsely flagged as overheating below 22°C
+            overheat_target_override   = EN_SUITE_MORNING_TEMP if morning_active else None,
             **common,
         )
 
