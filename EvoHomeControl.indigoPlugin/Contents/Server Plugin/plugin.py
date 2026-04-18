@@ -60,7 +60,8 @@ from heating_logic    import (
     VAR_AV_OUT_TEMP_LO_ID, VAR_AV_OUT_TEMP_LO_TIME_ID,
     VAR_TEMP_OFFSET_ID, VAR_HOME_AWAY_ID, VAR_BOOST_ID,
     DEV_BATHROOM_WINDOW_ID, DEV_BEDROOM_1_WINDOW_ID, DEV_BEDROOM_2_WINDOW_ID,
-    DEV_BEDROOM_3_WINDOW_ID, DEV_EN_SUITE_WINDOW_ID, DEV_EN_SUITE_FLOOR_HEAT_ID,
+    DEV_BEDROOM_3_WINDOW_ID, DEV_EN_SUITE_WINDOW_ID,
+    DEV_EN_SUITE_FLOOR_HEAT_ID, DEV_EN_SUITE_FLOOR_THERMOSTAT_ID,
     DEV_GARDEN_WINDOW_L_ID, DEV_GARDEN_WINDOW_R_ID, DEV_GARDEN_DOOR_ID,
     DEV_LIVING_ROOM_R_WIN_ID, DEV_LIVING_ROOM_L_WIN_ID,
     DEV_UTILITY_WINDOW_ID, DEV_UTILITY_DOOR_ID,
@@ -553,12 +554,20 @@ class Plugin(indigo.PluginBase):
             self.store["en_suite_morning_active"]           = True
             self.store["en_suite_morning_cancelled_reason"] = None
             _log("[EnSuiteMorning] 6am — starting 22degC morning schedule")
-            # Turn on floor heating immediately (don't wait for next heating cycle)
+            # Turn on floor heating switch immediately (don't wait for next heating cycle)
             try:
                 indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)
                 _log("[EnSuiteMorning] Floor heating switch turned ON")
             except Exception as e:
-                _log(f"[EnSuiteMorning] Floor heat on error: {e}", level="ERROR")
+                _log(f"[EnSuiteMorning] Floor heat switch on error: {e}", level="ERROR")
+            # Set floor thermostat to heat mode at 14degC — self-regulates until switch off
+            try:
+                therm = indigo.devices[DEV_EN_SUITE_FLOOR_THERMOSTAT_ID]
+                indigo.thermostat.setHvacMode(therm, value=indigo.kHvacMode.Heat)
+                indigo.thermostat.setHeatSetpoint(therm, value=14.0)
+                _log("[EnSuiteMorning] Floor thermostat set to Heat / 14degC")
+            except Exception as e:
+                _log(f"[EnSuiteMorning] Floor thermostat set error: {e}", level="ERROR")
             self._save_state()
 
         # Auto-cancel at 10am
