@@ -536,6 +536,11 @@ class Plugin(indigo.PluginBase):
         """
         Auto-start En Suite morning schedule at 06:00 and auto-cancel at 10:00.
         Window-open cancellation is handled inside en_suite_special_rules().
+
+        The plugin owns the floor heating switch completely:
+          - Turned ON here at 6am start (so Indigo schedules for this are redundant)
+          - Turned OFF here at 10am cancel (so Indigo schedules for this are redundant)
+          - Also turned OFF inside process_room_temperature() when window opens
         """
         hour  = datetime.now().hour
         today = datetime.now().strftime("%Y-%m-%d")
@@ -548,6 +553,12 @@ class Plugin(indigo.PluginBase):
             self.store["en_suite_morning_active"]           = True
             self.store["en_suite_morning_cancelled_reason"] = None
             _log("[EnSuiteMorning] 6am — starting 22degC morning schedule")
+            # Turn on floor heating immediately (don't wait for next heating cycle)
+            try:
+                indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)
+                _log("[EnSuiteMorning] Floor heating switch turned ON")
+            except Exception as e:
+                _log(f"[EnSuiteMorning] Floor heat on error: {e}", level="ERROR")
             self._save_state()
 
         # Auto-cancel at 10am
@@ -555,6 +566,12 @@ class Plugin(indigo.PluginBase):
             self.store["en_suite_morning_active"]           = False
             self.store["en_suite_morning_cancelled_reason"] = "10am_expired"
             _log("[EnSuiteMorning] 10am — reverting to normal schedule")
+            # Turn off floor heating immediately
+            try:
+                indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
+                _log("[EnSuiteMorning] Floor heating switch turned OFF")
+            except Exception as e:
+                _log(f"[EnSuiteMorning] Floor heat off error: {e}", level="ERROR")
             self._save_state()
 
         # Reset cancelled_date at midnight so tomorrow auto-starts again
