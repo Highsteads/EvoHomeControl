@@ -4,8 +4,8 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        15-04-2026
-# Version:     1.0
+# Date:        30-04-2026
+# Version:     1.3
 
 import os
 import sys
@@ -78,8 +78,18 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.0"
+PLUGIN_VERSION  = "1.3"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
+
+# Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
+#   ecowittDeviceId        (outdoor sensor)
+#   ecowittIndoorDeviceId  (indoor sensor — pressure / indoor temp / indoor humidity)
+_ECOWITT_OUTDOOR_DEFAULT = 889210700
+_ECOWITT_INDOOR_DEFAULT  = 1376100918
+
+# Solcast solar forecast variable IDs
+_VAR_SOLCAST_TODAY_ID    = 1085965464  # solcast_today_kwh
+_VAR_SOLCAST_TOMORROW_ID = 1029984958  # solcast_tomorrow_kwh
 
 # Legacy cache file paths (Python Scripts folder — migrate on first run)
 _OLD_SETPOINT_CACHE = "/Library/Application Support/Perceptive Automation/Python Scripts/Radiator_setpoint_cache.json"
@@ -97,6 +107,16 @@ def _log(message, level="INFO"):
     indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", level=level)
 
 
+def _wind_compass(degrees):
+    """Convert wind bearing (degrees) to 16-point compass label."""
+    try:
+        labels = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+        return labels[round(float(degrees) / 22.5) % 16]
+    except (ValueError, TypeError):
+        return "?"
+
+
 # ===========================================================================
 class Plugin(indigo.PluginBase):
 # ===========================================================================
@@ -109,7 +129,11 @@ class Plugin(indigo.PluginBase):
         else:
             indigo.server.log(f"{plugin_display_name} v{plugin_version} starting")
 
-        self.debug = plugin_prefs.get("showDebugInfo", False)
+        # Library check happens here (not startup()) so a missing dependency
+        # aborts before any half-initialised state is created.
+        self._check_libraries()
+
+        self.debug = str(plugin_prefs.get("showDebugInfo", "false")).lower() == "true"
 
         # Data directory for JSON persistence and log files
         self.data_dir = self._get_data_dir()
@@ -147,6 +171,9 @@ class Plugin(indigo.PluginBase):
         self.store["log_buffer"]     = []
         self.store["changes_buffer"] = []
 
+        # Snow forecast cache (updated each heating cycle)
+        self.store["snow_forecast"]  = []
+
         # Plugin modules — fully initialised in startup()
         self.weather  = None
         self.overheat = None
@@ -159,7 +186,6 @@ class Plugin(indigo.PluginBase):
     # -----------------------------------------------------------------------
 
     def startup(self):
-        self._check_libraries()
         _log(f"{PLUGIN_NAME} v{PLUGIN_VERSION} starting")
 
         run_interval = int(self.pluginPrefs.get("runIntervalMins", 5))
@@ -173,13 +199,17 @@ class Plugin(indigo.PluginBase):
         pushover_key = _SECRETS_PUSHOVER_KEY or self.pluginPrefs.get("pushoverUserKey", "")
 
         # Weather module
+        ecowitt_raw    = self.pluginPrefs.get("ecowittDeviceId", "")
+        ecowitt_dev_id = int(ecowitt_raw) if ecowitt_raw else None
+
         self.weather = WeatherData(
-            api_key      = owm_key,
-            cache_path   = os.path.join(self.data_dir, "weather_cache.json"),
-            lat          = float(self.pluginPrefs.get("owmLatitude",    54.882)),
-            lon          = float(self.pluginPrefs.get("owmLongitude",  -1.818)),
-            bypass       = self.pluginPrefs.get("weatherBypass", True),
-            bypass_temp  = float(self.pluginPrefs.get("weatherBypassTemp", 6.0)),
+            api_key        = owm_key,
+            cache_path     = os.path.join(self.data_dir, "weather_cache.json"),
+            lat            = float(self.pluginPrefs.get("owmLatitude",    54.882)),
+            lon            = float(self.pluginPrefs.get("owmLongitude",  -1.818)),
+            bypass         = self.pluginPrefs.get("weatherBypass", False),
+            bypass_temp    = float(self.pluginPrefs.get("weatherBypassTemp", 6.0)),
+            ecowitt_dev_id = ecowitt_dev_id,
         )
 
         # Overheat monitor
@@ -191,6 +221,8 @@ class Plugin(indigo.PluginBase):
         self.overheat.email_address     = self.pluginPrefs.get(
             "alertEmailAddress", "overheat-alert@strudwick.co.uk"
         )
+        # Wire up Indigo plugin events for overheat alert / all-clear
+        self.overheat.event_callback    = self._fire_event
 
         # Validate Indigo variable IDs before first cycle
         if not validate_configuration():
@@ -223,13 +255,15 @@ class Plugin(indigo.PluginBase):
 
     def closedPrefsConfigUi(self, values_dict, user_cancelled):
         if not user_cancelled:
-            self.debug = values_dict.get("showDebugInfo", False)
+            self.debug = str(values_dict.get("showDebugInfo", "false")).lower() == "true"
             # Re-init modules with new prefs
             if self.weather:
                 owm_key = _SECRETS_OWM_KEY or values_dict.get("owmApiKey", "")
-                self.weather.api_key     = owm_key
-                self.weather.bypass      = values_dict.get("weatherBypass", True)
-                self.weather.bypass_temp = float(values_dict.get("weatherBypassTemp", 6.0))
+                self.weather.api_key        = owm_key
+                self.weather.bypass         = values_dict.get("weatherBypass", False)
+                self.weather.bypass_temp    = float(values_dict.get("weatherBypassTemp", 6.0))
+                ecowitt_raw                 = values_dict.get("ecowittDeviceId", "")
+                self.weather.ecowitt_dev_id = int(ecowitt_raw) if ecowitt_raw else None
             if self.overheat:
                 self.overheat.pushover_user_key = (
                     _SECRETS_PUSHOVER_KEY or values_dict.get("pushoverUserKey", "")
@@ -241,6 +275,9 @@ class Plugin(indigo.PluginBase):
                 self.overheat.run_interval_mins        = run_interval
                 self.overheat.critical_duration_cycles = (6 * 60) // run_interval
                 self.overheat.all_clear_cycles         = max(2, 30 // run_interval)
+            # Force an immediate cycle so any change (interval, sources, alerts)
+            # takes effect now rather than at the next scheduled cycle.
+            self.store["last_heating_cycle"] = 0.0
 
     # -----------------------------------------------------------------------
     # Main polling loop
@@ -287,13 +324,30 @@ class Plugin(indigo.PluginBase):
         # Read Indigo mode variables
         self._read_mode_variables()
 
-        # Update weather (uses cache if fresh)
+        # Update weather (uses cache if fresh) — guard against unexpected
+        # exceptions so a transient network failure cannot abort the cycle.
         if self.weather:
-            self.weather.update()
+            try:
+                self.weather.update()
+            except Exception as e:
+                _log(f"[Weather] update() raised {type(e).__name__}: {e} — using stale data",
+                     level="WARNING")
 
         # Get outdoor temperature and calculate offset
-        outdoor_temp = self.weather.get_outdoor_temp() if self.weather else None
-        temp_offset  = calculate_temp_offset(outdoor_temp)
+        outdoor_temp  = self.weather.get_outdoor_temp() if self.weather else None
+        snow_forecast = self._get_snow_forecast()
+        self.store["snow_forecast"] = snow_forecast
+        temp_offset   = calculate_temp_offset(outdoor_temp)
+        if snow_forecast and self.pluginPrefs.get("snowHeatingEnabled", True):
+            snow_boost   = float(self.pluginPrefs.get("snowHeatingBoost", "1.0"))
+            temp_offset += snow_boost
+            _log(f"[Snow] Forecast detected — applying +{snow_boost:.1f}degC heating boost")
+            # Fire only on rising edge (was no snow last cycle, snow this cycle)
+            if not self.store.get("_snow_event_fired"):
+                self._fire_event("snowForecastDetected")
+                self.store["_snow_event_fired"] = True
+        elif not snow_forecast:
+            self.store["_snow_event_fired"] = False
         update_variable(VAR_TEMP_OFFSET_ID, temp_offset)
 
         # Update high/low temperature records
@@ -475,6 +529,17 @@ class Plugin(indigo.PluginBase):
     # Timed boost
     # -----------------------------------------------------------------------
 
+    def _fire_event(self, event_id):
+        """Fire a plugin event — silent if no triggers are configured for it."""
+        try:
+            indigo.server.fireEvent(event_id, params=self.pluginId)
+        except Exception:
+            # Older Indigo versions: triggerEvent path
+            try:
+                indigo.server.fireEvent(event_id)
+            except Exception as e:
+                _log(f"[Events] Could not fire {event_id}: {e}", level="WARNING")
+
     def _start_timed_boost(self, hours):
         """Activate timed boost for 1 or 2 hours on TIMED_BOOST_ROOMS."""
         expiry = datetime.now() + timedelta(hours=hours)
@@ -485,6 +550,7 @@ class Plugin(indigo.PluginBase):
         _log(f"[TimedBoost] {hours}h boost started — "
              f"expires at {expiry.strftime('%H:%M')} — rooms: {rooms}")
         self._save_state()
+        self._fire_event("timedBoostStarted")
 
     def _cancel_timed_boost(self, reason="expired"):
         """Cancel timed boost and log reason."""
@@ -496,6 +562,7 @@ class Plugin(indigo.PluginBase):
             self._save_state()
             # Log what the 4 rooms will revert to on the next cycle
             self._log_boost_revert_summary()
+            self._fire_event("timedBoostEnded")
 
     def _check_timed_boost_expiry(self):
         """Cancel timed boost if its expiry datetime has passed."""
@@ -542,8 +609,20 @@ class Plugin(indigo.PluginBase):
           - Turned ON here at 6am start (so Indigo schedules for this are redundant)
           - Turned OFF here at 10am cancel (so Indigo schedules for this are redundant)
           - Also turned OFF inside process_room_temperature() when window opens
+
+        Cheap-out fast paths so the check is essentially free outside the
+        morning window — _tick() runs this every POLL_SLEEP_SECS.
         """
         hour  = datetime.now().hour
+
+        # Outside 06:00-10:00 and 00:00 (midnight reset) the rest of the
+        # function is a no-op — return early to avoid pointless work.
+        in_morning_window = 6 <= hour < 10
+        is_midnight       = hour == 0
+        is_after_window   = hour == 10  # one-shot 10am cancel band
+        if not (in_morning_window or is_midnight or is_after_window):
+            return
+
         today = datetime.now().strftime("%Y-%m-%d")
 
         # Auto-start: 06:00-09:59, not already active, not cancelled by window today
@@ -569,6 +648,7 @@ class Plugin(indigo.PluginBase):
             except Exception as e:
                 _log(f"[EnSuiteMorning] Floor thermostat set error: {e}", level="ERROR")
             self._save_state()
+            self._fire_event("enSuiteMorningStarted")
 
         # Auto-cancel at 10am
         if self.store["en_suite_morning_active"] and hour >= 10:
@@ -582,10 +662,15 @@ class Plugin(indigo.PluginBase):
             except Exception as e:
                 _log(f"[EnSuiteMorning] Floor heat off error: {e}", level="ERROR")
             self._save_state()
+            self._fire_event("enSuiteMorningCancelled")
 
-        # Reset cancelled_date at midnight so tomorrow auto-starts again
+        # Reset cancelled_date at midnight so tomorrow auto-starts again.
+        # Must persist to disk — otherwise a plugin restart before the next
+        # _save_state() call would restore the cancelled_date and silently
+        # block tomorrow's auto-start.
         if hour == 0 and self.store.get("en_suite_morning_cancelled_date") not in (None, today):
             self.store["en_suite_morning_cancelled_date"] = None
+            self._save_state()
 
     # -----------------------------------------------------------------------
     # Device state helpers
@@ -670,12 +755,17 @@ class Plugin(indigo.PluginBase):
     # -----------------------------------------------------------------------
 
     def _update_temp_records(self, current_temp):
-        """Update all-time outdoor temperature high/low Indigo variables."""
+        """Update all-time outdoor temperature high/low Indigo variables.
+
+        Defaults are inverted so the FIRST reading on a fresh install always
+        sets both records: high default -999 (so any reading is higher),
+        low default +999 (so any reading is lower).
+        """
         if current_temp is None:
             return
         try:
-            av_high = float(get_variable_value(VAR_AV_OUT_TEMP_HI_ID, "999"))
-            av_low  = float(get_variable_value(VAR_AV_OUT_TEMP_LO_ID, "-999"))
+            av_high = float(get_variable_value(VAR_AV_OUT_TEMP_HI_ID, "-999"))
+            av_low  = float(get_variable_value(VAR_AV_OUT_TEMP_LO_ID,  "999"))
         except (ValueError, TypeError):
             return
 
@@ -688,72 +778,231 @@ class Plugin(indigo.PluginBase):
             update_variable(VAR_AV_OUT_TEMP_HI_TIME_ID, ts)
 
     # -----------------------------------------------------------------------
+    # Snow forecast helper
+    # -----------------------------------------------------------------------
+
+    def _get_snow_forecast(self):
+        """Return snow forecast list, or [] if disabled / no snow expected."""
+        if not self.weather:
+            return []
+        hours = int(self.pluginPrefs.get("snowForecastHours", "12"))
+        return self.weather.get_snow_forecast(hours)
+
+    # -----------------------------------------------------------------------
+    # Menu: force full log output
+    # -----------------------------------------------------------------------
+
+    def menuForceFullLog(self, valuesDict=None, typeId=None):
+        """Immediately emit a full weather + status log, as if it were the top of the hour.
+
+        Uses a throw-away buffer so the menu output never leaks into the next
+        cycle's daily log file via _flush_log_buffers().
+        """
+        if self.weather:
+            try:
+                self.weather.update()
+            except Exception as e:
+                _log(f"[Weather] update() raised {type(e).__name__}: {e}", level="WARNING")
+        outdoor_temp  = self.weather.get_outdoor_temp() if self.weather else None
+        snow_forecast = self._get_snow_forecast()
+        # Don't pollute the running cycle's snow_forecast cache from a menu click
+        temp_offset   = calculate_temp_offset(outdoor_temp)
+        if snow_forecast and self.pluginPrefs.get("snowHeatingEnabled", True):
+            temp_offset += float(self.pluginPrefs.get("snowHeatingBoost", "1.0"))
+
+        # Swap the log buffer for a throwaway one for the duration of this call
+        saved_buf = self.store["log_buffer"]
+        saved_snow = self.store.get("snow_forecast")
+        self.store["log_buffer"]    = []
+        self.store["snow_forecast"] = snow_forecast
+        try:
+            self._log_hourly_header(outdoor_temp, temp_offset, menu_mode=True)
+        finally:
+            self.store["log_buffer"]    = saved_buf
+            self.store["snow_forecast"] = saved_snow
+
+    # -----------------------------------------------------------------------
     # Hourly log header
     # -----------------------------------------------------------------------
 
-    def _log_hourly_header(self, outdoor_temp, temp_offset):
-        """Log full weather header and mode status (minute == 0 only)."""
-        buf = self.store["log_buffer"]
+    def _log_hourly_header(self, outdoor_temp, temp_offset, menu_mode=False):
+        """Log full weather header and mode status.
 
+        menu_mode=True: omits the room-processing header lines — used by the
+        'Show Full Weather Log' menu item which has no per-room table to
+        precede.
+
+        Split into focused helpers (_b emits to both Indigo log and the
+        per-cycle log buffer):
+          _log_weather_section  - Ecowitt + OWM + Solcast + snow + offset + suntimes
+          _log_records_section  - all-time high/low
+          _log_modes_section    - per-mode active/inactive + overheat status
+        """
         def _b(msg, level="INFO"):
             formatted = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
             indigo.server.log(formatted, level=level)
-            buf.append(formatted)
+            self.store["log_buffer"].append(formatted)
 
         _b("")
         _b(f"Todays Weather on {datetime.now().strftime('%A %d %B %Y at %H:%M:%S')}")
         _b("--------------------------------------------------")
         _b("")
 
-        # High/low records
-        try:
-            hi   = float(get_variable_value(VAR_AV_OUT_TEMP_HI_ID,      "0"))
-            lo   = float(get_variable_value(VAR_AV_OUT_TEMP_LO_ID,       "0"))
-            hi_t = get_variable_value(VAR_AV_OUT_TEMP_HI_TIME_ID, "N/A")
-            lo_t = get_variable_value(VAR_AV_OUT_TEMP_LO_TIME_ID, "N/A")
-            _b(f"Outside Temp High             {hi}degC on {hi_t}")
-            _b(f"Outside Temp Low              {lo}degC on {lo_t}")
-        except Exception:
-            pass
+        self._log_weather_section(_b, outdoor_temp, temp_offset)
         _b("")
+        self._log_records_section(_b)
+        _b("")
+        self._log_modes_section(_b)
 
-        # OWM current conditions
+        if not menu_mode:
+            _b("")
+            _b("Processing room temperature updates...")
+            _b("")
+            _b("Room               Current   Schedule    New     Action")
+            _b("=" * 80)
+
+    def _log_weather_section(self, _b, outdoor_temp, temp_offset):
+        """Emit weather lines: Ecowitt (active) + OWM (reference) + Solcast + snow + offset."""
+        # Active outdoor temperature source
+        using_ecowitt = bool(
+            self.weather and not self.weather.bypass and self.weather.ecowitt_dev_id
+        )
+        if using_ecowitt and outdoor_temp is not None:
+            _b(f"Ecowitt Temperature           {outdoor_temp:.1f}degC  (active source)")
+        elif outdoor_temp is not None:
+            _b(f"OWM Temperature               {outdoor_temp:.1f}degC  (active source)")
+
+        # Ecowitt outdoor humidity (uses the CONFIGURED outdoor device, not a hardcoded ID)
+        if using_ecowitt:
+            try:
+                out_dev = indigo.devices[self.weather.ecowitt_dev_id]
+                out_hum = out_dev.states.get("humidity")
+                if out_hum is not None:
+                    _b(f"Ecowitt Humidity              {out_hum}%  (outdoor)")
+            except Exception:
+                pass
+
+        # Ecowitt indoor sensor — pressure + indoor temp/humidity (configurable ID)
+        indoor_id_raw = self.pluginPrefs.get("ecowittIndoorDeviceId", str(_ECOWITT_INDOOR_DEFAULT))
+        try:
+            indoor_id = int(indoor_id_raw) if indoor_id_raw else None
+        except (ValueError, TypeError):
+            indoor_id = None
+        if indoor_id:
+            try:
+                in_dev  = indigo.devices[indoor_id]
+                press   = in_dev.states.get("pressureRelative")
+                p_unit  = in_dev.states.get("pressureRelativeUnit", "hPa")
+                in_temp = in_dev.states.get("temperature")
+                in_hum  = in_dev.states.get("humidity")
+                if press is not None:
+                    _b(f"Ecowitt Pressure              {press}{p_unit}")
+                if in_temp is not None and in_hum is not None:
+                    _b(f"Ecowitt Indoor                {in_temp}degC  /  {in_hum}% humidity")
+            except Exception:
+                pass
+
+        # OWM current conditions (reference — always shown for cloud/wind/UV context)
         if self.weather and self.weather.current:
-            w = self.weather
-            desc    = w.get_current("weather", [{}])[0].get("description", "N/A").title()
-            temp_c  = w.get_current("temp", "N/A")
-            feels   = w.get_current("feels_like", "N/A")
-            humid   = w.get_current("humidity", "N/A")
-            _b(f"OWMap Conditions              {desc}")
-            _b(f"OWMap Temperature             {temp_c}degC  (feels like {feels}degC)")
-            _b(f"OWMap Humidity                {humid}%")
+            w          = self.weather
+            desc       = w.get_current("weather", [{}])[0].get("description", "N/A").title()
+            temp_c     = w.get_current("temp",       "N/A")
+            feels      = w.get_current("feels_like", "N/A")
+            humid      = w.get_current("humidity",   "N/A")
+            wind_spd   = w.get_current("wind_speed")   # m/s
+            wind_deg   = w.get_current("wind_deg")
+            wind_gust  = w.get_current("wind_gust")    # m/s, optional
+            uvi        = w.get_current("uvi")
+
+            _b(f"OWM Conditions                {desc}")
+            rain_1h = (w.get_current("rain") or {}).get("1h")
+            snow_1h = (w.get_current("snow") or {}).get("1h")
+            if snow_1h:
+                _b(f"OWM Precipitation             {float(snow_1h):.1f}mm/h  SNOW")
+            elif rain_1h:
+                _b(f"OWM Precipitation             {float(rain_1h):.1f}mm/h  rain")
+            if not using_ecowitt:
+                _b(f"OWM Temperature               {temp_c}degC  (feels like {feels}degC)")
+                _b(f"OWM Humidity                  {humid}%")
+
+            # Wind speed + direction
+            if wind_spd is not None:
+                try:
+                    mph        = float(wind_spd) * 2.237
+                    compass    = _wind_compass(wind_deg)
+                    wind_str   = f"{mph:.1f}mph {compass}"
+                    if wind_gust is not None:
+                        wind_str += f"  (gusting {float(wind_gust) * 2.237:.1f}mph)"
+                    _b(f"OWM Wind                      {wind_str}")
+                except Exception:
+                    pass
+
+            # UV Index
+            if uvi is not None:
+                _b(f"OWM UV Index                  {uvi}")
+
+            # Solcast solar forecast (read from Indigo variables)
+            try:
+                sol_today    = indigo.variables[_VAR_SOLCAST_TODAY_ID].value
+                sol_tomorrow = indigo.variables[_VAR_SOLCAST_TOMORROW_ID].value
+                _b(f"Solcast Today                 {float(sol_today):.1f} kWh")
+                _b(f"Solcast Tomorrow              {float(sol_tomorrow):.1f} kWh")
+            except Exception:
+                pass
         else:
             _b("OpenWeatherMap data unavailable")
 
-        if outdoor_temp is not None:
-            _b(f"Temperature Offset            {temp_offset:+.1f}degC  (outdoor: {outdoor_temp:.1f}degC)")
-        _b("")
+        # Snow forecast warning (from cached forecast computed during cycle)
+        snow_forecast = self.store.get("snow_forecast", [])
+        if snow_forecast:
+            first     = snow_forecast[0]
+            total_mm  = sum(h["mm"] for h in snow_forecast)
+            count     = len(snow_forecast)
+            mm_str    = f", {total_mm:.1f}mm total" if total_mm > 0.0 else ""
+            _b(f"** SNOW FORECAST: starts {first['time_str']}, "
+               f"{count}h affected{mm_str} **", level="WARNING")
 
-        # Active mode summary
-        modes_on  = []
-        modes_off = []
+        if outdoor_temp is not None:
+            _b(f"Temperature Offset            {temp_offset:+.1f}degC")
+
+        # Sunrise / Sunset (OWM — shown last)
+        if self.weather:
+            try:
+                sunrise_ts = self.weather.get_current("sunrise")
+                sunset_ts  = self.weather.get_current("sunset")
+                if sunrise_ts and sunset_ts:
+                    sr = datetime.fromtimestamp(int(sunrise_ts)).strftime("%H:%M")
+                    ss = datetime.fromtimestamp(int(sunset_ts)).strftime("%H:%M")
+                    _b(f"Sunrise / Sunset              {sr}  /  {ss}")
+            except Exception:
+                pass
+
+    def _log_records_section(self, _b):
+        """Emit all-time outdoor temperature high/low records."""
+        try:
+            hi_raw = get_variable_value(VAR_AV_OUT_TEMP_HI_ID, None)
+            lo_raw = get_variable_value(VAR_AV_OUT_TEMP_LO_ID, None)
+            hi_t   = get_variable_value(VAR_AV_OUT_TEMP_HI_TIME_ID, "N/A")
+            lo_t   = get_variable_value(VAR_AV_OUT_TEMP_LO_TIME_ID, "N/A")
+            hi_str = f"{float(hi_raw):.1f}degC" if hi_raw not in (None, "") else "no record yet"
+            lo_str = f"{float(lo_raw):.1f}degC" if lo_raw not in (None, "") else "no record yet"
+            _b(f"Outside Temp Highest          {hi_str} on {hi_t}")
+            _b(f"Outside Temp Lowest           {lo_str} on {lo_t}")
+        except Exception:
+            pass
+
+    def _log_modes_section(self, _b):
+        """Emit one line per active mode + overheat status."""
         for flag, label in [
-            (self.store["is_away"],              "AWAY"),
-            (self.store["is_boost"],             "GLOBAL BOOST"),
-            (self.store["timed_boost_active"],   "TIMED BOOST"),
-            (self.store["is_both_out"],          "BOTH OUT"),
+            (self.store["is_away"],                 "AWAY"),
+            (self.store["is_boost"],                "GLOBAL BOOST"),
+            (self.store["timed_boost_active"],      "TIMED BOOST"),
+            (self.store["is_both_out"],             "BOTH OUT"),
             (self.store["en_suite_morning_active"], "EN SUITE MORNING"),
         ]:
-            (modes_on if flag else modes_off).append(label)
-        _b(f"Active modes: {', '.join(modes_on) or 'None'}"
-           f"  |  Inactive: {', '.join(modes_off)}")
-        _b("OVERHEAT prevention enabled")
-        _b("")
-
-        _b("Processing room temperature updates...")
-        _b("")
-        _b("Room               Current   Schedule    New     Action")
-        _b("=" * 80)
+            status = "Active" if flag else "Inactive"
+            _b(f"{label:<30}{status}")
+        _b(f"{'OVERHEAT PREVENTION':<30}Enabled")
 
     # -----------------------------------------------------------------------
     # Log file management
@@ -892,10 +1141,17 @@ class Plugin(indigo.PluginBase):
                 except ValueError:
                     pass
 
-            # Restore En Suite morning only if still within 06:00-09:59
+            # Restore En Suite morning only if still within 06:00-09:59.
+            # Re-assert floor heat ON to ensure the physical state matches the
+            # restored mode (the plugin may have been restarted while the switch
+            # was manually turned off, or never turned on after a crash).
             if st.get("en_suite_morning_active") and 6 <= datetime.now().hour < 10:
                 self.store["en_suite_morning_active"] = True
                 _log("[EnSuiteMorning] Restored from state — still within morning window")
+                try:
+                    indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)
+                except Exception as e:
+                    _log(f"[EnSuiteMorning] Could not re-assert floor heat: {e}", level="WARNING")
 
             self.store["en_suite_morning_cancelled_date"] = st.get("en_suite_morning_cancelled_date")
 
@@ -942,10 +1198,6 @@ class Plugin(indigo.PluginBase):
             import requests  # noqa
         except ImportError:
             missing.append("requests")
-        try:
-            import pytz  # noqa
-        except ImportError:
-            missing.append("pytz")
         if missing:
             fix = f"pip3 install {' '.join(missing)}"
             indigo.server.log(
@@ -977,10 +1229,15 @@ class Plugin(indigo.PluginBase):
         self.store["last_heating_cycle"] = 0.0  # force _tick() to run cycle next poll
 
     def actionSetAwayMode(self, action):
-        """Action: Set or clear away mode via Indigo variable."""
+        """Action: Set or clear away mode via Indigo variable.
+
+        Forces an immediate heating cycle so the change applies now rather
+        than waiting up to runIntervalMins minutes for the next scheduled cycle.
+        """
         active = action.props.get("awayActive", "true").lower() == "true"
         update_variable(VAR_HOME_AWAY_ID, "true" if active else "false")
-        _log(f"[Action] Away mode {'activated' if active else 'deactivated'}")
+        _log(f"[Action] Away mode {'activated' if active else 'deactivated'} — forcing immediate cycle")
+        self.store["last_heating_cycle"] = 0.0
 
     # -----------------------------------------------------------------------
     # Menu callbacks
@@ -1020,7 +1277,17 @@ class Plugin(indigo.PluginBase):
         _log(f"  En Suite morning:    {self.store['en_suite_morning_active']}")
         if self.overheat:
             rooms = self.overheat.get_overheating_rooms()
-            _log(f"  Overheating rooms:   {', '.join(rooms) if rooms else 'None'}")
+            if not rooms:
+                _log("  Overheating rooms:   None")
+            else:
+                _log("  Overheating rooms:")
+                for room in rooms:
+                    data        = self.overheat.history.get(room, {})
+                    current     = data.get("current_temp")
+                    setpoint    = data.get("target_temp")
+                    cur_str = f"{current:.1f}degC" if current is not None else "N/A"
+                    set_str = f"{setpoint:.1f}degC" if setpoint is not None else "N/A"
+                    _log(f"    {room:<24}  temp: {cur_str:<10}  setpoint: {set_str}")
         return True
 
     def menuShowOverheatStatus(self, values_dict=None, type_id=None):
@@ -1046,9 +1313,12 @@ class Plugin(indigo.PluginBase):
         return True
 
     def menuToggleDebug(self, values_dict=None, type_id=None):
-        """Menu: Toggle debug logging."""
+        """Menu: Toggle debug logging.
+
+        PluginPrefs round-trip as strings — store "true"/"false" for consistency.
+        """
         self.debug = not self.debug
-        self.pluginPrefs["showDebugInfo"] = self.debug
+        self.pluginPrefs["showDebugInfo"] = "true" if self.debug else "false"
         _log(f"[Debug] Debug logging {'enabled' if self.debug else 'disabled'}")
         return True
 

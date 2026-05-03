@@ -1,10 +1,10 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # Filename:    weather.py
-# Description: WeatherData class — OpenWeatherMap fetch with local JSON cache
+# Description: WeatherData class — Ecowitt primary / OWM fallback outdoor temperature
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        15-04-2026
-# Version:     1.0
+# Date:        30-04-2026
+# Version:     1.3
 
 import os
 import json
@@ -13,38 +13,51 @@ import time
 
 import indigo  # noqa — available in plugin context
 
+# OWM weather condition codes that indicate snow or freezing precipitation
+# 600-622: all snow variants  |  511: freezing rain
+_SNOW_CODES = frozenset(range(600, 623)) | {511}
+
 
 class WeatherData:
     """
-    Fetches current conditions from OpenWeatherMap One Call API 3.0.
+    Outdoor temperature with Ecowitt as primary source, OWM as fallback.
 
-    Caches responses locally (default 15 min TTL) to avoid exceeding the
-    OWM free-tier limit of 1000 calls/day when the plugin polls every 5 min.
-    At 5-min intervals with a 15-min cache: ~96 API calls/day.
+    Priority when bypass=False (normal operation):
+      1. Ecowitt outdoor sensor device state (ecowitt_dev_id)
+      2. OWM One Call API 3.0 (cached, 15-min TTL, ~96 calls/day)
+      3. bypass_temp (last-resort configured value)
 
-    When bypass=True (default, Ecowitt not yet configured) the class still
-    fetches from OWM for temperature data; the 'bypass' flag controls whether
-    the caller uses OWM temp in place of a local sensor reading.
+    When bypass=True (Ecowitt unavailable):
+      1. OWM cached/fetched temperature
+      2. bypass_temp
     """
 
     def __init__(self, api_key, cache_path, lat=54.882, lon=-1.818,
-                 bypass=True, bypass_temp=6.0, cache_ttl_secs=900):
-        self.api_key      = api_key
-        self.cache_path   = cache_path
-        self.api_url      = (
+                 bypass=False, bypass_temp=6.0, cache_ttl_secs=900,
+                 ecowitt_dev_id=None):
+        self.api_key        = api_key
+        self.cache_path     = cache_path
+        self.api_url        = (
             f"https://api.openweathermap.org/data/3.0/onecall"
             f"?lat={lat}&lon={lon}&appid={api_key}"
             f"&units=metric&exclude=alerts"
         )
-        self.bypass       = bypass
-        self.bypass_temp  = bypass_temp
-        self.ttl          = cache_ttl_secs
+        self.bypass         = bypass
+        self.bypass_temp    = bypass_temp
+        self.ttl            = cache_ttl_secs
+        self.ecowitt_dev_id = ecowitt_dev_id
 
         self.current      = {}
         self.minutely     = []
         self.hourly       = []
         self.daily        = []
         self.last_update  = None
+
+        # Ecowitt warning rate-limit: only log once per failure type per
+        # _ECOWITT_WARN_INTERVAL seconds, so a missing/offline sensor does
+        # not flood the event log every cycle.
+        self._ecowitt_last_warn = {}   # {reason: timestamp}
+        self._ECOWITT_WARN_INTERVAL = 1800  # 30 minutes
 
     # ------------------------------------------------------------------
     # Public API
@@ -133,13 +146,43 @@ class WeatherData:
 
     def get_outdoor_temp(self):
         """
-        Return the best available outdoor temperature as a float, or None.
+        Return best available outdoor temperature as float, or bypass_temp.
 
-        When bypass=True (Ecowitt not configured): returns OWM temperature.
-        When bypass=False: caller is expected to read from local Ecowitt device;
-            this method still returns OWM temp as a fallback if local sensor fails.
-        Returns None only if OWM is also unavailable.
+        Priority when bypass=False (Ecowitt active):
+          1. Ecowitt outdoor sensor device state
+          2. OWM cached/fetched temperature
+          3. bypass_temp (last-resort configured value)
+
+        When bypass=True (Ecowitt unavailable):
+          1. OWM cached/fetched temperature
+          2. bypass_temp
         """
+        # --- Primary: Ecowitt (when bypass=False and device configured) ---
+        if not self.bypass and self.ecowitt_dev_id:
+            try:
+                dev = indigo.devices[self.ecowitt_dev_id]
+                online = dev.states.get("deviceOnline", True)
+                temp   = dev.states.get("temperature")
+                if online and temp is not None:
+                    return float(temp)
+                # Distinguish the two failure modes so the log is meaningful
+                if not online:
+                    self._warn_ecowitt(
+                        "offline",
+                        "Ecowitt device offline — falling back to OWM"
+                    )
+                else:
+                    self._warn_ecowitt(
+                        "no_temp",
+                        "Ecowitt online but temperature state missing — falling back to OWM"
+                    )
+            except (KeyError, ValueError, TypeError) as e:
+                self._warn_ecowitt(
+                    "read_error",
+                    f"Ecowitt read error ({e}) — falling back to OWM"
+                )
+
+        # --- Secondary: OWM ---
         owm_temp = self.get_current('temp')
         if owm_temp is not None:
             try:
@@ -147,10 +190,8 @@ class WeatherData:
             except (ValueError, TypeError):
                 pass
 
-        if self.bypass:
-            return self.bypass_temp  # configured fallback
-
-        return None
+        # --- Last resort ---
+        return self.bypass_temp
 
     def get_precipitation_forecast(self, minutes=60):
         """Return precipitation forecast for next N minutes."""
@@ -163,3 +204,43 @@ class WeatherData:
     def get_daily_forecast(self, days=7):
         """Return daily forecast for next N days."""
         return list(self.daily[:days]) if self.daily else []
+
+    def _warn_ecowitt(self, reason, message):
+        """Rate-limited warning for Ecowitt issues (one per reason per 30 min)."""
+        now_ts   = time.time()
+        last_ts  = self._ecowitt_last_warn.get(reason, 0)
+        if now_ts - last_ts >= self._ECOWITT_WARN_INTERVAL:
+            indigo.server.log(f"[Weather] {message}", level="WARNING")
+            self._ecowitt_last_warn[reason] = now_ts
+
+    def get_snow_forecast(self, hours=12):
+        """
+        Scan hourly forecast for snow or freezing precipitation in next N hours.
+
+        Returns a list of dicts (one per affected hour):
+            hour_offset  — hours from now (0 = this hour)
+            time_str     — formatted as HH:MM
+            mm           — expected accumulation in mm (may be 0.0 if OWM omits it)
+            description  — e.g. "Light Snow", "Heavy Snow"
+
+        Empty list means no snow expected within the window.
+        """
+        results = []
+        for i, entry in enumerate(self.hourly[:hours]):
+            code = ((entry.get("weather") or [{}])[0]).get("id", 0)
+            if code in _SNOW_CODES:
+                mm   = float((entry.get("snow") or {}).get("1h", 0.0))
+                desc = ((entry.get("weather") or [{}])[0]).get("description", "snow").title()
+                try:
+                    time_str = datetime.datetime.fromtimestamp(
+                        int(entry.get("dt", 0))
+                    ).strftime("%H:%M")
+                except Exception:
+                    time_str = "??"
+                results.append({
+                    "hour_offset": i,
+                    "time_str":    time_str,
+                    "mm":          mm,
+                    "description": desc,
+                })
+        return results

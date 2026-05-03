@@ -3,8 +3,8 @@
 # Filename:    overheat_monitor.py
 # Description: OverheatMonitor — tracks per-room overheat history, sends Pushover + email alerts
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        15-04-2026
-# Version:     1.0
+# Date:        30-04-2026
+# Version:     1.3
 
 import os
 import json
@@ -44,6 +44,11 @@ class OverheatMonitor:
         # Credentials set by plugin.py after construction (from PluginConfig)
         self.pushover_user_key = ""
         self.email_address     = ""
+
+        # Optional callback fired when an overheat alert or all-clear is sent.
+        # Signature: callback(event_id: str)  — e.g. "overheatAlert" / "overheatAllClear"
+        # Set by plugin.py after construction. Used to fire Indigo plugin events.
+        self.event_callback    = None
 
         # Per-room threshold overrides
         self.room_specific_thresholds = {
@@ -155,16 +160,23 @@ class OverheatMonitor:
             if should_alert and not room_data["alert_sent"]:
                 if is_passive:
                     # Valve has been off 3+ cycles — passive warmth (solar/internal gain)
-                    # Not a TRV fault; suppress alert entirely
+                    # Not a TRV fault; suppress alert and mark sent so it does not
+                    # re-trigger every cycle.
                     indigo.server.log(
                         f"[OverheatMonitor] {room_name}: alert suppressed "
-                        f"(passive warmth — valve off, solar/internal gain)"
+                        f"(passive warmth — solar/internal gain, no TRV action)"
                     )
+                    room_data["alert_sent"]      = True
+                    room_data["alert_type"]      = "PASSIVE_GAIN"
+                    room_data["all_clear_sent"]  = False
                 elif outdoor_temp is not None and outdoor_temp > self.outdoor_suppress_temp:
                     indigo.server.log(
                         f"[OverheatMonitor] {room_name}: alert suppressed "
                         f"(outdoor {outdoor_temp:.1f}degC > {self.outdoor_suppress_temp}degC)"
                     )
+                    room_data["alert_sent"]      = True
+                    room_data["alert_type"]      = "OUTDOOR_SUPPRESSED"
+                    room_data["all_clear_sent"]  = False
                 else:
                     self.send_critical_alert(room_name, alert_type, overheat_amount)
                     room_data["alert_sent"]      = True
@@ -179,7 +191,15 @@ class OverheatMonitor:
             if (room_data["alert_sent"] and
                     not room_data["all_clear_sent"] and
                     room_data["stable_cycles"] >= self.all_clear_cycles):
-                self.send_all_clear(room_name)
+                suppressed_types = {"PASSIVE_GAIN", "OUTDOOR_SUPPRESSED"}
+                if room_data.get("alert_type") in suppressed_types:
+                    # Was suppressed — reset silently, no Pushover all-clear
+                    indigo.server.log(
+                        f"[OverheatMonitor] {room_name}: returned to normal "
+                        f"(was {room_data['alert_type']}, no alert was sent)"
+                    )
+                else:
+                    self.send_all_clear(room_name)
                 room_data["alert_sent"]     = False
                 room_data["alert_type"]     = None
                 room_data["max_overheat"]   = 0.0
@@ -243,6 +263,11 @@ class OverheatMonitor:
             f"{overheat_amount:+.1f}degC over target",
             level="WARNING"
         )
+        if self.event_callback:
+            try:
+                self.event_callback("overheatAlert")
+            except Exception:
+                pass
 
     def send_all_clear(self, room_name):
         """Send all-clear notification when room returns to normal."""
@@ -282,6 +307,11 @@ class OverheatMonitor:
         indigo.server.log(
             f"[OverheatMonitor] ALL CLEAR sent for {room_name}: room returned to normal"
         )
+        if self.event_callback:
+            try:
+                self.event_callback("overheatAllClear")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Notification helpers
@@ -354,7 +384,16 @@ class OverheatMonitor:
                     f"(max {data['max_overheat']:+.1f}degC)"
                 )
                 if data.get("alert_sent"):
-                    lines.append(f"{'':20s}   Alert: {data['alert_type']}")
+                    alert_labels = {
+                        "PASSIVE_GAIN":       "Passive gain (no alert sent)",
+                        "OUTDOOR_SUPPRESSED": "Outdoor temp (no alert sent)",
+                        "CRITICAL_IMMEDIATE": "CRITICAL IMMEDIATE (alert sent)",
+                        "CRITICAL_PERSISTENT":"CRITICAL PERSISTENT (alert sent)",
+                    }
+                    alert_str = alert_labels.get(
+                        data["alert_type"], data["alert_type"]
+                    )
+                    lines.append(f"{'':20s}   Alert: {alert_str}")
         if not found:
             lines.append("No rooms above target")
         return "\n".join(lines)

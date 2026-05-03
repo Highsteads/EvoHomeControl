@@ -28,6 +28,11 @@
         <CallbackMethod>menuShowStatus</CallbackMethod>
     </MenuItem>
 
+    <MenuItem id="menuForceFullLog">
+        <Name>Show Full Weather Log</Name>
+        <CallbackMethod>menuForceFullLog</CallbackMethod>
+    </MenuItem>
+
     <MenuItem id="menuShowOverheatStatus">
         <Name>Show Overheat Monitor Status</Name>
         <CallbackMethod>menuShowOverheatStatus</CallbackMethod>

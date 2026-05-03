@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Events>
+
+    <!-- Fired when overheat_monitor sends a CRITICAL_IMMEDIATE or CRITICAL_PERSISTENT alert -->
+    <Event id="overheatAlert">
+        <Name>Critical Overheat Alert</Name>
+    </Event>
+
+    <!-- Fired when an overheating room returns to target temperature -->
+    <Event id="overheatAllClear">
+        <Name>Room All Clear (back to target)</Name>
+    </Event>
+
+    <!-- Fired when a 1h or 2h timed boost is activated -->
+    <Event id="timedBoostStarted">
+        <Name>Timed Boost Started</Name>
+    </Event>
+
+    <!-- Fired when timed boost expires or is cancelled -->
+    <Event id="timedBoostEnded">
+        <Name>Timed Boost Ended</Name>
+    </Event>
+
+    <!-- Fired when a snow forecast is detected and the heating boost is applied -->
+    <Event id="snowForecastDetected">
+        <Name>Snow Forecast Detected</Name>
+    </Event>
+
+    <!-- Fired when the En Suite morning schedule auto-starts at 06:00 -->
+    <Event id="enSuiteMorningStarted">
+        <Name>En Suite Morning Started</Name>
+    </Event>
+
+    <!-- Fired when the En Suite morning schedule is cancelled (window or 10am) -->
+    <Event id="enSuiteMorningCancelled">
+        <Name>En Suite Morning Cancelled</Name>
+    </Event>
+
+</Events>

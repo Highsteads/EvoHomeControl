@@ -21,11 +21,18 @@
     <Field id="lbl_weather" type="label">
         <Label>WEATHER SOURCE</Label>
     </Field>
-    <Field id="weatherBypass" type="checkbox" defaultValue="true">
-        <Label>Use OWM temperature (bypass Ecowitt — enable when Ecowitt is unavailable):</Label>
+    <Field id="weatherBypass" type="checkbox" defaultValue="false">
+        <Label>Force OWM temperature (bypass Ecowitt — enable when Ecowitt is unavailable):</Label>
+    </Field>
+    <Field id="ecowittDeviceId" type="textfield" defaultValue="889210700"
+           visibleBindingId="weatherBypass" visibleBindingValue="false">
+        <Label>Ecowitt outdoor sensor device ID:</Label>
+    </Field>
+    <Field id="ecowittIndoorDeviceId" type="textfield" defaultValue="1376100918">
+        <Label>Ecowitt indoor sensor device ID (pressure / indoor temp / humidity):</Label>
     </Field>
     <Field id="weatherBypassTemp" type="textfield" defaultValue="6.0">
-        <Label>Fallback temperature when OWM also unavailable (degC):</Label>
+        <Label>Fallback temperature when both Ecowitt and OWM unavailable (degC):</Label>
     </Field>
 
     <Field id="sep_notify" type="separator"/>
@@ -49,6 +56,33 @@
             <Option value="5">5 minutes (recommended)</Option>
             <Option value="10">10 minutes</Option>
             <Option value="15">15 minutes</Option>
+        </List>
+    </Field>
+
+    <Field id="sep_snow" type="separator"/>
+    <Field id="lbl_snow" type="label">
+        <Label>SNOW FORECAST</Label>
+    </Field>
+    <Field id="snowHeatingEnabled" type="checkbox" defaultValue="true">
+        <Label>Apply heating boost when snow is forecast:</Label>
+    </Field>
+    <Field id="snowForecastHours" type="menu" defaultValue="12"
+           visibleBindingId="snowHeatingEnabled" visibleBindingValue="true">
+        <Label>Look-ahead window for snow detection:</Label>
+        <List>
+            <Option value="6">6 hours</Option>
+            <Option value="12">12 hours (recommended)</Option>
+            <Option value="24">24 hours</Option>
+        </List>
+    </Field>
+    <Field id="snowHeatingBoost" type="menu" defaultValue="1.0"
+           visibleBindingId="snowHeatingEnabled" visibleBindingValue="true">
+        <Label>Heating boost when snow forecast (degC):</Label>
+        <List>
+            <Option value="0.5">+0.5 degC</Option>
+            <Option value="1.0">+1.0 degC (recommended)</Option>
+            <Option value="1.5">+1.5 degC</Option>
+            <Option value="2.0">+2.0 degC</Option>
         </List>
     </Field>
 

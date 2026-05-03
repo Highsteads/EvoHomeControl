@@ -4,8 +4,8 @@
 # Description: Core heating logic — room processing, overheat detection, special rules
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        15-04-2026
-# Version:     1.0
+# Date:        30-04-2026
+# Version:     1.3
 
 from datetime import datetime as dt
 
@@ -85,7 +85,7 @@ OVERHEAT_RATE_THRESHOLD     =  0.15  # degC per 15 min (normalised)
 OVERHEAT_USE_RADIATOR_OFF   =  False
 OVERHEAT_BACKOFF            =  6.0
 OVERHEAT_MIN_SETPOINT       = 12.0
-OVERHEAT_MIN_OFF_CYCLES     =  9     # 45 min at 5-min interval (scaled by run_interval_mins at call site)
+OVERHEAT_MIN_OFF_MINUTES    = 45     # min time valve must be off before reopen — scaled by run_interval_mins
 OVERHEAT_REOPEN_FLOOR       =  0.3
 OVERHEAT_PREDICTIVE_MARGIN  =  0.1
 OVERHEAT_COAST_MARGIN       =  0.5
@@ -124,7 +124,7 @@ OVERHEAT_EXCLUDED_ROOMS = {"Bedroom 3"}
 # 17=overheat (radiator contributing)  19=window/door closed  20=window open (reduced)
 # 21=door open (reduced)  22=En Suite morning schedule
 # 23=above target (passive warmth — solar/internal gain, valve has been off 3+ cycles)
-ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22}
+ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23}
 
 # En Suite morning schedule temperature
 EN_SUITE_MORNING_TEMP = 22.0
@@ -142,8 +142,12 @@ def _log(message, level="INFO", log_buffer=None):
 
 
 def validate_configuration():
-    """Validate that all required devices and variables exist. Returns True on success."""
+    """Validate that all required Indigo variables and RAMSES TRV devices exist.
+
+    Logs an ERROR for each missing item. Returns True if no errors.
+    """
     errors = []
+
     required_vars = [
         (VAR_BOTH_OUT_ID,   "Both_Out"),
         (VAR_HOME_AWAY_ID,  "Away"),
@@ -157,6 +161,28 @@ def validate_configuration():
             indigo.variables[var_id]
         except Exception:
             errors.append(f"Missing required variable: {var_name} (ID: {var_id})")
+
+    # Check all 12 RAMSES TRV devices
+    required_devices = [
+        (DEV_BATHROOM_ID,           "Bathroom TRV"),
+        (DEV_BEDROOM_1_ID,          "Bedroom 1 TRV"),
+        (DEV_BEDROOM_2_ID,          "Bedroom 2 TRV"),
+        (DEV_BEDROOM_3_ID,          "Bedroom 3 TRV"),
+        (DEV_CONSERVATORY_ID,       "Conservatory TRV"),
+        (DEV_DINING_ROOM_ID,        "Dining Room TRV"),
+        (DEV_EN_SUITE_ID,           "En Suite TRV"),
+        (DEV_HALL_BEDROOM_ID,       "Hall Bedroom TRV"),
+        (DEV_HALL_KITCHEN_ID,       "Hall Kitchen TRV"),
+        (DEV_LIVING_ROOM_DOOR_ID,   "Living Room Door TRV"),
+        (DEV_LIVING_ROOM_FRONT_ID,  "Living Room Front TRV"),
+        (DEV_UTILITY_ROOM_ID,       "Utility Room TRV"),
+    ]
+    for dev_id, dev_label in required_devices:
+        try:
+            indigo.devices[dev_id]
+        except Exception:
+            errors.append(f"Missing required device: {dev_label} (ID: {dev_id})")
+
     for error in errors:
         indigo.server.log(error, level="ERROR")
     return len(errors) == 0
@@ -267,7 +293,7 @@ def check_overheating(current_temp, target_temp, room_name,
     was_overheating   = room_data.get("consecutive_cycles", 0) > 0
     rate_threshold    = ROOM_SPECIFIC_RATE_THRESHOLDS.get(room_name, OVERHEAT_RATE_THRESHOLD)
     coast_margin      = ROOM_COAST_MARGINS.get(room_name, OVERHEAT_COAST_MARGIN)
-    min_off_cycles    = max(1, 45 // run_interval_mins)
+    min_off_cycles    = max(1, OVERHEAT_MIN_OFF_MINUTES // run_interval_mins)
 
     # TIER 0: Coast closure
     if temp_rise_rate > 0 and overheat_amount > -coast_margin:
@@ -277,10 +303,15 @@ def check_overheating(current_temp, target_temp, room_name,
         return True, adjusted, overheat_amount
 
     # Coast complete: room stopped rising
+    # Only release if room has also dropped back near target — if it is still
+    # significantly above the trigger threshold, fall through to Tier 2 rather
+    # than blindly opening the valve just because the rate of rise has stopped.
     if room_data.get("is_coasting", False) and temp_rise_rate <= 0:
         room_data["is_coasting"]    = False
         room_data["off_since_cycle"] = 0
-        return False, target_temp, 0.0
+        if overheat_amount <= OVERHEAT_TRIGGER_THRESHOLD:
+            return False, target_temp, 0.0
+        # Still above threshold — fall through to Tier 2
 
     room_data["is_coasting"] = False
 
@@ -424,19 +455,25 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
             return
 
         # Read current device setpoint for W 2349 decision
-        setpoint_str = dev_radiator.states.get("setpointHeat", "0")
-        if setpoint_str in (None, "null", "None", "", "unavailable", "unknown"):
-            setpoint_before = 0.0
-        else:
+        # When the RAMSES state is unavailable we use the local cache instead of
+        # 0.0 — otherwise abs(0 - 12) > tolerance always fires a redundant W 2349.
+        setpoint_str       = dev_radiator.states.get("setpointHeat", "0")
+        setpoint_available = setpoint_str not in (None, "null", "None", "", "unavailable", "unknown")
+        if setpoint_available:
             setpoint_before = float(setpoint_str)
+        else:
+            cached = last_setpoints.get(room_name)
+            setpoint_before = float(cached) if cached is not None else 0.0
 
         new_temp = float(new_temp)
 
         # Send W 2349 (permanent override) when setpoint changed OR zone_mode drifted
+        # If RAMSES setpoint state is unavailable we still issue the command on
+        # first run to ensure the TRV reflects our calculated target.
         zone_mode     = dev_radiator.states.get("zone_mode", "")
         not_permanent = (zone_mode != "permanent override")
         changed       = abs(setpoint_before - new_temp) > TEMP_CHANGE_TOLERANCE
-        if changed or not_permanent:
+        if changed or not_permanent or not setpoint_available:
             indigo.thermostat.setHeatSetpoint(dev_radiator, value=new_temp)
 
         # Change detection uses our own cache (not RAMSES device state)
@@ -703,7 +740,7 @@ def process_room_temperature(
             )
 
     # --- Special room rules ---
-    if special_rules and message != 17:
+    if special_rules and message not in (17, 23):
         new_temp, special_msg = special_rules(
             new_temp, message, windows_open, doors_open,
             window_count, door_count, current_outdoor_temp, current_hour
@@ -714,7 +751,7 @@ def process_room_temperature(
     # --- Standard priority overrides ---
 
     # Away mode
-    if is_away and message != 17:
+    if is_away and message not in (17, 23):
         outdoor = current_outdoor_temp if current_outdoor_temp is not None else 10.0
         if outdoor < 3.0:
             new_temp = AWAY_TEMP + 2.0
@@ -761,7 +798,7 @@ def process_room_temperature(
     # High outdoor temperature
     if (current_outdoor_temp is not None and
             current_outdoor_temp > OUTDOOR_TEMP_TRIGGER and
-            message not in (17, 5)):
+            message not in (17, 23, 5)):
         new_temp = RADIATORS_OFF_TEMP
         message  = 7
 
@@ -770,12 +807,12 @@ def process_room_temperature(
         is_boost
         or (timed_boost_active and room_name in (timed_boost_rooms or set()))
     )
-    if effective_boost and room_name in schedules.BOOST_AMOUNTS and message not in (17, 5):
+    if effective_boost and room_name in schedules.BOOST_AMOUNTS and message not in (17, 23, 5):
         new_temp += schedules.BOOST_AMOUNTS[room_name]
         message   = 12
 
     # Both-out
-    if is_both_out and message not in (17, 5):
+    if is_both_out and message not in (17, 23, 5):
         new_temp += BOTH_OUT_OFFSET
         message   = 13
 
@@ -783,7 +820,7 @@ def process_room_temperature(
     new_temp = max(RADIATORS_OFF_TEMP, min(round(new_temp), MAX_ROOM_TEMP))
 
     # --- Final bedroom max limit ---
-    if room_name in schedules.MAX_TEMP_LIMITS and message not in (1, 2, 3, 4, 7, 8, 15, 17):
+    if room_name in schedules.MAX_TEMP_LIMITS and message not in (1, 2, 3, 4, 7, 8, 15, 17, 23):
         if is_guest and room_name in schedules.MAX_TEMP_LIMITS_GUEST:
             max_limit = schedules.MAX_TEMP_LIMITS_GUEST[room_name]
         else:
@@ -793,18 +830,19 @@ def process_room_temperature(
             message  = 18
 
     # --- Message refinement ---
+    # 23 = above target (passive warmth) is protected exactly like 17 (overheat)
     _OPEN_MESSAGES = {1, 2, 3, 4, 20, 21}
 
     if dev_temp is not None and abs(dev_temp - new_temp) <= TEMP_CHANGE_TOLERANCE:
-        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22):
+        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23):
             message = 11
 
     elif abs(dev_setpoint - new_temp) <= TEMP_CHANGE_TOLERANCE:
-        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22):
+        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23):
             message = 11
 
     # Window/door closed transition (open -> closed detection)
-    if message not in _OPEN_MESSAGES and message != 17:
+    if message not in _OPEN_MESSAGES and message not in (17, 23):
         if last_messages.get(room_name) in _OPEN_MESSAGES:
             message = 19
 
