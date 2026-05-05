@@ -133,10 +133,12 @@ EN_SUITE_MORNING_TEMP = 22.0
 # HELPER FUNCTIONS
 # ---------------------------------------------------------------------------
 
-def _log(message, level="INFO", log_buffer=None):
-    """Log to Indigo event log and optionally to a buffer list."""
+def _log(message, level="INFO", log_buffer=None, file_only=False):
+    """Log to Indigo event log and optionally to a buffer list.
+    file_only=True suppresses the Indigo event log; data still goes to log_buffer."""
     formatted = f"[{dt.now().strftime('%H:%M:%S')}] {message}"
-    indigo.server.log(formatted, level=level)
+    if not file_only:
+        indigo.server.log(formatted, level=level)
     if log_buffer is not None:
         log_buffer.append(formatted)
 
@@ -492,14 +494,17 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
             )
 
         # Event log / log_buffer: hourly full dump or ALERT_LOG_MESSAGES events
+        # file_only=True for per-change events (not hourly) — keeps file logs intact
+        # but suppresses routine solar gain / overheat status lines from event log
         if force_log or (script_changed and message in ALERT_LOG_MESSAGES):
             log_line = get_log_message(
                 message, room_name, setpoint_before, new_temp,
                 dev_temp, scheduled_temp, overheat_amount
             )
-            _log(log_line, log_buffer=log_buffer)
+            _log(log_line, log_buffer=log_buffer, file_only=(not force_log))
             if not force_log:
-                _log(get_reason_line(message, new_temp, overheat_amount), log_buffer=log_buffer)
+                _log(get_reason_line(message, new_temp, overheat_amount),
+                     log_buffer=log_buffer, file_only=True)
 
     except Exception as e:
         _log(f"Error updating {room_name}: {e}", level="ERROR", log_buffer=log_buffer)
