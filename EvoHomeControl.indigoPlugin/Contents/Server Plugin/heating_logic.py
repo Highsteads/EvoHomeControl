@@ -720,6 +720,11 @@ def process_room_temperature(
         # Use override target if provided (e.g. En Suite morning schedule sets 22°C —
         # use that as the baseline so 21.9°C is not falsely flagged as overheating)
         overheat_target = overheat_target_override if overheat_target_override is not None else new_temp
+        # If timed boost is active for this room, raise the overheat baseline by the boost amount
+        # so a room at 20.9°C with a 20°C schedule and +2°C boost is not falsely suppressed.
+        if (timed_boost_active and room_name in (timed_boost_rooms or set())
+                and room_name in schedules.BOOST_AMOUNTS):
+            overheat_target = overheat_target + schedules.BOOST_AMOUNTS[room_name]
         is_overheating, adjusted_temp, overheat_amt = check_overheating(
             dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins
         )

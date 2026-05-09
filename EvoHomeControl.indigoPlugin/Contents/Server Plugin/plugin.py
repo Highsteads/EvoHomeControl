@@ -178,6 +178,9 @@ class Plugin(indigo.PluginBase):
         self.weather  = None
         self.overheat = None
 
+        # Active event triggers — populated by triggerStartProcessing / triggerStopProcessing
+        self.event_triggers = {}
+
         # Load persisted state from previous run
         self._load_state()
 
@@ -529,16 +532,20 @@ class Plugin(indigo.PluginBase):
     # Timed boost
     # -----------------------------------------------------------------------
 
+    def triggerStartProcessing(self, trigger):
+        self.event_triggers[trigger.id] = trigger
+
+    def triggerStopProcessing(self, trigger):
+        self.event_triggers.pop(trigger.id, None)
+
     def _fire_event(self, event_id):
-        """Fire a plugin event — silent if no triggers are configured for it."""
+        """Fire all Indigo triggers configured for this plugin event."""
         try:
-            indigo.server.fireEvent(event_id, params=self.pluginId)
-        except Exception:
-            # Older Indigo versions: triggerEvent path
-            try:
-                indigo.server.fireEvent(event_id)
-            except Exception as e:
-                _log(f"[Events] Could not fire {event_id}: {e}", level="WARNING")
+            for trigger in self.event_triggers.values():
+                if trigger.pluginTypeId == event_id:
+                    indigo.trigger.execute(trigger)
+        except Exception as e:
+            _log(f"[Events] Could not fire {event_id}: {e}", level="WARNING")
 
     def _start_timed_boost(self, hours):
         """Activate timed boost for 1 or 2 hours on TIMED_BOOST_ROOMS."""
