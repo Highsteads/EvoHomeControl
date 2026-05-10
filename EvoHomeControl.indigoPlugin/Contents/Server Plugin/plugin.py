@@ -31,13 +31,13 @@ except ImportError:
 # ---------------------------------------------------------------------------
 sys.path.insert(0, "/Library/Application Support/Perceptive Automation")
 try:
-    from secrets import OWM_API_KEY as _SECRETS_OWM_KEY
+    from IndigoSecrets import OWM_API_KEY as _SECRETS_OWM_KEY
 except ImportError:
     _SECRETS_OWM_KEY = ""
 
 # Try to import Pushover user key from secrets too
 try:
-    from secrets import PUSHOVER_USER_TOKEN as _SECRETS_PUSHOVER_KEY
+    from IndigoSecrets import PUSHOVER_USER_TOKEN as _SECRETS_PUSHOVER_KEY
 except ImportError:
     _SECRETS_PUSHOVER_KEY = ""
 

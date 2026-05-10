@@ -35,17 +35,17 @@ Converted from a scheduled Python script to a persistent plugin, adding timed bo
 
 ## Credentials
 
-This plugin uses `secrets.py` for the OpenWeatherMap API key.
+This plugin uses `IndigoSecrets.py` for the OpenWeatherMap API key.
 
-Add to your master secrets file at `/Library/Application Support/Perceptive Automation/secrets.py`:
+Add to your master secrets file at `/Library/Application Support/Perceptive Automation/IndigoSecrets.py`:
 
 ```python
 OWM_API_KEY = "your-openweathermap-api-key-here"
 ```
 
-A template is provided at `Contents/Server Plugin/secrets_example.py`.
+A template is provided at `Contents/Server Plugin/IndigoSecrets_example.py`.
 
-If `secrets.py` is not present, the API key falls back to the value entered in Plugin Preferences.
+If `IndigoSecrets.py` is not present, the API key falls back to the value entered in Plugin Preferences.
 
 ## Actions
 
