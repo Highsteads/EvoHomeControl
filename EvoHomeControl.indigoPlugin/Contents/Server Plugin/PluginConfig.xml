@@ -8,7 +8,7 @@
         <Label>OPENWEATHERMAP</Label>
     </Field>
     <Field id="owmApiKey" type="textfield" defaultValue="">
-        <Label>OWM API key (leave blank to use secrets.py):</Label>
+        <Label>OWM API key (leave blank to use IndigoSecrets.py):</Label>
     </Field>
     <Field id="owmLatitude" type="textfield" defaultValue="54.882">
         <Label>Latitude:</Label>
@@ -40,7 +40,7 @@
         <Label>OVERHEAT ALERTS</Label>
     </Field>
     <Field id="pushoverUserKey" type="textfield" defaultValue="">
-        <Label>Pushover user key (leave blank to use secrets.py):</Label>
+        <Label>Pushover user key (leave blank to use IndigoSecrets.py):</Label>
     </Field>
     <Field id="alertEmailAddress" type="textfield" defaultValue="overheat-alert@strudwick.co.uk">
         <Label>Overheat alert email address:</Label>

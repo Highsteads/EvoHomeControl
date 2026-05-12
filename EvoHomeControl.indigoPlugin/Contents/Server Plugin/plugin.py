@@ -27,7 +27,7 @@ except ImportError:
     log_startup_banner = None
 
 # ---------------------------------------------------------------------------
-# OWM API key from secrets.py (overrides PluginConfig if present)
+# OWM API key from IndigoSecrets.py (overrides PluginConfig if present)
 # ---------------------------------------------------------------------------
 sys.path.insert(0, "/Library/Application Support/Perceptive Automation")
 try:
@@ -193,10 +193,10 @@ class Plugin(indigo.PluginBase):
 
         run_interval = int(self.pluginPrefs.get("runIntervalMins", 5))
 
-        # OWM API key: secrets.py wins over PluginConfig
+        # OWM API key: IndigoSecrets.py wins over PluginConfig
         owm_key = _SECRETS_OWM_KEY or self.pluginPrefs.get("owmApiKey", "")
         if not owm_key:
-            _log("[Startup] No OWM API key found in secrets.py or PluginConfig", level="WARNING")
+            _log("[Startup] No OWM API key found in IndigoSecrets.py or PluginConfig", level="WARNING")
 
         # Resolve Pushover key
         pushover_key = _SECRETS_PUSHOVER_KEY or self.pluginPrefs.get("pushoverUserKey", "")

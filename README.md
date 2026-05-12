@@ -33,20 +33,26 @@ Converted from a scheduled Python script to a persistent plugin, adding timed bo
 5. Create a **EvoHome Heating Controller** device (Plugins → EvoHome Heating Controller → New Device)
 6. Configure the plugin preferences (API key, location, intervals)
 
-## Credentials
+## Credentials — `IndigoSecrets.py` vs `IndigoSecrets_example.py`
 
-This plugin uses `IndigoSecrets.py` for the OpenWeatherMap API key.
+This plugin (along with all CliveS Indigo plugins) reads sensitive values from
+a shared master credentials file at:
 
-Add to your master secrets file at `/Library/Application Support/Perceptive Automation/IndigoSecrets.py`:
+`/Library/Application Support/Perceptive Automation/IndigoSecrets.py`
 
-```python
-OWM_API_KEY = "your-openweathermap-api-key-here"
-```
+| File | Purpose | Real data? | Committed to GitHub? |
+|------|---------|------------|----------------------|
+| `IndigoSecrets.py` | Working file the plugin reads at runtime. Keep a backup in a password manager. | YES | **NO** — listed in `.gitignore` |
+| `IndigoSecrets_example.py` | Template only — empty placeholders. Shipped in the plugin bundle. | NO | YES |
 
-A template is provided at `Contents/Server Plugin/IndigoSecrets_example.py`.
+If you do not have `IndigoSecrets.py`, copy `IndigoSecrets_example.py` from
+the plugin bundle to that location and fill in your values. Or skip
+`IndigoSecrets.py` entirely and enter values via the plugin's configuration
+dialog — `IndigoSecrets.py` wins over the dialog when both are set.
 
-If `IndigoSecrets.py` is not present, the API key falls back to the value entered in Plugin Preferences.
-
+If a required value is set in NEITHER source the plugin logs an ERROR
+pointing the user to either fill in the matching field or add the key to
+`IndigoSecrets.py`.
 ## Actions
 
 | Action | Description |
