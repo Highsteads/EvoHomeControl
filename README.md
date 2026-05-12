@@ -18,7 +18,7 @@ Converted from a scheduled Python script to a persistent plugin, adding timed bo
 
 ## Requirements
 
-- Indigo 2025.1 or later
+- Indigo 2022.1 or later (Python 3.10+)
 - Home Assistant Agent plugin (for Evohome TRV control via RAMSES-II)
 - OpenWeatherMap API key (free tier sufficient)
 - Pushover plugin (optional, for alerts)
