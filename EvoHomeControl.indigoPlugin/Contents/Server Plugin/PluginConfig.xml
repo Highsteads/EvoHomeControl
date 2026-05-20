@@ -7,14 +7,17 @@
     <Field id="lbl_owm" type="label">
         <Label>OPENWEATHERMAP</Label>
     </Field>
+    <Field id="lbl_secrets_owm" type="label">
+        <Label>Values are read from IndigoSecrets.py first (OWM_API_KEY, LATITUDE, LONGITUDE). The fields below are a fallback for users without IndigoSecrets.py.</Label>
+    </Field>
     <Field id="owmApiKey" type="textfield" defaultValue="">
-        <Label>OWM API key (leave blank to use IndigoSecrets.py):</Label>
+        <Label>OWM API key (fallback if not in IndigoSecrets):</Label>
     </Field>
-    <Field id="owmLatitude" type="textfield" defaultValue="54.882">
-        <Label>Latitude:</Label>
+    <Field id="owmLatitude" type="textfield" defaultValue="">
+        <Label>Latitude (fallback):</Label>
     </Field>
-    <Field id="owmLongitude" type="textfield" defaultValue="-1.818">
-        <Label>Longitude:</Label>
+    <Field id="owmLongitude" type="textfield" defaultValue="">
+        <Label>Longitude (fallback):</Label>
     </Field>
 
     <Field id="sep_weather" type="separator"/>
@@ -24,11 +27,11 @@
     <Field id="weatherBypass" type="checkbox" defaultValue="false">
         <Label>Force OWM temperature (bypass Ecowitt — enable when Ecowitt is unavailable):</Label>
     </Field>
-    <Field id="ecowittDeviceId" type="textfield" defaultValue="889210700"
+    <Field id="ecowittDeviceId" type="textfield" defaultValue=""
            visibleBindingId="weatherBypass" visibleBindingValue="false">
         <Label>Ecowitt outdoor sensor device ID:</Label>
     </Field>
-    <Field id="ecowittIndoorDeviceId" type="textfield" defaultValue="1376100918">
+    <Field id="ecowittIndoorDeviceId" type="textfield" defaultValue="">
         <Label>Ecowitt indoor sensor device ID (pressure / indoor temp / humidity):</Label>
     </Field>
     <Field id="weatherBypassTemp" type="textfield" defaultValue="6.0">
@@ -40,10 +43,10 @@
         <Label>OVERHEAT ALERTS</Label>
     </Field>
     <Field id="pushoverUserKey" type="textfield" defaultValue="">
-        <Label>Pushover user key (leave blank to use IndigoSecrets.py):</Label>
+        <Label>Pushover user key (leave blank to use secrets.py):</Label>
     </Field>
-    <Field id="alertEmailAddress" type="textfield" defaultValue="overheat-alert@strudwick.co.uk">
-        <Label>Overheat alert email address:</Label>
+    <Field id="alertEmailAddress" type="textfield" defaultValue="">
+        <Label>Overheat alert email (fallback if OVERHEAT_ALERT_EMAIL not in IndigoSecrets):</Label>
     </Field>
 
     <Field id="sep_timing" type="separator"/>

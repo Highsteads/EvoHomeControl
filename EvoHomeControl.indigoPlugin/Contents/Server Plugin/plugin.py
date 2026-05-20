@@ -4,8 +4,21 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        30-04-2026
-# Version:     1.3
+# Date:        13-05-2026
+# Version:     1.4
+#
+# v1.4 (13-05-2026):
+# - Overheat alert email moved to IndigoSecrets.OVERHEAT_ALERT_EMAIL with
+#   PluginConfig fallback. Hardcoded "overheat-alert@strudwick.co.uk" removed
+#   from plugin.py (2 places) and PluginConfig.xml defaultValue.
+# - Location (lat/lon) moved to IndigoSecrets.LATITUDE / LONGITUDE with
+#   PluginConfig fallback. Hardcoded 54.882 / -1.818 removed.
+# - Ecowitt outdoor + indoor device ID defaults removed from PluginConfig.xml
+#   (user-specific values — must now be entered or left to plugin defaults).
+# - Removed `_OLD_OVERHEAT_HIST` legacy migration constant pointing at
+#   Indigo 2025.1 — that path no longer exists and the migration is complete.
+# - Silent `except Exception: pass` in Ecowitt indoor/outdoor sensor lookups
+#   now log at debug level (no more silent device-lookup failures).
 
 import os
 import sys
@@ -27,7 +40,7 @@ except ImportError:
     log_startup_banner = None
 
 # ---------------------------------------------------------------------------
-# OWM API key from IndigoSecrets.py (overrides PluginConfig if present)
+# OWM API key from secrets.py (overrides PluginConfig if present)
 # ---------------------------------------------------------------------------
 sys.path.insert(0, "/Library/Application Support/Perceptive Automation")
 try:
@@ -40,6 +53,22 @@ try:
     from IndigoSecrets import PUSHOVER_USER_TOKEN as _SECRETS_PUSHOVER_KEY
 except ImportError:
     _SECRETS_PUSHOVER_KEY = ""
+
+# Overheat alert email — secrets-first, PluginConfig fallback
+try:
+    from IndigoSecrets import OVERHEAT_ALERT_EMAIL as _SECRETS_OVERHEAT_EMAIL
+except ImportError:
+    _SECRETS_OVERHEAT_EMAIL = ""
+
+# Location (lat/lon) — secrets-first, PluginConfig fallback
+try:
+    from IndigoSecrets import LATITUDE as _SECRETS_LATITUDE
+except ImportError:
+    _SECRETS_LATITUDE = None
+try:
+    from IndigoSecrets import LONGITUDE as _SECRETS_LONGITUDE
+except ImportError:
+    _SECRETS_LONGITUDE = None
 
 # ---------------------------------------------------------------------------
 # Plugin modules
@@ -78,7 +107,7 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.3"
+PLUGIN_VERSION  = "1.4"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
@@ -91,10 +120,11 @@ _ECOWITT_INDOOR_DEFAULT  = 1376100918
 _VAR_SOLCAST_TODAY_ID    = 1085965464  # solcast_today_kwh
 _VAR_SOLCAST_TOMORROW_ID = 1029984958  # solcast_tomorrow_kwh
 
-# Legacy cache file paths (Python Scripts folder — migrate on first run)
+# Legacy cache file paths (Python Scripts folder — migrate on first run).
+# Overheat history migration was retired in v1.4 (Indigo 2025.1 install no
+# longer exists; one-time migration already completed for this user).
 _OLD_SETPOINT_CACHE = "/Library/Application Support/Perceptive Automation/Python Scripts/Radiator_setpoint_cache.json"
 _OLD_WEATHER_CACHE  = "/Library/Application Support/Perceptive Automation/Python Scripts/Radiator_weather_cache.json"
-_OLD_OVERHEAT_HIST  = "/Library/Application Support/Perceptive Automation/Indigo 2025.1/Logs/overheat_history.json"
 
 # Daily log file handles (module-level so they survive across _tick() calls)
 _heating_log_fh  = None
@@ -193,10 +223,10 @@ class Plugin(indigo.PluginBase):
 
         run_interval = int(self.pluginPrefs.get("runIntervalMins", 5))
 
-        # OWM API key: IndigoSecrets.py wins over PluginConfig
+        # OWM API key: secrets.py wins over PluginConfig
         owm_key = _SECRETS_OWM_KEY or self.pluginPrefs.get("owmApiKey", "")
         if not owm_key:
-            _log("[Startup] No OWM API key found in IndigoSecrets.py or PluginConfig", level="WARNING")
+            _log("[Startup] No OWM API key found in secrets.py or PluginConfig", level="WARNING")
 
         # Resolve Pushover key
         pushover_key = _SECRETS_PUSHOVER_KEY or self.pluginPrefs.get("pushoverUserKey", "")
@@ -205,11 +235,14 @@ class Plugin(indigo.PluginBase):
         ecowitt_raw    = self.pluginPrefs.get("ecowittDeviceId", "")
         ecowitt_dev_id = int(ecowitt_raw) if ecowitt_raw else None
 
+        lat = _SECRETS_LATITUDE if _SECRETS_LATITUDE is not None else float(self.pluginPrefs.get("owmLatitude", 0.0) or 0.0)
+        lon = _SECRETS_LONGITUDE if _SECRETS_LONGITUDE is not None else float(self.pluginPrefs.get("owmLongitude", 0.0) or 0.0)
+
         self.weather = WeatherData(
             api_key        = owm_key,
             cache_path     = os.path.join(self.data_dir, "weather_cache.json"),
-            lat            = float(self.pluginPrefs.get("owmLatitude",    54.882)),
-            lon            = float(self.pluginPrefs.get("owmLongitude",  -1.818)),
+            lat            = lat,
+            lon            = lon,
             bypass         = self.pluginPrefs.get("weatherBypass", False),
             bypass_temp    = float(self.pluginPrefs.get("weatherBypassTemp", 6.0)),
             ecowitt_dev_id = ecowitt_dev_id,
@@ -221,9 +254,15 @@ class Plugin(indigo.PluginBase):
             run_interval_mins = run_interval,
         )
         self.overheat.pushover_user_key = pushover_key
-        self.overheat.email_address     = self.pluginPrefs.get(
-            "alertEmailAddress", "overheat-alert@strudwick.co.uk"
+        self.overheat.email_address     = (
+            _SECRETS_OVERHEAT_EMAIL or self.pluginPrefs.get("alertEmailAddress", "")
         )
+        if not self.overheat.email_address:
+            _log(
+                "No overheat-alert email configured. Set OVERHEAT_ALERT_EMAIL in "
+                "IndigoSecrets.py OR fill the Alert Email field in Plugin Preferences.",
+                level="ERROR",
+            )
         # Wire up Indigo plugin events for overheat alert / all-clear
         self.overheat.event_callback    = self._fire_event
 
@@ -271,8 +310,8 @@ class Plugin(indigo.PluginBase):
                 self.overheat.pushover_user_key = (
                     _SECRETS_PUSHOVER_KEY or values_dict.get("pushoverUserKey", "")
                 )
-                self.overheat.email_address = values_dict.get(
-                    "alertEmailAddress", "overheat-alert@strudwick.co.uk"
+                self.overheat.email_address = (
+                    _SECRETS_OVERHEAT_EMAIL or values_dict.get("alertEmailAddress", "")
                 )
                 run_interval = int(values_dict.get("runIntervalMins", 5))
                 self.overheat.run_interval_mins        = run_interval
@@ -886,8 +925,8 @@ class Plugin(indigo.PluginBase):
                 out_hum = out_dev.states.get("humidity")
                 if out_hum is not None:
                     _b(f"Ecowitt Humidity              {out_hum}%  (outdoor)")
-            except Exception:
-                pass
+            except Exception as exc:
+                self.logger.debug(f"Ecowitt outdoor humidity lookup failed (dev_id={self.weather.ecowitt_dev_id}): {exc}")
 
         # Ecowitt indoor sensor — pressure + indoor temp/humidity (configurable ID)
         indoor_id_raw = self.pluginPrefs.get("ecowittIndoorDeviceId", str(_ECOWITT_INDOOR_DEFAULT))
@@ -906,8 +945,8 @@ class Plugin(indigo.PluginBase):
                     _b(f"Ecowitt Pressure              {press}{p_unit}")
                 if in_temp is not None and in_hum is not None:
                     _b(f"Ecowitt Indoor                {in_temp}degC  /  {in_hum}% humidity")
-            except Exception:
-                pass
+            except Exception as exc:
+                self.logger.debug(f"Ecowitt indoor sensor lookup failed (dev_id={indoor_id}): {exc}")
 
         # OWM current conditions (reference — always shown for cloud/wind/UV context)
         if self.weather and self.weather.current:
@@ -1119,15 +1158,6 @@ class Plugin(indigo.PluginBase):
                 self.store["last_messages"]  = {}
         except (OSError, ValueError):
             pass  # fresh start — all rooms log once on first cycle
-
-        # --- Overheat history migration ---
-        hist_path = os.path.join(self.data_dir, "overheat_history.json")
-        if not os.path.exists(hist_path) and os.path.exists(_OLD_OVERHEAT_HIST):
-            try:
-                shutil.copy2(_OLD_OVERHEAT_HIST, hist_path)
-                indigo.server.log("[EvoHomeControl] Migrated overheat history from Logs dir")
-            except Exception as e:
-                indigo.server.log(f"[EvoHomeControl] Overheat history migration failed: {e}", level="WARNING")
 
         # --- Timed boost + En Suite morning (plugin_state.json) ---
         state_path = os.path.join(self.data_dir, "plugin_state.json")

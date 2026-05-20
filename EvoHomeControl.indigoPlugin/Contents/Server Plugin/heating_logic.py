@@ -469,10 +469,11 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
 
         new_temp = float(new_temp)
 
-        # Send W 2349 (permanent override) when setpoint changed OR zone_mode drifted
+        # Send W 2349 (permanent override) when setpoint changed OR zoneMode drifted
         # If RAMSES setpoint state is unavailable we still issue the command on
         # first run to ensure the TRV reflects our calculated target.
-        zone_mode     = dev_radiator.states.get("zone_mode", "")
+        # (RAMSES_ESP v1.2.8 renamed zone_mode -> zoneMode.)
+        zone_mode     = dev_radiator.states.get("zoneMode", "")
         not_permanent = (zone_mode != "permanent override")
         changed       = abs(setpoint_before - new_temp) > TEMP_CHANGE_TOLERANCE
         if changed or not_permanent or not setpoint_available:
