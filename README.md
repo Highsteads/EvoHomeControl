@@ -107,6 +107,7 @@ CliveS & Claude (model identity tracked per release in the version history below
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.5.1 | 23-05-2026 | Secrets-policy housekeeping — `weather.py` `OWMWeather` constructor default lat/lon switched from CliveS coords (54.882, -1.818) to `0.0, 0.0`. The plugin startup path always passes real values resolved from `IndigoSecrets` / PluginConfig; the defensive default just stops the developer location leaking if anyone ever instantiates the class directly. No user-visible behaviour change. |
 | 1.5 | 23-05-2026 | En Suite warm-morning skip — if outdoor ≥ 10 °C at 06:00 the morning slot is not activated (radiator stays off, floor heat off, floor thermostat untouched). New `cancelled_reason` value `"warm_outdoor"` and new event-log message code 24. Co-authored with Claude Opus 4.7. |
 | 1.4 | 13-05-2026 | Overheat alert email moved to `IndigoSecrets.OVERHEAT_ALERT_EMAIL`. Location (lat/lon) moved to `IndigoSecrets.LATITUDE/LONGITUDE`. Removed hardcoded Ecowitt device IDs from PluginConfig. Cleaned legacy 2025.1 migration paths. |
 | 1.0 | 15-04-2026 | Initial release — full port from EvoHome_Radiator_Update.py v8.14 with timed boost and En Suite morning schedule |
