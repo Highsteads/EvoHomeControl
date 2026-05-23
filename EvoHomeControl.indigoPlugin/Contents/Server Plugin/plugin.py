@@ -3,9 +3,18 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Sonnet 4.6
-# Date:        13-05-2026
-# Version:     1.4
+# Author:      CliveS & Claude Opus 4.7
+# Date:        23-05-2026
+# Version:     1.5
+#
+# v1.5 (23-05-2026):
+# - En Suite warm-morning skip: at 06:00, if outdoor temperature is at or above
+#   EN_SUITE_WARM_MORNING_THRESHOLD (10 degC) the 22 degC morning slot is not
+#   activated. Radiator stays off (held at RADIATORS_OFF_TEMP by extended
+#   en_suite_special_rules logic for the remainder of 06-10); floor heating
+#   switch is not turned on and floor thermostat is not modified. New
+#   cancellation reason "warm_outdoor" set in store. New message code 24
+#   ("Warm morning skip") logged for the radiator state.
 #
 # v1.4 (13-05-2026):
 # - Overheat alert email moved to IndigoSecrets.OVERHEAT_ALERT_EMAIL with
@@ -100,6 +109,7 @@ from heating_logic    import (
     DEV_LIVING_ROOM_DOOR_ID, DEV_LIVING_ROOM_FRONT_ID, DEV_UTILITY_ROOM_ID,
     OUTDOOR_TEMP_TRIGGER,
     EN_SUITE_MORNING_TEMP,
+    EN_SUITE_WARM_MORNING_THRESHOLD,
 )
 import schedules
 
@@ -107,7 +117,7 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.4"
+PLUGIN_VERSION  = "1.5"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
@@ -676,6 +686,28 @@ class Plugin(indigo.PluginBase):
         if (6 <= hour < 10
                 and not self.store["en_suite_morning_active"]
                 and not cancelled_today):
+
+            # Warm-morning skip: if outdoor temperature is at/above the warm
+            # threshold at activation time, the en suite room is already
+            # comfortable and the floor is not cold to the touch. Skip the
+            # 22degC morning slot entirely — radiator stays off, floor switch
+            # stays off, floor thermostat is not touched. en_suite_special_rules
+            # forces the radiator to RADIATORS_OFF_TEMP for the remaining 06-10
+            # hours (otherwise the schedule's 19-20degC values would still run).
+            outdoor_temp = self.weather.get_outdoor_temp() if self.weather else None
+            if (outdoor_temp is not None
+                    and outdoor_temp >= EN_SUITE_WARM_MORNING_THRESHOLD):
+                self.store["en_suite_morning_cancelled_date"]   = today
+                self.store["en_suite_morning_cancelled_reason"] = "warm_outdoor"
+                _log(
+                    f"[EnSuiteMorning] 6am — outdoor {outdoor_temp:.1f}degC >= "
+                    f"{EN_SUITE_WARM_MORNING_THRESHOLD:.0f}degC: skipping morning "
+                    f"schedule (radiator + floor heat stay off)"
+                )
+                self._save_state()
+                self._fire_event("enSuiteMorningCancelled")
+                return  # Don't activate; don't touch floor switch or thermostat
+
             self.store["en_suite_morning_active"]           = True
             self.store["en_suite_morning_cancelled_reason"] = None
             _log("[EnSuiteMorning] 6am — starting 22degC morning schedule")

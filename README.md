@@ -1,8 +1,8 @@
 # EvoHome Heating Controller
 
-An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the Home Assistant Agent plugin.
+An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) bridge plugin.
 
-Converted from a scheduled Python script to a persistent plugin, adding timed boost, En Suite morning schedule, and window-aware floor heating control.
+Converted from a scheduled Python script to a persistent plugin, adding timed boost, En Suite morning schedule, warm-morning skip, and window-aware floor heating control.
 
 ## Features
 
@@ -10,7 +10,7 @@ Converted from a scheduled Python script to a persistent plugin, adding timed bo
 - **Overheat prevention** — detects rooms overheating and reduces setpoints; 3-tier logic (predictive, trigger, hysteresis)
 - **Window/door detection** — closes valves when windows or doors are open; restores on close
 - **Timed boost** — raise Dining Room, Living Room (door + front), and Hall Kitchen by +2°C for 1 or 2 hours; auto-reverts at expiry
-- **En Suite morning schedule** — automatic 22°C from 06:00–10:00 daily with floor heating; cancelled immediately if En Suite window opens
+- **En Suite morning schedule** — automatic 22°C from 06:00–10:00 daily with floor heating; cancelled immediately if En Suite window opens; **also skipped entirely on warm mornings** (outdoor ≥ 10 °C at 06:00 → radiator stays off, floor heat not turned on)
 - **Weather integration** — OpenWeatherMap API with local Ecowitt bypass option
 - **Away / Both-Out / Guest modes** — freeze protection and alternative schedules
 - **Daily rotating logs** — append-only daily log files with 14-day retention
@@ -18,9 +18,10 @@ Converted from a scheduled Python script to a persistent plugin, adding timed bo
 
 ## Requirements
 
-- Indigo 2022.1 or later (Python 3.10+)
-- Home Assistant Agent plugin (for Evohome TRV control via RAMSES-II)
+- Indigo 2025.2 or later (Python 3.13)
+- [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) plugin (for Evohome TRV control via RAMSES-II — replaces the earlier HA Agent dependency)
 - OpenWeatherMap API key (free tier sufficient)
+- Ecowitt outdoor weather sensor (optional but recommended — used by warm-morning skip and overheat logic)
 - Pushover plugin (optional, for alerts)
 - Email+ plugin (optional, for alerts)
 
@@ -71,6 +72,19 @@ pointing the user to either fill in the matching field or add the key to
 - Auto-expires at **10:00** if window was never opened
 - Resets at midnight — active again the following morning
 
+### Warm-morning skip (v1.5+)
+
+At 06:00 the plugin checks the current outdoor temperature. If it is at or above the warm-morning threshold (**10 °C**, hardcoded in `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD`):
+
+- The 22 °C morning slot is **not activated** — `enSuiteMorningActive` stays `false`
+- The floor heating switch is **not turned on**
+- The floor thermostat is **not modified**
+- The radiator is held at **8 °C** (`RADIATORS_OFF_TEMP`) for the remainder of 06:00–09:59 — otherwise the schedule's 19–20 °C values for those hours would still run
+- `cancelled_reason` in plugin state is set to `"warm_outdoor"` (visible via `_log_modes_section`)
+- Event log shows: `Warm morning skip  (out >=10degC, rad+floor off)` (message code 24)
+
+If outdoor drops below 10 °C on a cold morning, the normal 22 °C slot runs as usual. The threshold is a single constant — edit `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD` to tune for a different installation.
+
 ## Device States
 
 The `heatingController` device exposes these states in Indigo:
@@ -87,10 +101,12 @@ The `heatingController` device exposes these states in Indigo:
 
 ## Author
 
-CliveS & Claude Sonnet 4.6
+CliveS & Claude (model identity tracked per release in the version history below)
 
 ## Version History
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.5 | 23-05-2026 | En Suite warm-morning skip — if outdoor ≥ 10 °C at 06:00 the morning slot is not activated (radiator stays off, floor heat off, floor thermostat untouched). New `cancelled_reason` value `"warm_outdoor"` and new event-log message code 24. Co-authored with Claude Opus 4.7. |
+| 1.4 | 13-05-2026 | Overheat alert email moved to `IndigoSecrets.OVERHEAT_ALERT_EMAIL`. Location (lat/lon) moved to `IndigoSecrets.LATITUDE/LONGITUDE`. Removed hardcoded Ecowitt device IDs from PluginConfig. Cleaned legacy 2025.1 migration paths. |
 | 1.0 | 15-04-2026 | Initial release — full port from EvoHome_Radiator_Update.py v8.14 with timed boost and En Suite morning schedule |

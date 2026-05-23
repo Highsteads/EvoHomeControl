@@ -124,10 +124,18 @@ OVERHEAT_EXCLUDED_ROOMS = {"Bedroom 3"}
 # 17=overheat (radiator contributing)  19=window/door closed  20=window open (reduced)
 # 21=door open (reduced)  22=En Suite morning schedule
 # 23=above target (passive warmth — solar/internal gain, valve has been off 3+ cycles)
-ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23}
+# 24=En Suite warm-morning skip (radiator off + floor heat suppressed)
+ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23, 24}
 
 # En Suite morning schedule temperature
 EN_SUITE_MORNING_TEMP = 22.0
+
+# Outdoor temperature at 06:00 above which the En Suite morning schedule is
+# skipped entirely (radiator stays off AND floor heat is not turned on).
+# Set lower than OUTDOOR_TEMP_TRIGGER (14.0) because that threshold rarely
+# fires at 6am even on warm days. 10.0 catches genuinely warm mornings where
+# the room is already comfortable and the floor isn't cold to the touch.
+EN_SUITE_WARM_MORNING_THRESHOLD = 10.0
 
 # ---------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -396,6 +404,7 @@ def get_log_message(message_code, room_name, current_setpoint, new_temp,
         20: "Window open        (valve reduced)",
         21: "Door open          (valve reduced)",
         22: "En Suite morning   (22degC)",
+        24: f"Warm morning skip  (out >={EN_SUITE_WARM_MORNING_THRESHOLD:.0f}degC, rad+floor off)",
     }
 
     action = action_map.get(message_code, "Status update")
@@ -554,15 +563,33 @@ def en_suite_special_rules(temp, msg, windows_open, doors_open,
       - en_suite_morning_active flag is set in store
       - window is closed (contact state True)
 
-    Window open: cancels morning schedule for the rest of today.
-    Returns (temp, msg) — if window is open, returns unchanged so the
-    standard windows_open branch in process_room_temperature closes the
-    valve and turns off floor heating via the floor_heat_device parameter.
+    Cancellation reasons (set in store["en_suite_morning_cancelled_reason"]):
+      - "window_open"   — window opened during the morning slot
+      - "warm_outdoor"  — outdoor temp was at/above EN_SUITE_WARM_MORNING_THRESHOLD
+                          at 06:00; orchestrator never activated morning today
+      - "10am_expired"  — normal end-of-window auto-cancel
+
+    For "warm_outdoor", this function ALSO forces the radiator to
+    RADIATORS_OFF_TEMP during 06-10 — the En Suite schedule's non-morning
+    value in those hours is 19-20°C which is still unwanted on a warm day.
+
+    Returns (temp, msg). If window is open during active morning, returns
+    unchanged so the standard windows_open branch in process_room_temperature
+    closes the valve and turns off floor heating via floor_heat_device.
     """
     if store is None:
         return temp, msg
 
-    morning_active = store.get("en_suite_morning_active", False)
+    morning_active   = store.get("en_suite_morning_active", False)
+    cancelled_reason = store.get("en_suite_morning_cancelled_reason")
+
+    # Warm-morning cancellation: keep radiator off during the would-be morning
+    # hours even though the active flag is already False. The orchestrator in
+    # plugin.py set this reason BEFORE activation; floor heat was never turned on.
+    if (not morning_active
+            and cancelled_reason == "warm_outdoor"
+            and 6 <= hour < 10):
+        return RADIATORS_OFF_TEMP, 24  # message 24 = warm-morning skip
 
     # Check En Suite window contact sensor directly
     window_open = _contact_is_open(DEV_EN_SUITE_WINDOW_ID)
