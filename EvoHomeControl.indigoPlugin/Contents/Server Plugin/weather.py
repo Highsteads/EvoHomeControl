@@ -32,9 +32,14 @@ class WeatherData:
       2. bypass_temp
     """
 
-    def __init__(self, api_key, cache_path, lat=54.882, lon=-1.818,
+    def __init__(self, api_key, cache_path, lat=0.0, lon=0.0,
                  bypass=False, bypass_temp=6.0, cache_ttl_secs=900,
                  ecowitt_dev_id=None):
+        # NOTE: lat/lon default to 0.0/0.0 (Null Island) on purpose — callers
+        # are expected to pass real coordinates resolved from IndigoSecrets
+        # or PluginConfig. The plugin's startup path always does so; the
+        # defensive default just avoids leaking the developer's home
+        # coordinates if anyone instantiates this class directly.
         self.api_key        = api_key
         self.cache_path     = cache_path
         self.api_url        = (

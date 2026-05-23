@@ -5,7 +5,12 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.7
 # Date:        23-05-2026
-# Version:     1.5
+# Version:     1.5.1
+#
+# v1.5.1 (23-05-2026): weather.py OWMWeather default lat/lon switched from
+#                       Clive's Medomsley coords (54.882, -1.818) to 0.0, 0.0
+#                       so direct instantiation no longer leaks the developer
+#                       location. Plugin startup path always passes real values.
 #
 # v1.5 (23-05-2026):
 # - En Suite warm-morning skip: at 06:00, if outdoor temperature is at or above
