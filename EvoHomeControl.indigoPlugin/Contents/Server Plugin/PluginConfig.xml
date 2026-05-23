@@ -43,7 +43,7 @@
         <Label>OVERHEAT ALERTS</Label>
     </Field>
     <Field id="pushoverUserKey" type="textfield" defaultValue="">
-        <Label>Pushover user key (leave blank to use secrets.py):</Label>
+        <Label>Pushover user key (leave blank to use IndigoSecrets.py):</Label>
     </Field>
     <Field id="alertEmailAddress" type="textfield" defaultValue="">
         <Label>Overheat alert email (fallback if OVERHEAT_ALERT_EMAIL not in IndigoSecrets):</Label>
