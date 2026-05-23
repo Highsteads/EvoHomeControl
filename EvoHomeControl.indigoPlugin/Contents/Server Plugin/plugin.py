@@ -5,7 +5,12 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.7
 # Date:        23-05-2026
-# Version:     1.5.1
+# Version:     1.5.2
+#
+# v1.5.2 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
+# log line via plugin_utils.install_timestamp_filter() — matches Device
+# Activity Monitor convention. Module-level _log helper already used ms
+# precision. New "Toggle Timestamps in Log" menu item.
 #
 # v1.5.1 (23-05-2026): weather.py OWMWeather default lat/lon switched from
 #                       Clive's Medomsley coords (54.882, -1.818) to 0.0, 0.0
@@ -52,6 +57,10 @@ try:
     from plugin_utils import log_startup_banner
 except ImportError:
     log_startup_banner = None
+try:
+    from plugin_utils import install_timestamp_filter
+except ImportError:
+    install_timestamp_filter = None
 
 # ---------------------------------------------------------------------------
 # OWM API key from IndigoSecrets.py (overrides PluginConfig if present)
@@ -122,7 +131,7 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.5"
+PLUGIN_VERSION  = "1.5.2"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
@@ -149,7 +158,7 @@ _log_date        = None
 
 def _log(message, level="INFO"):
     """Log with timestamp to Indigo event log."""
-    indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", level=level)
+    indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {message}", level=level)
 
 
 def _wind_compass(degrees):
@@ -168,6 +177,12 @@ class Plugin(indigo.PluginBase):
 
     def __init__(self, plugin_id, plugin_display_name, plugin_version, plugin_prefs):
         super().__init__(plugin_id, plugin_display_name, plugin_version, plugin_prefs)
+
+        self.timestamp_enabled = bool(plugin_prefs.get("timestampEnabled", True))
+        if install_timestamp_filter:
+            self._ts_filter = install_timestamp_filter(self, enabled=self.timestamp_enabled)
+        else:
+            self._ts_filter = None
 
         if log_startup_banner:
             log_startup_banner(plugin_id, plugin_display_name, plugin_version)
@@ -1398,9 +1413,21 @@ class Plugin(indigo.PluginBase):
 
     def showPluginInfo(self, values_dict=None, type_id=None):
         """Menu: Re-display startup banner and current status."""
+        extras = [("Timestamps in Log:", "ON" if self.timestamp_enabled else "OFF")]
         if log_startup_banner:
-            log_startup_banner(self.pluginId, self.pluginDisplayName, self.pluginVersion)
+            log_startup_banner(self.pluginId, self.pluginDisplayName, self.pluginVersion, extras=extras)
         else:
             _log(f"{self.pluginDisplayName} v{self.pluginVersion}")
+            for label, value in extras:
+                _log(f"  {label} {value}")
         # Also show current status
         self.menuShowStatus(values_dict, type_id)
+
+    def menuToggleTimestamps(self, values_dict=None, type_id=None):
+        self.timestamp_enabled = not self.timestamp_enabled
+        self.pluginPrefs["timestampEnabled"] = self.timestamp_enabled
+        if self._ts_filter:
+            self._ts_filter.enabled = self.timestamp_enabled
+        state = "ON" if self.timestamp_enabled else "OFF"
+        indigo.server.log(f"[{self.pluginDisplayName}] Timestamps in Log -> {state}")
+        return True
