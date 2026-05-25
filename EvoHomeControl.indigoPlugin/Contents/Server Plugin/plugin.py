@@ -5,7 +5,7 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.7
 # Date:        23-05-2026
-# Version:     1.5.2
+# Version:     1.5.3
 #
 # v1.5.2 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
 # log line via plugin_utils.install_timestamp_filter() — matches Device
@@ -131,7 +131,7 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.5.2"
+PLUGIN_VERSION  = "1.5.3"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
@@ -324,6 +324,17 @@ class Plugin(indigo.PluginBase):
 
     def deviceStopComm(self, dev):
         pass
+
+    @staticmethod
+    def didDeviceCommPropertyChange(oldDevice, newDevice):
+        """Suppress unnecessary deviceStopComm/deviceStartComm cycles.
+
+        Devices in this plugin are created and managed internally; there are
+        no user-editable pluginProps that justify a comm restart. Returning
+        False prevents Indigo from cycling comm on every internal
+        replacePluginPropsOnServer write.
+        """
+        return False
 
     def closedPrefsConfigUi(self, values_dict, user_cancelled):
         if not user_cancelled:
