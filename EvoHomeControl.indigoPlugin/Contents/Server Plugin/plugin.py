@@ -184,10 +184,7 @@ class Plugin(indigo.PluginBase):
         else:
             self._ts_filter = None
 
-        if log_startup_banner:
-            log_startup_banner(plugin_id, plugin_display_name, plugin_version)
-        else:
-            indigo.server.log(f"{plugin_display_name} v{plugin_version} starting")
+        # Startup banner moved to showPluginInfo on demand (revised 25-May-2026 per Jay).
 
         # Library check happens here (not startup()) so a missing dependency
         # aborts before any half-initialised state is created.
