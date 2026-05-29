@@ -639,6 +639,11 @@ def process_room_temperature(
         # When En Suite morning schedule is active, pass EN_SUITE_MORNING_TEMP (22°C)
         # so the room is only flagged as overheating if it exceeds 22°C, not 18°C.
         overheat_target_override=None,
+        # Force this room's line into the hourly full event-log dump. When None
+        # (caller did not specify) fall back to the legacy minute == 0 gate.
+        # The plugin passes the clock-hour-change flag here so the dump is not
+        # lost to heating-cycle drift past the :00 boundary.
+        force_log_override=None,
 ):
     """
     Process temperature update for one room.
@@ -890,5 +895,6 @@ def process_room_temperature(
         last_setpoints, last_messages,
         log_buffer, changes_buffer,
         dev_temp, original_scheduled_temp, overheat_amount,
-        force_log=(current_minute == 0),
+        force_log=(force_log_override if force_log_override is not None
+                   else (current_minute == 0)),
     )

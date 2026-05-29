@@ -3,9 +3,17 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Opus 4.7
-# Date:        23-05-2026
-# Version:     1.5.3
+# Author:      CliveS & Claude Opus 4.8
+# Date:        29-05-2026
+# Version:     1.5.4
+#
+# v1.5.4 (29-05-2026): Hourly event-log dump (weather header + full room
+# table) now fires on the first cycle of each new clock hour instead of
+# gating on minute == 0. The heating cycle is dispatched on a time-delta and
+# drifts ~10-12s/hour, so the old minute == 0 gate was missed for whole days
+# once the firing phase crept past the :00 boundary — the hourly radiator
+# report silently stopped a few hours after every restart. Tracking the clock
+# hour is immune to that drift and to any runIntervalMins value.
 #
 # v1.5.2 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
 # log line via plugin_utils.install_timestamp_filter() — matches Device
@@ -131,7 +139,7 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.5.3"
+PLUGIN_VERSION  = "1.5.4"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
@@ -202,6 +210,11 @@ class Plugin(indigo.PluginBase):
 
         # Poll timer
         self.store["last_heating_cycle"] = 0.0
+
+        # Clock hour of the last hourly event-log dump (header + full room
+        # table). Tracked by clock hour rather than gating on minute == 0 so
+        # the dump cannot be lost to cycle drift — see _run_heating_cycle.
+        self.store["last_header_hour"] = None
 
         # Mode flags (read from Indigo variables each cycle)
         self.store["is_away"]     = False
@@ -433,20 +446,28 @@ class Plugin(indigo.PluginBase):
         # Update high/low temperature records
         self._update_temp_records(outdoor_temp)
 
-        # Hourly full log header (minute == 0)
-        if minute == 0:
+        # Hourly full event-log dump (header + full room table). Fire on the
+        # FIRST cycle of each new clock hour rather than gating on minute == 0:
+        # the cycle is dispatched on a time-delta and drifts ~10-12s/hour, so a
+        # minute == 0 gate is missed for whole days once the phase creeps past
+        # the :00 boundary. Tracking the clock hour is immune to that drift and
+        # to any runIntervalMins value.
+        do_hourly = (self.store.get("last_header_hour") != hour)
+        if do_hourly:
             self._log_hourly_header(outdoor_temp, temp_offset)
+            self.store["last_header_hour"] = hour
 
         # Process all 12 rooms
         run_interval = int(self.pluginPrefs.get("runIntervalMins", 5))
-        self._process_all_rooms(hour, minute, temp_offset, outdoor_temp, run_interval)
+        self._process_all_rooms(hour, minute, temp_offset, outdoor_temp, run_interval,
+                                force_hourly=do_hourly)
 
         # Save state
         self.overheat.save_history()
         self._save_setpoint_cache()
 
         # Write log files
-        self._flush_log_buffers(minute)
+        self._flush_log_buffers(do_hourly)
 
         # Update heatingController device states
         self._update_controller_device(outdoor_temp, temp_offset)
@@ -454,8 +475,14 @@ class Plugin(indigo.PluginBase):
         if self.debug:
             _log(f"[Debug] Cycle complete — {datetime.now().strftime('%H:%M:%S')}")
 
-    def _process_all_rooms(self, hour, minute, temp_offset, outdoor_temp, run_interval):
-        """Dispatch process_room_temperature() for all 12 RAMSES zones."""
+    def _process_all_rooms(self, hour, minute, temp_offset, outdoor_temp, run_interval,
+                           force_hourly=False):
+        """Dispatch process_room_temperature() for all 12 RAMSES zones.
+
+        force_hourly: when True this is the first cycle of a new clock hour, so
+        every room's line is forced to the event log (the hourly full dump),
+        regardless of the wall-clock minute.
+        """
         guest_2 = self.store["is_guest_2"]
         guest_3 = self.store["is_guest_3"]
         guest_active = guest_2 or guest_3
@@ -479,6 +506,7 @@ class Plugin(indigo.PluginBase):
             run_interval_mins    = run_interval,
             timed_boost_active   = self.store["timed_boost_active"],
             timed_boost_rooms    = schedules.TIMED_BOOST_ROOMS,
+            force_log_override   = force_hourly,
         )
 
         # 1. Bathroom
@@ -1146,8 +1174,14 @@ class Plugin(indigo.PluginBase):
         except Exception as e:
             _log(f"[Logs] Purge error: {e}", level="WARNING")
 
-    def _flush_log_buffers(self, minute):
-        """Write accumulated log and changes buffers to daily log files."""
+    def _flush_log_buffers(self, is_hourly):
+        """Write accumulated log and changes buffers to daily log files.
+
+        is_hourly: True on the first cycle of a new clock hour. On the hourly
+        dump the table header is already present in log_buffer (added by
+        _log_hourly_header), so it is not written again; on non-hourly cycles
+        the header line is prepended here so each block is self-describing.
+        """
         try:
             self._ensure_logs()
         except Exception as e:
@@ -1159,7 +1193,7 @@ class Plugin(indigo.PluginBase):
 
         if log_buf and _heating_log_fh:
             try:
-                if minute != 0:
+                if not is_hourly:
                     _heating_log_fh.write("Room               Current   Schedule    New     Action\n")
                     _heating_log_fh.write("=" * 80 + "\n")
                 _heating_log_fh.write(datetime.now().strftime("%d %b %Y at %H:%M:%S") + "\n")
