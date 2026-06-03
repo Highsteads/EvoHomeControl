@@ -54,10 +54,12 @@ DEV_UTILITY_ROOM_ID        = 1376483274  # Zone  8
 VAR_BOTH_OUT_ID            = 901855906
 VAR_GUEST_2_ID             = 127473296
 VAR_GUEST_3_ID             = 785954068
-VAR_AV_OUT_TEMP_HI_ID      = 1680034901
-VAR_AV_OUT_TEMP_HI_TIME_ID = 1668580986
-VAR_AV_OUT_TEMP_LO_ID      = 94565580
-VAR_AV_OUT_TEMP_LO_TIME_ID = 50347848
+# Referenced by NAME (not id) so recreating the variable can't break the link.
+# get_variable_value / update_variable both accept a name or an id.
+VAR_AV_OUT_TEMP_HI_ID      = "Average_Outside_Temp_Highest"
+VAR_AV_OUT_TEMP_HI_TIME_ID = "Average_Outside_Temp_Highest_Time"
+VAR_AV_OUT_TEMP_LO_ID      = "Average_Outside_Temp_Lowest"
+VAR_AV_OUT_TEMP_LO_TIME_ID = "Average_Outside_Temp_Lowest_Time"
 VAR_TEMP_OFFSET_ID         = 1079983379
 VAR_HOME_AWAY_ID           = 437369347
 VAR_BOOST_ID               = 1067614282

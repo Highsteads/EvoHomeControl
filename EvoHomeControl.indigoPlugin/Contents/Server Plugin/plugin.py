@@ -4,8 +4,15 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
-# Date:        29-05-2026
-# Version:     1.5.4
+# Date:        03-06-2026
+# Version:     1.5.5
+#
+# v1.5.5 (03-06-2026): Outdoor-temp high/low record variables are now referenced
+# by NAME, not hard-coded id (Average_Outside_Temp_Highest / _Highest_Time /
+# _Lowest / _Lowest_Time). The hard-coded ids broke when those variables were
+# recreated, spamming "could not find ... element ID" errors every cycle. The
+# get_variable_value / update_variable helpers already accept a name, so by-name
+# lookup is immune to future id changes. Records feature only — no heating impact.
 #
 # v1.5.4 (29-05-2026): Hourly event-log dump (weather header + full room
 # table) now fires on the first cycle of each new clock hour instead of
@@ -139,7 +146,7 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.5.4"
+PLUGIN_VERSION  = "1.5.5"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
