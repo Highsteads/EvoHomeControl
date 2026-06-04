@@ -146,7 +146,7 @@ EN_SUITE_WARM_MORNING_THRESHOLD = 10.0
 def _log(message, level="INFO", log_buffer=None, file_only=False):
     """Log to Indigo event log and optionally to a buffer list.
     file_only=True suppresses the Indigo event log; data still goes to log_buffer."""
-    formatted = f"[{dt.now().strftime('%H:%M:%S')}] {message}"
+    formatted = f"[{dt.now().strftime('%H:%M:%S.%f')[:-3]}] {message}"
     if not file_only:
         indigo.server.log(formatted, level=level)
     if log_buffer is not None:
@@ -501,7 +501,7 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
             reason   = get_reason_line(message, new_temp, overheat_amount).strip()
             before_s = f"{setpoint_before:.1f}" if setpoint_before else "??"
             changes_buffer.append(
-                f"[{dt.now().strftime('%H:%M:%S')}] {room_name:<20s}  "
+                f"[{dt.now().strftime('%H:%M:%S.%f')[:-3]}] {room_name:<20s}  "
                 f"{before_s} -> {new_temp:.1f}  {reason}"
             )
 

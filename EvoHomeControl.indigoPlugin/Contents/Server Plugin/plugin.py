@@ -4,8 +4,8 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
-# Date:        03-06-2026
-# Version:     1.5.5
+# Date:        04-06-2026
+# Version:     1.5.6
 #
 # v1.5.5 (03-06-2026): Outdoor-temp high/low record variables are now referenced
 # by NAME, not hard-coded id (Average_Outside_Temp_Highest / _Highest_Time /
@@ -146,7 +146,7 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.5.5"
+PLUGIN_VERSION  = "1.5.6"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
@@ -980,7 +980,7 @@ class Plugin(indigo.PluginBase):
           _log_modes_section    - per-mode active/inactive + overheat status
         """
         def _b(msg, level="INFO"):
-            formatted = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+            formatted = f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}"
             indigo.server.log(formatted, level=level)
             self.store["log_buffer"].append(formatted)
 
