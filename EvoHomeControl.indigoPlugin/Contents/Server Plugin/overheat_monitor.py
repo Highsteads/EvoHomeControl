@@ -331,7 +331,7 @@ class OverheatMonitor:
                 "msgTitle":        title,
                 "msgBody":         message,
                 "msgSound":        "vibrate",
-                "msgPriority":     priority,
+                "msgPriority":     str(priority),
                 "msgDevice":       "",
                 "msgSupLinkUrl":   "",
                 "msgSupLinkTitle": "",

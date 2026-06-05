@@ -5,7 +5,7 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
 # Date:        04-06-2026
-# Version:     1.5.6
+# Version:     1.5.7
 #
 # v1.5.5 (03-06-2026): Outdoor-temp high/low record variables are now referenced
 # by NAME, not hard-coded id (Average_Outside_Temp_Highest / _Highest_Time /
@@ -146,8 +146,25 @@ import schedules
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.5.6"
+PLUGIN_VERSION  = "1.5.7"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
+
+
+def _safe_float(value, default=0.0):
+    """Coerce a config value to float, falling back to default on blank/non-numeric input.
+    Config textfields come back as strings (and can be blank), so float() must be guarded."""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_int(value, default=None):
+    """Coerce a config value to int, returning default on blank/non-numeric input."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
 #   ecowittDeviceId        (outdoor sensor)
@@ -280,10 +297,10 @@ class Plugin(indigo.PluginBase):
 
         # Weather module
         ecowitt_raw    = self.pluginPrefs.get("ecowittDeviceId", "")
-        ecowitt_dev_id = int(ecowitt_raw) if ecowitt_raw else None
+        ecowitt_dev_id = _safe_int(ecowitt_raw, None) if ecowitt_raw else None
 
-        lat = _SECRETS_LATITUDE if _SECRETS_LATITUDE is not None else float(self.pluginPrefs.get("owmLatitude", 0.0) or 0.0)
-        lon = _SECRETS_LONGITUDE if _SECRETS_LONGITUDE is not None else float(self.pluginPrefs.get("owmLongitude", 0.0) or 0.0)
+        lat = _SECRETS_LATITUDE if _SECRETS_LATITUDE is not None else _safe_float(self.pluginPrefs.get("owmLatitude"), 0.0)
+        lon = _SECRETS_LONGITUDE if _SECRETS_LONGITUDE is not None else _safe_float(self.pluginPrefs.get("owmLongitude"), 0.0)
 
         self.weather = WeatherData(
             api_key        = owm_key,
@@ -291,7 +308,7 @@ class Plugin(indigo.PluginBase):
             lat            = lat,
             lon            = lon,
             bypass         = self.pluginPrefs.get("weatherBypass", False),
-            bypass_temp    = float(self.pluginPrefs.get("weatherBypassTemp", 6.0)),
+            bypass_temp    = _safe_float(self.pluginPrefs.get("weatherBypassTemp"), 6.0),
             ecowitt_dev_id = ecowitt_dev_id,
         )
 
