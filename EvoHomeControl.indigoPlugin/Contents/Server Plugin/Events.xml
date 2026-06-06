@@ -36,4 +36,14 @@
         <Name>En Suite Morning Cancelled</Name>
     </Event>
 
+    <!-- Fired when the 24h whole-house force-on override starts -->
+    <Event id="summerForceStarted">
+        <Name>Summer Force-On Started</Name>
+    </Event>
+
+    <!-- Fired when the 24h force-on ends (expired or cancelled) -->
+    <Event id="summerForceEnded">
+        <Name>Summer Force-On Ended</Name>
+    </Event>
+
 </Events>

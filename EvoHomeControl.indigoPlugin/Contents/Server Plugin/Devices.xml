@@ -54,6 +54,11 @@
                 <TriggerLabel>En Suite morning mode changed</TriggerLabel>
                 <ControlPageLabel>En Suite Morning Active</ControlPageLabel>
             </State>
+            <State id="summerStatus">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Summer shut-off status changed</TriggerLabel>
+                <ControlPageLabel>Summer Shut-off Status</ControlPageLabel>
+            </State>
             <State id="overheatRooms">
                 <ValueType>String</ValueType>
                 <TriggerLabel>Overheating rooms changed</TriggerLabel>

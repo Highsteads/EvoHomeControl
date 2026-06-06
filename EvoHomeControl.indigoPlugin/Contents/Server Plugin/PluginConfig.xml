@@ -89,6 +89,91 @@
         </List>
     </Field>
 
+    <Field id="sep_summer" type="separator"/>
+    <Field id="lbl_summer" type="label">
+        <Label>SUMMER SHUT-OFF</Label>
+    </Field>
+    <Field id="lbl_summer_help" type="label">
+        <Label>When enabled, the whole house turns OFF for summer: every radiator is held at the 8 degC frost setpoint and the En Suite floor heating is switched off. Heating is restored automatically on the ON date. Use the "Force Heating On (24 hours)" action or menu item to override for a single day.</Label>
+    </Field>
+    <Field id="summerLockoutEnabled" type="checkbox" defaultValue="true">
+        <Label>Enable summer shut-off:</Label>
+    </Field>
+    <Field id="summerOffStartMonth" type="menu" defaultValue="6"
+           visibleBindingId="summerLockoutEnabled" visibleBindingValue="true">
+        <Label>Shut-off starts — month:</Label>
+        <List>
+            <Option value="1">January</Option>
+            <Option value="2">February</Option>
+            <Option value="3">March</Option>
+            <Option value="4">April</Option>
+            <Option value="5">May</Option>
+            <Option value="6">June</Option>
+            <Option value="7">July</Option>
+            <Option value="8">August</Option>
+            <Option value="9">September</Option>
+            <Option value="10">October</Option>
+            <Option value="11">November</Option>
+            <Option value="12">December</Option>
+        </List>
+    </Field>
+    <Field id="summerOffStartDay" type="menu" defaultValue="1"
+           visibleBindingId="summerLockoutEnabled" visibleBindingValue="true">
+        <Label>Shut-off starts — day:</Label>
+        <List>
+            <Option value="1">1</Option><Option value="2">2</Option><Option value="3">3</Option>
+            <Option value="4">4</Option><Option value="5">5</Option><Option value="6">6</Option>
+            <Option value="7">7</Option><Option value="8">8</Option><Option value="9">9</Option>
+            <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
+            <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
+            <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
+            <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
+            <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
+            <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
+            <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
+            <Option value="31">31</Option>
+        </List>
+    </Field>
+    <Field id="summerOnMonth" type="menu" defaultValue="9"
+           visibleBindingId="summerLockoutEnabled" visibleBindingValue="true">
+        <Label>Heating returns — month:</Label>
+        <List>
+            <Option value="1">January</Option>
+            <Option value="2">February</Option>
+            <Option value="3">March</Option>
+            <Option value="4">April</Option>
+            <Option value="5">May</Option>
+            <Option value="6">June</Option>
+            <Option value="7">July</Option>
+            <Option value="8">August</Option>
+            <Option value="9">September</Option>
+            <Option value="10">October</Option>
+            <Option value="11">November</Option>
+            <Option value="12">December</Option>
+        </List>
+    </Field>
+    <Field id="summerOnDay" type="menu" defaultValue="30"
+           visibleBindingId="summerLockoutEnabled" visibleBindingValue="true">
+        <Label>Heating returns — day:</Label>
+        <List>
+            <Option value="1">1</Option><Option value="2">2</Option><Option value="3">3</Option>
+            <Option value="4">4</Option><Option value="5">5</Option><Option value="6">6</Option>
+            <Option value="7">7</Option><Option value="8">8</Option><Option value="9">9</Option>
+            <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
+            <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
+            <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
+            <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
+            <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
+            <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
+            <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
+            <Option value="31">31</Option>
+        </List>
+    </Field>
+    <Field id="lbl_summer_note" type="label"
+           visibleBindingId="summerLockoutEnabled" visibleBindingValue="true">
+        <Label>The "returns" date is the day heating comes back on — e.g. 30 September means off 1 June to 29 September inclusive, normal heating from 30 September.</Label>
+    </Field>
+
     <Field id="sep_debug" type="separator"/>
     <Field id="showDebugInfo" type="checkbox" defaultValue="false">
         <Label>Enable debug logging:</Label>

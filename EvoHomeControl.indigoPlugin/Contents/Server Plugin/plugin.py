@@ -4,8 +4,19 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
-# Date:        04-06-2026
-# Version:     1.5.7
+# Date:        06-06-2026
+# Version:     1.6.0
+#
+# v1.6.0 (06-06-2026): Whole-house summer shut-off. When enabled (PluginConfig,
+# default 1 Jun -> 30 Sep) every radiator is held at RADIATORS_OFF_TEMP (8 degC)
+# and the En Suite floor heating is switched off; the normal per-room cycle and
+# the En Suite morning boost are skipped while the window is active. A 24-hour
+# "Force Heating On" action / menu item overrides the shut-off and restores
+# fully normal heating, auto-reverting after 24h. The force expiry is persisted
+# to plugin_state.json so it survives a plugin restart. New plugin-level actions
+# forceHeatingOn24h / cancelForcedHeating, three menu items, two custom events
+# (summerForceStarted / summerForceEnded) and a summerStatus device state. The
+# off-window dates are configurable in PluginConfig with a master enable toggle.
 #
 # v1.5.5 (03-06-2026): Outdoor-temp high/low record variables are now referenced
 # by NAME, not hard-coded id (Average_Outside_Temp_Highest / _Highest_Time /
@@ -139,14 +150,22 @@ from heating_logic    import (
     OUTDOOR_TEMP_TRIGGER,
     EN_SUITE_MORNING_TEMP,
     EN_SUITE_WARM_MORNING_THRESHOLD,
+    ALL_RADIATOR_IDS,
+    RADIATORS_OFF_TEMP,
+    TEMP_CHANGE_TOLERANCE,
+    is_within_summer_off,
 )
 import schedules
+
+# Short month labels for summer-window status strings (index 1-12)
+_MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.5.7"
+PLUGIN_VERSION  = "1.6.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
@@ -252,6 +271,12 @@ class Plugin(indigo.PluginBase):
         self.store["timed_boost_expiry"]  = None   # datetime object or None
         self.store["timed_boost_hours"]   = 0      # 1 or 2
 
+        # Whole-house summer shut-off: 24h force-on override state.
+        # When active, the seasonal lockout yields and normal heating resumes
+        # until the expiry datetime, then auto-reverts to summer-off.
+        self.store["summer_force_active"] = False
+        self.store["summer_force_expiry"] = None   # datetime object or None
+
         # En Suite morning schedule (auto 22°C 06:00-09:59, cancelled by window open)
         self.store["en_suite_morning_active"]           = False
         self.store["en_suite_morning_cancelled_date"]   = None  # "YYYY-MM-DD"
@@ -340,6 +365,7 @@ class Plugin(indigo.PluginBase):
             self._set_device_initial_state(dev)
 
         _log(f"{PLUGIN_NAME} ready (cycle every {run_interval} min, poll every {POLL_SLEEP_SECS}s)")
+        _log(f"[Summer] {self._summer_status_str()}")
 
     def shutdown(self):
         global _heating_log_fh, _changes_log_fh
@@ -413,6 +439,9 @@ class Plugin(indigo.PluginBase):
         """Called every POLL_SLEEP_SECS. Dispatches timed tasks."""
         run_interval_secs = int(self.pluginPrefs.get("runIntervalMins", 5)) * 60
 
+        # Summer 24h force-on expiry check (every tick) — revert to shut-off
+        self._check_summer_force_expiry()
+
         # En Suite morning auto-start / auto-cancel (every tick for responsiveness)
         self._check_en_suite_morning()
 
@@ -437,6 +466,23 @@ class Plugin(indigo.PluginBase):
         # Clear per-run buffers
         self.store["log_buffer"]     = []
         self.store["changes_buffer"] = []
+
+        # ----------------------------------------------------------------
+        # Whole-house summer shut-off gate
+        # ----------------------------------------------------------------
+        # When the seasonal window is active (and no 24h force-on override is
+        # running) skip the entire normal cycle: every radiator is held at
+        # RADIATORS_OFF_TEMP and the En Suite floor heating is off. A concise
+        # status line is logged once per clock hour to avoid 5-min spam.
+        if self._summer_lockout_active():
+            self._apply_summer_off()
+            if self.store.get("last_header_hour") != hour:
+                _log(f"[Summer] Whole-house heating OFF for summer — all radiators "
+                     f"at {RADIATORS_OFF_TEMP:.0f}degC, En Suite floor heat off. "
+                     f"Resumes {self._summer_on_date_str()}.")
+                self.store["last_header_hour"] = hour
+            self._update_controller_device(None, 0.0)
+            return
 
         # Read Indigo mode variables
         self._read_mode_variables()
@@ -678,6 +724,11 @@ class Plugin(indigo.PluginBase):
 
     def _start_timed_boost(self, hours):
         """Activate timed boost for 1 or 2 hours on TIMED_BOOST_ROOMS."""
+        if self._summer_lockout_active():
+            _log("[TimedBoost] Ignored — whole-house summer shut-off is active. "
+                 "Use 'Force Heating On (24h)' first if you need heat now.",
+                 level="WARNING")
+            return
         expiry = datetime.now() + timedelta(hours=hours)
         self.store["timed_boost_active"] = True
         self.store["timed_boost_expiry"] = expiry
@@ -733,6 +784,151 @@ class Plugin(indigo.PluginBase):
             pass  # non-critical
 
     # -----------------------------------------------------------------------
+    # Whole-house summer shut-off
+    # -----------------------------------------------------------------------
+
+    def _summer_enabled(self):
+        """True if the summer shut-off feature is switched on in prefs."""
+        return str(self.pluginPrefs.get("summerLockoutEnabled", True)).lower() in ("true", "1", "yes")
+
+    def _summer_window(self):
+        """Return (start_month, start_day, on_month, on_day) from prefs, coerced.
+
+        Config values round-trip as strings after a dialog save, so every read
+        is funnelled through _safe_int with a sensible default."""
+        start_m = _safe_int(self.pluginPrefs.get("summerOffStartMonth", 6),  6)
+        start_d = _safe_int(self.pluginPrefs.get("summerOffStartDay",   1),  1)
+        on_m    = _safe_int(self.pluginPrefs.get("summerOnMonth",       9),  9)
+        on_d    = _safe_int(self.pluginPrefs.get("summerOnDay",        30), 30)
+        return start_m, start_d, on_m, on_d
+
+    def _summer_lockout_active(self):
+        """True when the whole-house shut-off should be enforced right now:
+        feature enabled, today inside the off-window, and no 24h force override."""
+        if not self._summer_enabled():
+            return False
+        if self.store.get("summer_force_active"):
+            return False
+        start_m, start_d, on_m, on_d = self._summer_window()
+        return is_within_summer_off(datetime.now().date(), start_m, start_d, on_m, on_d)
+
+    def _summer_on_date_str(self):
+        _, _, on_m, on_d = self._summer_window()
+        abbr = _MONTH_ABBR[on_m] if 1 <= on_m <= 12 else str(on_m)
+        return f"{on_d} {abbr}"
+
+    def _summer_off_start_str(self):
+        start_m, start_d, _, _ = self._summer_window()
+        abbr = _MONTH_ABBR[start_m] if 1 <= start_m <= 12 else str(start_m)
+        return f"{start_d} {abbr}"
+
+    def _summer_status_str(self):
+        """One-line human-readable summary of the summer shut-off state."""
+        if not self._summer_enabled():
+            return "Summer shut-off DISABLED — heating follows the normal schedule year-round"
+        if self.store.get("summer_force_active"):
+            exp = self.store.get("summer_force_expiry")
+            if exp:
+                secs = max(0, (exp - datetime.now()).total_seconds())
+                hrs  = int(secs // 3600)
+                mins = int((secs % 3600) // 60)
+                return (f"FORCED ON — full heating for {hrs}h {mins}m more "
+                        f"(reverts to summer shut-off {exp.strftime('%a %d %b %H:%M')})")
+            return "FORCED ON — full heating (24h override)"
+        if self._summer_lockout_active():
+            return (f"Summer shut-off ACTIVE — all radiators off, "
+                    f"heating resumes {self._summer_on_date_str()}")
+        return (f"In-season — heating normal. Summer shut-off runs "
+                f"{self._summer_off_start_str()} to {self._summer_on_date_str()}")
+
+    def _apply_summer_off(self):
+        """Hold every radiator at RADIATORS_OFF_TEMP and turn the En Suite floor
+        heating off. Idempotent — only writes a TRV when its setpoint differs
+        from the off temperature or its zone mode has drifted, mirroring the
+        W 2349 decision in process_room_temperature() to avoid RAMSES spam."""
+        for dev_id in ALL_RADIATOR_IDS:
+            try:
+                dev = indigo.devices[dev_id]
+            except Exception as e:
+                _log(f"[Summer] Radiator {dev_id} not found: {e}", level="WARNING")
+                continue
+            setpoint_str = dev.states.get("setpointHeat", "0")
+            available    = setpoint_str not in (None, "null", "None", "", "unavailable", "unknown")
+            try:
+                before = float(setpoint_str) if available else None
+            except (ValueError, TypeError):
+                before = None
+            zone_mode     = dev.states.get("zoneMode", "")
+            not_permanent = (zone_mode != "permanent override")
+            changed       = (before is None) or (abs(before - RADIATORS_OFF_TEMP) > TEMP_CHANGE_TOLERANCE)
+            if changed or not_permanent:
+                try:
+                    indigo.thermostat.setHeatSetpoint(dev, value=RADIATORS_OFF_TEMP)
+                except Exception as e:
+                    _log(f"[Summer] Could not set radiator {dev.name} to "
+                         f"{RADIATORS_OFF_TEMP:.0f}degC: {e}", level="WARNING")
+
+        # En Suite floor heating switch off (idempotent on onState)
+        try:
+            floor = indigo.devices[DEV_EN_SUITE_FLOOR_HEAT_ID]
+            if floor.onState:
+                indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
+                _log("[Summer] En Suite floor heating switched OFF")
+        except Exception as e:
+            _log(f"[Summer] Could not turn off En Suite floor heat: {e}", level="WARNING")
+
+        # Clear any lingering En Suite morning mode so it can't fight the lockout
+        if self.store.get("en_suite_morning_active"):
+            self.store["en_suite_morning_active"] = False
+            self._save_state()
+
+    def _start_summer_force(self, hours=24):
+        """Start a 24h force-on: suspend the summer shut-off and resume fully
+        normal heating until the expiry, then auto-revert."""
+        if not self._summer_enabled():
+            _log("[Summer] Force-on requested but the summer shut-off feature is "
+                 "disabled — nothing to override.", level="WARNING")
+            return
+        expiry = datetime.now() + timedelta(hours=hours)
+        self.store["summer_force_active"] = True
+        self.store["summer_force_expiry"] = expiry
+        _log(f"[Summer] Force-on START — full heating restored for {hours}h, "
+             f"reverts to summer shut-off at {expiry.strftime('%a %d %b %H:%M')}")
+        self._save_state()
+        self._fire_event("summerForceStarted")
+        # Apply normal heating immediately rather than waiting for the next cycle
+        self.store["last_heating_cycle"] = 0.0
+
+    def _cancel_summer_force(self, reason="expired"):
+        """End the 24h force-on and (if still in-window) re-assert the shut-off."""
+        if self.store.get("summer_force_active"):
+            self.store["summer_force_active"] = False
+            self.store["summer_force_expiry"] = None
+            _log(f"[Summer] Force-on END ({reason}) — {self._summer_status_str()}")
+            self._save_state()
+            self._fire_event("summerForceEnded")
+            # Re-evaluate immediately so the lockout re-applies this cycle
+            self.store["last_heating_cycle"] = 0.0
+
+    def _check_summer_force_expiry(self):
+        """Cancel the 24h force-on once its expiry datetime has passed."""
+        if not self.store.get("summer_force_active"):
+            return
+        exp = self.store.get("summer_force_expiry")
+        if exp and datetime.now() >= exp:
+            self._cancel_summer_force("24h timer expired")
+
+    def _log_summer_status(self):
+        """Log the current summer shut-off status (menu / on-demand)."""
+        _log("=== Summer Shut-off Status ===")
+        _log(f"  {self._summer_status_str()}")
+        _log(f"  Off window:   {self._summer_off_start_str()} -> {self._summer_on_date_str()} "
+             f"(heating returns on the end date)")
+        _log(f"  Enabled:      {self._summer_enabled()}")
+        _log(f"  Lockout now:  {self._summer_lockout_active()}")
+        _log(f"  Force active: {self.store.get('summer_force_active', False)}")
+
+    # -----------------------------------------------------------------------
     # En Suite morning schedule
     # -----------------------------------------------------------------------
 
@@ -749,6 +945,11 @@ class Plugin(indigo.PluginBase):
         Cheap-out fast paths so the check is essentially free outside the
         morning window — _tick() runs this every POLL_SLEEP_SECS.
         """
+        # Summer shut-off in force (and not overridden) — never start the
+        # morning floor-heat boost; the lockout owns the En Suite.
+        if self._summer_lockout_active():
+            return
+
         hour  = datetime.now().hour
 
         # Outside 06:00-10:00 and 00:00 (midnight reset) the rest of the
@@ -846,7 +1047,11 @@ class Plugin(indigo.PluginBase):
             return
 
         # Determine active mode display string (priority order)
-        if self.store["is_away"]:
+        if self.store.get("summer_force_active"):
+            mode = "Forced On (summer)"
+        elif self._summer_lockout_active():
+            mode = "Summer Off"
+        elif self.store["is_away"]:
             mode = "Away"
         elif self.store["is_both_out"]:
             mode = "Both-Out"
@@ -879,6 +1084,7 @@ class Plugin(indigo.PluginBase):
             {"key": "timedBoostActive",    "value": str(self.store["timed_boost_active"])},
             {"key": "timedBoostExpiry",    "value": expiry_str},
             {"key": "enSuiteMorningActive","value": str(self.store["en_suite_morning_active"])},
+            {"key": "summerStatus",        "value": self._summer_status_str()},
             {"key": "overheatRooms",       "value": overheat_str},
             {"key": "lastCycleTime",       "value": now_str},
             {"key": "lastUpdate",          "value": now_str},
@@ -1296,6 +1502,19 @@ class Plugin(indigo.PluginBase):
                 except ValueError:
                     pass
 
+            # Restore summer 24h force-on only if expiry is still in the future
+            force_expiry_str = st.get("summer_force_expiry")
+            if force_expiry_str:
+                try:
+                    fexp = datetime.fromisoformat(force_expiry_str)
+                    if fexp > datetime.now():
+                        self.store["summer_force_active"] = True
+                        self.store["summer_force_expiry"] = fexp
+                        _log(f"[Summer] Force-on restored from state — "
+                             f"reverts {fexp.strftime('%a %d %b %H:%M')}")
+                except ValueError:
+                    pass
+
             # Restore En Suite morning only if still within 06:00-09:59.
             # Re-assert floor heat ON to ensure the physical state matches the
             # restored mode (the plugin may have been restarted while the switch
@@ -1317,10 +1536,13 @@ class Plugin(indigo.PluginBase):
         """Persist timed boost and En Suite morning state to plugin_state.json."""
         state_path = os.path.join(self.data_dir, "plugin_state.json")
         expiry     = self.store.get("timed_boost_expiry")
+        force_exp  = self.store.get("summer_force_expiry")
         data = {
             "timed_boost_active":           self.store["timed_boost_active"],
             "timed_boost_expiry":           expiry.isoformat() if expiry else None,
             "timed_boost_hours":            self.store.get("timed_boost_hours", 0),
+            "summer_force_active":          self.store.get("summer_force_active", False),
+            "summer_force_expiry":          force_exp.isoformat() if force_exp else None,
             "en_suite_morning_active":      self.store["en_suite_morning_active"],
             "en_suite_morning_cancelled_date": self.store.get("en_suite_morning_cancelled_date"),
         }
@@ -1378,6 +1600,14 @@ class Plugin(indigo.PluginBase):
         """Action: Cancel timed boost immediately."""
         self._cancel_timed_boost(reason="manual cancel")
 
+    def actionForceHeatingOn24h(self, action):
+        """Action: Force whole-house heating on for 24h (override summer shut-off)."""
+        self._start_summer_force(hours=24)
+
+    def actionCancelForcedHeating(self, action):
+        """Action: Cancel the 24h force-on and revert to the summer shut-off."""
+        self._cancel_summer_force(reason="manual cancel")
+
     def actionRunCycleNow(self, action):
         """Action: Force an immediate heating cycle."""
         _log("[Action] Manual heating cycle triggered")
@@ -1413,6 +1643,21 @@ class Plugin(indigo.PluginBase):
         self._cancel_timed_boost(reason="menu cancel")
         return True
 
+    def menuForceHeatingOn24h(self, values_dict=None, type_id=None):
+        """Menu: Force whole-house heating on for 24h (override summer shut-off)."""
+        self._start_summer_force(hours=24)
+        return True
+
+    def menuCancelForcedHeating(self, values_dict=None, type_id=None):
+        """Menu: Cancel the 24h force-on and revert to the summer shut-off."""
+        self._cancel_summer_force(reason="menu cancel")
+        return True
+
+    def menuShowSummerStatus(self, values_dict=None, type_id=None):
+        """Menu: Show the whole-house summer shut-off status."""
+        self._log_summer_status()
+        return True
+
     def menuRunCycleNow(self, values_dict=None, type_id=None):
         """Menu: Run heating cycle now."""
         _log("[Menu] Manual heating cycle triggered")
@@ -1430,6 +1675,7 @@ class Plugin(indigo.PluginBase):
             expiry = self.store.get("timed_boost_expiry")
             _log(f"  Timed boost expiry:  {expiry.strftime('%H:%M') if expiry else 'N/A'}")
         _log(f"  En Suite morning:    {self.store['en_suite_morning_active']}")
+        _log(f"  Summer shut-off:     {self._summer_status_str()}")
         if self.overheat:
             rooms = self.overheat.get_overheating_rooms()
             if not rooms:

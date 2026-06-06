@@ -2,7 +2,7 @@
 
 An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) bridge plugin.
 
-Converted from a scheduled Python script to a persistent plugin, adding timed boost, En Suite morning schedule, warm-morning skip, and window-aware floor heating control.
+Converted from a scheduled Python script to a persistent plugin, adding timed boost, En Suite morning schedule, warm-morning skip, a whole-house summer shut-off, and window-aware floor heating control.
 
 ## Features
 
@@ -10,6 +10,7 @@ Converted from a scheduled Python script to a persistent plugin, adding timed bo
 - **Overheat prevention** — detects rooms overheating and reduces setpoints; 3-tier logic (predictive, trigger, hysteresis)
 - **Window/door detection** — closes valves when windows or doors are open; restores on close
 - **Timed boost** — raise Dining Room, Living Room (door + front), and Hall Kitchen by +2°C for 1 or 2 hours; auto-reverts at expiry
+- **Whole-house summer shut-off** — turns the whole house off for summer (default 1 June to 30 September): every radiator is held at the 8 °C frost setpoint and the En Suite floor heating is switched off. Dates are configurable and there is a master on/off toggle. A 24-hour **Force Heating On** action or menu item brings everything back to normal for a day, then it reverts on its own
 - **En Suite morning schedule** — automatic 22°C from 06:00–10:00 daily with floor heating; cancelled immediately if En Suite window opens; **also skipped entirely on warm mornings** (outdoor ≥ 10 °C at 06:00 → radiator stays off, floor heat not turned on)
 - **Weather integration** — OpenWeatherMap API with local Ecowitt bypass option
 - **Away / Both-Out / Guest modes** — freeze protection and alternative schedules
@@ -63,6 +64,8 @@ pointing the user to either fill in the matching field or add the key to
 | Cancel Timed Boost | Immediately reverts boost rooms to schedule |
 | Run Heating Cycle Now | Forces an immediate heating cycle |
 | Set Away Mode | Activates or deactivates away mode |
+| Force Heating On (24 hours) | Overrides the summer shut-off and restores fully normal heating for 24 hours, then auto-reverts |
+| Cancel Forced Heating | Ends the 24-hour force-on early and re-applies the summer shut-off |
 
 ## En Suite Morning Schedule
 
@@ -85,16 +88,42 @@ At 06:00 the plugin checks the current outdoor temperature. If it is at or above
 
 If outdoor drops below 10 °C on a cold morning, the normal 22 °C slot runs as usual. The threshold is a single constant — edit `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD` to tune for a different installation.
 
+## Whole-house Summer Shut-off
+
+Through the warmer months there is no need to run any heating, so the plugin can shut the whole house down for a fixed window each year.
+
+- While the window is active (default **1 June to 30 September**) every radiator is held at the **8 °C** frost setpoint and the **En Suite floor heating** is switched off
+- The normal per-room cycle and the En Suite morning boost are skipped for the duration, so nothing fights the shut-off
+- Heating returns automatically on the **return date** — for example 30 September means off from 1 June to 29 September inclusive, with normal heating from the 30th
+- The radiators sit at 8 °C rather than being forced fully shut, so genuine frost protection is still in place for the rare cold snap
+
+### Forcing heating on for a day
+
+If you want heat during the shut-off — a cold spell, guests, or drying towels — use **Force Heating On (24 hours)**, available as both an Indigo action and a Plugins-menu item. For the next 24 hours the whole house behaves exactly as it does outside the summer window, then it reverts to the shut-off on its own. **Cancel Forced Heating** ends the override early. The 24-hour timer is saved to disk, so it survives a plugin restart.
+
+### Configuration
+
+The four date fields and the master toggle live in **Plugins → EvoHome Heating Controller → Configure**:
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| Enable summer shut-off | On | Master switch for the whole feature |
+| Shut-off starts (month / day) | 1 June | First day the house goes off |
+| Heating returns (month / day) | 30 September | Day normal heating comes back on (the window end is exclusive) |
+
+A window whose start falls later in the year than its end (for example 1 November to 1 March) is handled correctly as a wrap across the year-end.
+
 ## Device States
 
 The `heatingController` device exposes these states in Indigo:
 
 | State | Description |
 |-------|-------------|
-| `activeMode` | Current mode: Schedule / Away / Both-Out / Boost / Timed Boost 1h / Timed Boost 2h / En Suite Morning |
+| `activeMode` | Current mode: Schedule / Away / Both-Out / Boost / Timed Boost 1h / Timed Boost 2h / En Suite Morning / Summer Off / Forced On (summer) |
 | `timedBoostActive` | True/False |
 | `timedBoostExpiry` | HH:MM expiry time |
 | `enSuiteMorningActive` | True/False |
+| `summerStatus` | Human-readable summer shut-off state (e.g. "Summer shut-off ACTIVE…", "FORCED ON…") |
 | `overheatRooms` | Comma-separated list of rooms currently suppressed |
 | `outdoorTempC` | Current outdoor temperature used for control |
 | `lastUpdate` | Timestamp of last heating cycle |
@@ -120,6 +149,7 @@ restarts. Defaults to ON.
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.6.0 | 06-06-2026 | Whole-house summer shut-off (default 1 Jun–30 Sep, configurable): all radiators held at 8 °C and the En Suite floor heating off for the window, with the normal cycle and En Suite morning boost skipped. New 24-hour **Force Heating On** / **Cancel Forced Heating** actions and menu items (override persists across restarts), two custom events, and a `summerStatus` device state. Co-authored with Claude Opus 4.8. |
 | 1.5.2 | 23-05-2026 | Millisecond timestamp `[HH:MM:SS.mmm]` prefix on every `self.logger` line via `plugin_utils.install_timestamp_filter()`; new "Toggle Timestamps in Log" menu item. |
 | 1.5.1 | 23-05-2026 | Secrets-policy housekeeping — `weather.py` `OWMWeather` constructor default lat/lon switched from CliveS coords (54.882, -1.818) to `0.0, 0.0`. The plugin startup path always passes real values resolved from `IndigoSecrets` / PluginConfig; the defensive default just stops the developer location leaking if anyone ever instantiates the class directly. No user-visible behaviour change. |
 | 1.5 | 23-05-2026 | En Suite warm-morning skip — if outdoor ≥ 10 °C at 06:00 the morning slot is not activated (radiator stays off, floor heat off, floor thermostat untouched). New `cancelled_reason` value `"warm_outdoor"` and new event-log message code 24. Co-authored with Claude Opus 4.7. |

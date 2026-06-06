@@ -16,6 +16,23 @@
         <CallbackMethod>menuCancelTimedBoost</CallbackMethod>
     </MenuItem>
 
+    <MenuItem id="sepSummer" isSeparator="true"/>
+
+    <MenuItem id="menuForceHeatingOn24h">
+        <Name>Force Heating On (24 hours)</Name>
+        <CallbackMethod>menuForceHeatingOn24h</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="menuCancelForcedHeating">
+        <Name>Cancel Forced Heating</Name>
+        <CallbackMethod>menuCancelForcedHeating</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="menuShowSummerStatus">
+        <Name>Show Summer Shut-off Status</Name>
+        <CallbackMethod>menuShowSummerStatus</CallbackMethod>
+    </MenuItem>
+
     <MenuItem id="sep0" isSeparator="true"/>
 
     <MenuItem id="menuRunCycleNow">

@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Actions>
 
+    <!-- Whole-house summer shut-off: force normal heating on for 24 hours.
+         Plugin-level (no deviceFilter) so it is selectable without a
+         Heating Controller device instance. -->
+    <Action id="forceHeatingOn24h" uiPath="DeviceActions">
+        <Name>Force Heating On (24 hours)</Name>
+        <CallbackMethod>actionForceHeatingOn24h</CallbackMethod>
+    </Action>
+
+    <!-- Cancel the 24h force-on, revert to the summer shut-off -->
+    <Action id="cancelForcedHeating" uiPath="DeviceActions">
+        <Name>Cancel Forced Heating</Name>
+        <CallbackMethod>actionCancelForcedHeating</CallbackMethod>
+    </Action>
+
     <!-- Timed Boost: all 4 living rooms +2°C for 1 hour -->
     <Action id="startTimedBoost1h" deviceFilter="self.heatingController" uiPath="DeviceActions">
         <Name>Start Timed Boost (1 hour)</Name>

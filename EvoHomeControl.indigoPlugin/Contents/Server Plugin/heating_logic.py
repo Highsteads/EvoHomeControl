@@ -48,6 +48,16 @@ DEV_LIVING_ROOM_DOOR_ID    = 963505712   # Zone  0
 DEV_LIVING_ROOM_FRONT_ID   = 110516814   # Zone 11
 DEV_UTILITY_ROOM_ID        = 1376483274  # Zone  8
 
+# Every RAMSES TRV device ID — used by the whole-house summer shut-off to force
+# each radiator to RADIATORS_OFF_TEMP. Kept in sync with the device list in
+# validate_configuration() below.
+ALL_RADIATOR_IDS = (
+    DEV_BATHROOM_ID, DEV_BEDROOM_1_ID, DEV_BEDROOM_2_ID, DEV_BEDROOM_3_ID,
+    DEV_CONSERVATORY_ID, DEV_DINING_ROOM_ID, DEV_EN_SUITE_ID,
+    DEV_HALL_BEDROOM_ID, DEV_HALL_KITCHEN_ID,
+    DEV_LIVING_ROOM_DOOR_ID, DEV_LIVING_ROOM_FRONT_ID, DEV_UTILITY_ROOM_ID,
+)
+
 # ---------------------------------------------------------------------------
 # Indigo variable IDs
 # ---------------------------------------------------------------------------
@@ -214,6 +224,26 @@ def get_variable_value(var_id_or_name, default=None):
         return indigo.variables[var_id_or_name].value
     except Exception:
         return default
+
+
+def is_within_summer_off(today, start_month, start_day, end_month, end_day):
+    """Return True if `today` (a date) falls inside the summer shut-off window.
+
+    The window runs from (start_month, start_day) INCLUSIVE up to
+    (end_month, end_day) EXCLUSIVE — i.e. heating returns ON on the end date.
+    With the defaults (1 Jun -> 30 Sep) the house is off 1 Jun..29 Sep and
+    heating is restored on 30 Sep.
+
+    A window whose start falls later in the year than its end (e.g. 1 Nov ->
+    1 Mar) is treated as wrapping across the year boundary.
+    """
+    start = (start_month, start_day)
+    end   = (end_month,   end_day)
+    cur   = (today.month,  today.day)
+    if start <= end:
+        return start <= cur < end
+    # Wrapped window (start later than end): off if at/after start OR before end
+    return cur >= start or cur < end
 
 
 def calculate_temp_offset(outdoor_temp):

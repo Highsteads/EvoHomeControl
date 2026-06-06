@@ -174,5 +174,48 @@ class TestMessageRefinementProtection(unittest.TestCase):
         self.assertIn(23, hl.ALERT_LOG_MESSAGES)
 
 
+# ===========================================================================
+class TestSummerWindow(unittest.TestCase):
+    """is_within_summer_off date-window helper (whole-house summer shut-off)."""
+# ===========================================================================
+
+    def _off(self, m, d, sm=6, sd=1, em=9, ed=30):
+        from datetime import date
+        return hl.is_within_summer_off(date(2026, m, d), sm, sd, em, ed)
+
+    def test_default_window_inside(self):
+        self.assertTrue(self._off(6, 1))     # start day inclusive
+        self.assertTrue(self._off(6, 6))
+        self.assertTrue(self._off(7, 15))
+        self.assertTrue(self._off(9, 29))    # last off day
+
+    def test_default_window_outside(self):
+        self.assertFalse(self._off(5, 31))   # day before start
+        self.assertFalse(self._off(9, 30))   # end date exclusive — heating returns
+        self.assertFalse(self._off(10, 1))
+        self.assertFalse(self._off(1, 15))
+        self.assertFalse(self._off(12, 25))
+
+    def test_boundary_semantics(self):
+        # Off 1 Jun..29 Sep inclusive, ON from 30 Sep
+        self.assertTrue(self._off(6, 1))
+        self.assertTrue(self._off(9, 29))
+        self.assertFalse(self._off(9, 30))
+
+    def test_wrapped_window(self):
+        # Winter-off window 1 Nov -> 1 Mar (start later in the year than end)
+        self.assertTrue(self._off(12, 25, sm=11, sd=1, em=3, ed=1))
+        self.assertTrue(self._off(1, 15,  sm=11, sd=1, em=3, ed=1))
+        self.assertTrue(self._off(11, 1,  sm=11, sd=1, em=3, ed=1))
+        self.assertFalse(self._off(3, 1,  sm=11, sd=1, em=3, ed=1))   # end exclusive
+        self.assertFalse(self._off(6, 1,  sm=11, sd=1, em=3, ed=1))
+
+    def test_all_radiator_ids(self):
+        # All 12 zones present and unique, En Suite included
+        self.assertEqual(len(hl.ALL_RADIATOR_IDS), 12)
+        self.assertEqual(len(set(hl.ALL_RADIATOR_IDS)), 12)
+        self.assertIn(hl.DEV_EN_SUITE_ID, hl.ALL_RADIATOR_IDS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
