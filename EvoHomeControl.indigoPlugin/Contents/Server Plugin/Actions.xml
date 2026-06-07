@@ -33,6 +33,12 @@
         <CallbackMethod>actionCancelTimedBoost</CallbackMethod>
     </Action>
 
+    <!-- Log the whole-house summer shut-off status (dashboard-accessible) -->
+    <Action id="showSummerStatus" uiPath="DeviceActions">
+        <Name>Show Summer Shut-off Status</Name>
+        <CallbackMethod>actionShowSummerStatus</CallbackMethod>
+    </Action>
+
     <!-- Force an immediate heating cycle (useful for testing) -->
     <Action id="runCycleNow" deviceFilter="self.heatingController" uiPath="DeviceActions">
         <Name>Run Heating Cycle Now</Name>

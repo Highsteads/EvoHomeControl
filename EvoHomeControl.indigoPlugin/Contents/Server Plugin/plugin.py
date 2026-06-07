@@ -5,8 +5,10 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
 # Date:        06-06-2026
-# Version:     1.6.0
+# Version:     1.6.1
 #
+# v1.6.1 (07-06-2026): Added showSummerStatus action (callable via executeAction
+# from the Dashboards heating page control panel; mirrors menuShowSummerStatus).
 # v1.6.0 (06-06-2026): Whole-house summer shut-off. When enabled (PluginConfig,
 # default 1 Jun -> 30 Sep) every radiator is held at RADIATORS_OFF_TEMP (8 degC)
 # and the En Suite floor heating is switched off; the normal per-room cycle and
@@ -165,7 +167,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.6.0"
+PLUGIN_VERSION  = "1.6.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
@@ -1607,6 +1609,10 @@ class Plugin(indigo.PluginBase):
     def actionCancelForcedHeating(self, action):
         """Action: Cancel the 24h force-on and revert to the summer shut-off."""
         self._cancel_summer_force(reason="manual cancel")
+
+    def actionShowSummerStatus(self, action):
+        """Action: Log the whole-house summer shut-off status (dashboard-invocable)."""
+        self._log_summer_status()
 
     def actionRunCycleNow(self, action):
         """Action: Force an immediate heating cycle."""
