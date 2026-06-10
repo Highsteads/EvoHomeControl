@@ -41,7 +41,6 @@ sys.modules["schedules"] = _schedules
 
 # Now safe to import the modules under test
 import heating_logic as hl                        # noqa: E402
-from overheat_monitor import OverheatMonitor       # noqa: E402
 
 
 # ---------------------------------------------------------------------------

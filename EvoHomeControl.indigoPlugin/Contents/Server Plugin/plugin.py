@@ -4,8 +4,8 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
-# Date:        06-06-2026
-# Version:     1.6.1
+# Date:        10-06-2026
+# Version:     1.6.2
 #
 # v1.6.1 (07-06-2026): Added showSummerStatus action (callable via executeAction
 # from the Dashboards heating page control panel; mirrors menuShowSummerStatus).
@@ -149,7 +149,6 @@ from heating_logic    import (
     DEV_CONSERVATORY_ID, DEV_DINING_ROOM_ID, DEV_EN_SUITE_ID,
     DEV_HALL_BEDROOM_ID, DEV_HALL_KITCHEN_ID,
     DEV_LIVING_ROOM_DOOR_ID, DEV_LIVING_ROOM_FRONT_ID, DEV_UTILITY_ROOM_ID,
-    OUTDOOR_TEMP_TRIGGER,
     EN_SUITE_MORNING_TEMP,
     EN_SUITE_WARM_MORNING_THRESHOLD,
     ALL_RADIATOR_IDS,
@@ -167,7 +166,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.6.1"
+PLUGIN_VERSION  = "1.6.2"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
