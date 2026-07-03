@@ -732,10 +732,14 @@ def process_room_temperature(
 
         temp_str = dev_radiator.states.get("temperatureInput1", "0")
         if temp_str in (None, "null", "None", "", "unavailable", "unknown"):
-            _log(f"{room_name}: temperature unavailable, using 0degC", level="WARNING", log_buffer=log_buffer)
-            dev_temp = 0.0
-        else:
-            dev_temp = float(temp_str)
+            # A missing reading must NOT be treated as 0degC — that makes the room
+            # look freezing (defeating overheat detection and driving a bogus
+            # heat-up). Skip this zone for this cycle; the TRV keeps its last RAMSES
+            # setpoint until a real temperature returns.
+            _log(f"{room_name}: temperature unavailable — skipping this cycle (TRV holds last setpoint)",
+                 level="WARNING", log_buffer=log_buffer)
+            return
+        dev_temp = float(temp_str)
 
         setpoint_str = dev_radiator.states.get("setpointHeat", "0")
         dev_setpoint = 0.0 if setpoint_str in (None, "null", "None", "", "unavailable", "unknown") else float(setpoint_str)
@@ -759,12 +763,13 @@ def process_room_temperature(
                      level="ERROR", log_buffer=log_buffer)
 
     # --- Check door states ---
+    # Use the same _contact_is_open() reader as windows so a Zigbee2MQTT door
+    # contact (states["contact"]: False = open) is read correctly rather than via
+    # the raw onOffState.ui, which a Zigbee contact device does not drive reliably.
     if door_devices:
         for dev_id in door_devices:
             try:
-                dev = indigo.devices[dev_id]
-                state_ui = dev.states.get("onOffState.ui", "closed").lower()
-                if state_ui == "open":
+                if _contact_is_open(dev_id):
                     doors_open = True
                     door_count += 1
             except Exception as e:

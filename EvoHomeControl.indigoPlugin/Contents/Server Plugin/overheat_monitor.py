@@ -106,11 +106,16 @@ class OverheatMonitor:
         return {}
 
     def save_history(self):
-        """Persist overheat history to JSON file."""
+        """Persist overheat history to JSON file (atomically: a crash mid-write
+        must not corrupt the file and silently discard all overheat history)."""
         try:
             os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
-            with open(self.history_file, 'w', encoding='utf-8') as f:
+            tmp = f"{self.history_file}.tmp"
+            with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(self.history, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.history_file)
         except Exception as e:
             _slog(
                 f"[OverheatMonitor] Error saving history: {e}",
@@ -242,6 +247,10 @@ class OverheatMonitor:
         current_temp = room_data["current_temp"]
         target_temp  = room_data["target_temp"]
         outdoor_temp = room_data["outdoor_temp"]
+        # outdoor_temp is None when weather is unavailable — format defensively so a
+        # missing reading cannot crash the alert (which recurs every cycle because
+        # alert_sent is only set True after a successful send).
+        outdoor_str  = f"{outdoor_temp:.1f}degC" if isinstance(outdoor_temp, (int, float)) else "unavailable"
 
         duration_hours = (room_data["consecutive_cycles"] * self.run_interval_mins) / 60.0
 
@@ -273,7 +282,7 @@ class OverheatMonitor:
             f"Duration:         {duration_hours:.2f} hours\n"
             f"Valve Status:     {valve_status}\n"
             f"\n"
-            f"Outdoor Temp:     {outdoor_temp:.1f}degC\n"
+            f"Outdoor Temp:     {outdoor_str}\n"
             f"\n"
             f"{reason}\n"
             f"\n"
@@ -308,7 +317,7 @@ class OverheatMonitor:
                 alert_time = dt.strptime(room_data["alert_timestamp"], "%d-%m-%Y %H:%M:%S")
                 hours_ago  = (dt.now() - alert_time).total_seconds() / 3600.0
                 time_text  = f"{hours_ago:.2f} hours ago"
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
 
         title = f"ALL CLEAR - {room_name}"

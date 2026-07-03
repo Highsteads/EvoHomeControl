@@ -265,5 +265,74 @@ class TestOverheatIntervalClamp(unittest.TestCase):
         self.assertEqual(m.critical_duration_cycles, (6 * 60) // 10)
 
 
+# ===========================================================================
+class TestOverheatAtomicSave(unittest.TestCase):
+    """v1.7.1 (M6): save_history must write atomically and round-trip cleanly,
+    leaving no leftover .tmp file."""
+# ===========================================================================
+
+    def test_save_history_roundtrip_no_tmp(self):
+        import os
+        import json
+        import tempfile
+        import overheat_monitor as om
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "sub", "overheat_history.json")   # makedirs must create 'sub'
+        m = om.OverheatMonitor(path, run_interval_mins=5)
+        m.history = {"Bathroom": {"consecutive_cycles": 3, "max_overheat": 5.5}}
+        m.save_history()
+        self.assertTrue(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".tmp"))          # temp file cleaned up
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["Bathroom"]["consecutive_cycles"], 3)
+
+
+# ===========================================================================
+class TestCriticalAlertNoneOutdoor(unittest.TestCase):
+    """v1.7.1 (M5): a None outdoor temp (weather unavailable) must not crash the
+    critical-alert formatter — it recurs every cycle until alert_sent is set."""
+# ===========================================================================
+
+    def test_none_outdoor_does_not_crash(self):
+        import overheat_monitor as om
+        m = om.OverheatMonitor("/tmp/_evohome_test_overheat_hist2.json", run_interval_mins=5)
+        sent = {}
+        m._send_pushover = lambda *a, **k: sent.setdefault("push", True)
+        m._send_email    = lambda *a, **k: sent.setdefault("mail", True)
+        m.history["Bathroom"] = {
+            "current_temp": 26.0, "target_temp": 20.0, "outdoor_temp": None,
+            "consecutive_cycles": 4, "max_overheat": 6.5, "alert_sent": False,
+            "alert_type": None, "alert_timestamp": None,
+        }
+        # Must not raise despite outdoor_temp=None
+        m.send_critical_alert("Bathroom", "CRITICAL_IMMEDIATE", 6.5)
+        self.assertTrue(sent.get("push"))
+        self.assertTrue(sent.get("mail"))
+
+
+# ===========================================================================
+class TestContactReaderParity(unittest.TestCase):
+    """v1.7.1 (HL4): doors now use _contact_is_open (same reader as windows) so a
+    Zigbee2MQTT contact (states['contact']: False = open) is read correctly."""
+# ===========================================================================
+
+    def test_zigbee_contact_open_and_closed(self):
+        class _Dev:
+            def __init__(self, states):
+                self.states = states
+        # Zigbee2MQTT: contact False == open
+        _indigo.devices = {1: _Dev({"contact": False}), 2: _Dev({"contact": True})}
+        self.assertTrue(hl._contact_is_open(1))
+        self.assertFalse(hl._contact_is_open(2))
+
+    def test_legacy_onoffstate_fallback(self):
+        class _Dev:
+            def __init__(self, states):
+                self.states = states
+        _indigo.devices = {3: _Dev({"onOffState.ui": "open"}), 4: _Dev({"onOffState.ui": "closed"})}
+        self.assertTrue(hl._contact_is_open(3))
+        self.assertFalse(hl._contact_is_open(4))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

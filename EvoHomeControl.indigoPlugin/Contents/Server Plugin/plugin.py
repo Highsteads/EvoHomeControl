@@ -5,7 +5,24 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
 # Date:        03-07-2026
-# Version:     1.7.0
+# Version:     1.7.1
+#
+# v1.7.1 (03-07-2026): Deep-review MEDIUM batch. (1) _load_state now tolerates a
+# malformed/legacy plugin_state.json (catches TypeError/AttributeError + naive-vs-
+# aware datetime compares) so a corrupt state file can no longer crash __init__ and
+# stop the plugin loading. (2) plugin_state.json, the setpoint cache, the overheat
+# history and the weather cache are all written atomically (temp file + fsync +
+# os.replace) so a crash mid-write can't corrupt them and silently drop an active
+# 24h force-on or all overheat history. (3) The critical-overheat alert no longer
+# crashes when the outdoor temperature is unavailable (None) — it would otherwise
+# raise every cycle. (4) A missing TRV temperature reading now skips that zone for
+# the cycle (TRV holds its last setpoint) instead of being treated as 0degC, which
+# made a room look freezing and defeated overheat detection. (5) Door contacts are
+# now read through the same _contact_is_open() reader as windows, so a Zigbee2MQTT
+# door contact is read correctly rather than via the raw onOffState.ui. (6) The OWM
+# fetch-error log redacts the API key that requests can echo in the request URL.
+# menuForceFullLog's log-buffer swap is serialised with the cycle via a lock. +4
+# regression tests -> 24.
 #
 # v1.7.0 (03-07-2026): Deep-review HIGH batch. (1) runConcurrentThread now isolates
 # each tick (log-and-continue, re-raise StopThread) and each of the 12 zones
@@ -85,6 +102,7 @@ import json
 import shutil
 import time
 import logging
+import threading
 import functools
 from datetime import datetime, timedelta
 
@@ -179,7 +197,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.7.0"
+PLUGIN_VERSION  = "1.7.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
@@ -198,6 +216,23 @@ def _safe_int(value, default=None):
         return int(value)
     except (ValueError, TypeError):
         return default
+
+
+def _atomic_write_json(path, obj, **dump_kwargs):
+    """Write JSON to path atomically (temp file + os.replace).
+
+    A crash or power loss mid-write must never leave a half-written file that the
+    reader then trusts (a truncated plugin_state.json would silently drop an active
+    24h force-on; a truncated setpoint cache would make every room re-log). os.replace
+    is atomic on the same filesystem, so the reader always sees either the old file
+    or the fully-written new one.
+    """
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, **dump_kwargs)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 # Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
 #   ecowittDeviceId        (outdoor sensor)
@@ -334,6 +369,11 @@ class Plugin(indigo.PluginBase):
 
         # Active event triggers — populated by triggerStartProcessing / triggerStopProcessing
         self.event_triggers = {}
+
+        # Serialises the per-cycle log buffer between the runConcurrentThread cycle
+        # and menu-thread callbacks that temporarily swap it (menuForceFullLog), so
+        # menu output can't leak into the daily log or clobber a live cycle's lines.
+        self._cycle_lock = threading.Lock()
 
         # Load persisted state from previous run
         self._load_state()
@@ -510,6 +550,12 @@ class Plugin(indigo.PluginBase):
     # -----------------------------------------------------------------------
 
     def _run_heating_cycle(self):
+        """Run one heating cycle while holding the cycle lock, so a menu-thread
+        buffer swap (menuForceFullLog) can't race the per-cycle log buffer."""
+        with self._cycle_lock:
+            self._run_heating_cycle_body()
+
+    def _run_heating_cycle_body(self):
         """Execute one full heating cycle across all 12 zones."""
         now_dt  = datetime.now()
         hour    = now_dt.hour
@@ -1236,16 +1282,20 @@ class Plugin(indigo.PluginBase):
         if snow_forecast and self.pluginPrefs.get("snowHeatingEnabled", True):
             temp_offset += _safe_float(self.pluginPrefs.get("snowHeatingBoost", "1.0"), 1.0)
 
-        # Swap the log buffer for a throwaway one for the duration of this call
-        saved_buf = self.store["log_buffer"]
-        saved_snow = self.store.get("snow_forecast")
-        self.store["log_buffer"]    = []
-        self.store["snow_forecast"] = snow_forecast
-        try:
-            self._log_hourly_header(outdoor_temp, temp_offset, menu_mode=True)
-        finally:
-            self.store["log_buffer"]    = saved_buf
-            self.store["snow_forecast"] = saved_snow
+        # Swap the log buffer for a throwaway one for the duration of this call.
+        # Hold the cycle lock so a concurrent heating cycle can't observe the
+        # throwaway buffer (menu lines leaking into the daily log) or have its own
+        # buffer clobbered by the restore.
+        with self._cycle_lock:
+            saved_buf = self.store["log_buffer"]
+            saved_snow = self.store.get("snow_forecast")
+            self.store["log_buffer"]    = []
+            self.store["snow_forecast"] = snow_forecast
+            try:
+                self._log_hourly_header(outdoor_temp, temp_offset, menu_mode=True)
+            finally:
+                self.store["log_buffer"]    = saved_buf
+                self.store["snow_forecast"] = saved_snow
 
     # -----------------------------------------------------------------------
     # Hourly log header
@@ -1561,7 +1611,9 @@ class Plugin(indigo.PluginBase):
                         self.store["timed_boost_expiry"] = expiry
                         self.store["timed_boost_hours"]  = st.get("timed_boost_hours", 1)
                         _log(f"[TimedBoost] Restored from state — expires {expiry.strftime('%H:%M')}")
-                except ValueError:
+                except (ValueError, TypeError):
+                    # Malformed/legacy value, or a tz-aware string compared to a
+                    # naive now() — ignore the stale boost rather than crash startup.
                     pass
 
             # Restore summer 24h force-on only if expiry is still in the future
@@ -1574,7 +1626,7 @@ class Plugin(indigo.PluginBase):
                         self.store["summer_force_expiry"] = fexp
                         _log(f"[Summer] Force-on restored from state — "
                              f"reverts {fexp.strftime('%a %d %b %H:%M')}")
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
 
             # Restore En Suite morning only if still within 06:00-09:59.
@@ -1591,8 +1643,11 @@ class Plugin(indigo.PluginBase):
 
             self.store["en_suite_morning_cancelled_date"] = st.get("en_suite_morning_cancelled_date")
 
-        except (OSError, ValueError):
-            pass  # no previous state — fresh start
+        except (OSError, ValueError, TypeError, AttributeError) as e:
+            # Missing/corrupt/legacy plugin_state.json must never crash __init__ —
+            # a malformed file just means a fresh start for the persisted flags.
+            _log(f"[State] Could not restore plugin_state.json ({type(e).__name__}) — fresh start",
+                 level="WARNING")
 
     def _save_state(self):
         """Persist timed boost and En Suite morning state to plugin_state.json."""
@@ -1609,8 +1664,7 @@ class Plugin(indigo.PluginBase):
             "en_suite_morning_cancelled_date": self.store.get("en_suite_morning_cancelled_date"),
         }
         try:
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            _atomic_write_json(state_path, data, indent=2)
         except OSError as e:
             _log(f"[State] Write error: {e}", level="WARNING")
 
@@ -1618,11 +1672,10 @@ class Plugin(indigo.PluginBase):
         """Persist per-room setpoint and message cache."""
         cache_path = os.path.join(self.data_dir, "setpoint_cache.json")
         try:
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "setpoints": self.store["last_setpoints"],
-                    "messages":  self.store["last_messages"],
-                }, f)
+            _atomic_write_json(cache_path, {
+                "setpoints": self.store["last_setpoints"],
+                "messages":  self.store["last_messages"],
+            })
         except OSError as e:
             _log(f"[SetpointCache] Write error: {e}", level="WARNING")
 

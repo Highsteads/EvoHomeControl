@@ -142,13 +142,18 @@ class WeatherData:
             self.daily       = data.get('daily', [])
             self.last_update = datetime.datetime.now()
 
-            # Write cache
+            # Write cache atomically (temp file + os.replace) so a crash mid-write
+            # cannot leave a truncated cache that the reader then trusts.
             try:
                 cache_dir = os.path.dirname(self.cache_path)
                 if cache_dir:
                     os.makedirs(cache_dir, exist_ok=True)
-                with open(self.cache_path, 'w', encoding='utf-8') as f:
+                tmp = f"{self.cache_path}.tmp"
+                with open(tmp, 'w', encoding='utf-8') as f:
                     json.dump({'fetched_at': now_ts, 'data': data}, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, self.cache_path)
             except OSError as e:
                 _slog(
                     f"[Weather] Cache write error (data still usable): {e}",
@@ -158,8 +163,13 @@ class WeatherData:
             return True
 
         except Exception as e:
+            # requests exception text can echo the full request URL, which carries
+            # the OWM API key as ?appid=<key> — redact it before it reaches the log.
+            msg = str(e)
+            if self.api_key:
+                msg = msg.replace(self.api_key, "***")
             _slog(
-                f"[Weather] Error fetching from OWM: {e}",
+                f"[Weather] Error fetching from OWM: {msg}",
                 level="ERROR"
             )
             return False
