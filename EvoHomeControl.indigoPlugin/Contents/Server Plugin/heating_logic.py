@@ -914,7 +914,10 @@ def process_room_temperature(
         message   = 13
 
     # --- Clamp to valid range ---
-    new_temp = max(RADIATORS_OFF_TEMP, min(round(new_temp), MAX_ROOM_TEMP))
+    # Round to the nearest 0.5degC (RAMSES/Evohome native resolution) rather than to
+    # a whole degree, so a fractional offset (e.g. a 1.5degC snow boost) isn't lost.
+    new_temp = round(new_temp * 2) / 2
+    new_temp = max(RADIATORS_OFF_TEMP, min(new_temp, MAX_ROOM_TEMP))
 
     # --- Final bedroom max limit ---
     if room_name in schedules.MAX_TEMP_LIMITS and message not in (1, 2, 3, 4, 7, 8, 15, 17, 23):

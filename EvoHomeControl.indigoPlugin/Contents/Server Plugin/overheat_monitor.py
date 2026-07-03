@@ -254,8 +254,11 @@ class OverheatMonitor:
 
         duration_hours = (room_data["consecutive_cycles"] * self.run_interval_mins) / 60.0
 
-        reduced_temp = max(12.0, target_temp - 6.0)
-        valve_status = f"REDUCED (backed off 6°C to {reduced_temp:.1f}°C)"
+        # The backoff is clamped to a 12degC floor, so the actual reduction can be
+        # less than the nominal 6degC — report the real figure, not a hard-coded 6.
+        reduced_temp   = max(12.0, target_temp - 6.0)
+        actual_backoff = target_temp - reduced_temp
+        valve_status   = f"REDUCED (backed off {actual_backoff:.1f}degC to {reduced_temp:.1f}degC)"
 
         if alert_type == "CRITICAL_IMMEDIATE":
             title  = f"CRITICAL OVERHEAT - {room_name}"
@@ -406,7 +409,10 @@ class OverheatMonitor:
         """Return a multi-line string summarising current overheat status."""
         lines = ["Above-Target / Overheat Monitor Status", "=" * 50]
         found = False
-        for room_name, data in sorted(self.history.items()):
+        # Snapshot the items: these status readers run on the menu/action thread
+        # while the cycle thread's update_room may add a room key — iterating the
+        # live dict would risk 'dictionary changed size during iteration'.
+        for room_name, data in sorted(list(self.history.items())):
             if data.get("consecutive_cycles", 0) > 0:
                 found = True
                 hours      = (data["consecutive_cycles"] * self.run_interval_mins) / 60.0
@@ -436,7 +442,25 @@ class OverheatMonitor:
 
     def get_overheating_rooms(self):
         """Return sorted list of room names currently overheating."""
+        # Snapshot for the same cross-thread reason as get_status_summary.
         return sorted(
-            r for r, d in self.history.items()
+            r for r, d in list(self.history.items())
             if d.get("consecutive_cycles", 0) > 0
         )
+
+    def reset_all_tracking(self):
+        """Clear per-room overheat counters and alert flags for every room.
+
+        Called once when the whole-house summer shut-off engages: during lockout the
+        cycle stops calling update_room, so any room left mid-alert would keep a stale
+        alert_sent=True for the whole season and could suppress a genuine alert when
+        heating resumes. Resetting here means tracking starts clean at lockout end.
+        """
+        for data in self.history.values():
+            data["consecutive_cycles"] = 0
+            data["stable_cycles"]      = 0
+            data["alert_sent"]         = False
+            data["all_clear_sent"]     = True
+            data["alert_type"]         = None
+            data["off_since_cycle"]    = 0
+            data["is_coasting"]        = False

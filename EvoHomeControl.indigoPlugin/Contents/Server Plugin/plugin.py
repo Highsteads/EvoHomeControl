@@ -4,8 +4,21 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
-# Date:        03-07-2026
-# Version:     1.7.1
+# Date:        04-07-2026
+# Version:     1.7.2
+#
+# v1.7.2 (04-07-2026): Deep-review LOW batch. (1) A changed OWM API key OR location
+# now takes effect on config-save without a restart — WeatherData rebuilds its
+# request URL via set_credentials() (the key was previously never re-applied either).
+# (2) timestampEnabled is coerced by value, not truthiness (bool("false") was truthy).
+# (3) _load_state no longer re-asserts En Suite floor heat ON during a summer lockout.
+# (4) Overheat status readers snapshot the history dict so a menu-thread read can't
+# hit 'dict changed size' against the cycle writer; overheat tracking is reset once on
+# summer-lockout entry so no room stays stuck alert_sent across the season. (5) The
+# critical-alert valve-status line reports the ACTUAL backoff, not a hard-coded 6degC.
+# (6) Solcast values looked up BY NAME (hard-coded ids removed); the Clive-only Ecowitt
+# device-id defaults removed (blank field just skips the section). (7) Setpoints round
+# to the nearest 0.5degC (RAMSES resolution) instead of a whole degree. +3 tests -> 27.
 #
 # v1.7.1 (03-07-2026): Deep-review MEDIUM batch. (1) _load_state now tolerates a
 # malformed/legacy plugin_state.json (catches TypeError/AttributeError + naive-vs-
@@ -197,7 +210,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.7.1"
+PLUGIN_VERSION  = "1.7.2"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
@@ -234,15 +247,13 @@ def _atomic_write_json(path, obj, **dump_kwargs):
         os.fsync(f.fileno())
     os.replace(tmp, path)
 
-# Ecowitt device ID DEFAULTS — overridden by PluginConfig.xml fields:
-#   ecowittDeviceId        (outdoor sensor)
-#   ecowittIndoorDeviceId  (indoor sensor — pressure / indoor temp / indoor humidity)
-_ECOWITT_OUTDOOR_DEFAULT = 889210700
-_ECOWITT_INDOOR_DEFAULT  = 1376100918
+# Ecowitt sensor device IDs come entirely from PluginConfig.xml
+# (ecowittDeviceId = outdoor, ecowittIndoorDeviceId = indoor). A blank field
+# simply skips that section — no hard-coded install-specific device id defaults.
 
-# Solcast solar forecast variable IDs
-_VAR_SOLCAST_TODAY_ID    = 1085965464  # solcast_today_kwh
-_VAR_SOLCAST_TOMORROW_ID = 1029984958  # solcast_tomorrow_kwh
+# Solcast solar forecast variables are looked up BY NAME
+# ("solcast_today_kwh" / "solcast_tomorrow_kwh") at the read site — no hard-coded
+# ids, so a recreated or absent variable can never break the header.
 
 # Legacy cache file paths (Python Scripts folder — migrate on first run).
 # Overheat history migration was retired in v1.4 (Indigo 2025.1 install no
@@ -299,7 +310,11 @@ class Plugin(indigo.PluginBase):
     def __init__(self, plugin_id, plugin_display_name, plugin_version, plugin_prefs):
         super().__init__(plugin_id, plugin_display_name, plugin_version, plugin_prefs)
 
-        self.timestamp_enabled = bool(plugin_prefs.get("timestampEnabled", True))
+        # A saved dialog stores this as the string "false"/"true"; bool("false") is
+        # truthy, so coerce by value (matching the showDebugInfo coercion) rather than
+        # by truthiness. Missing/true -> enabled.
+        self.timestamp_enabled = str(plugin_prefs.get("timestampEnabled", True)).strip().lower() \
+            not in ("false", "0", "no", "off")
         if install_timestamp_filter:
             self._ts_filter = install_timestamp_filter(self, enabled=self.timestamp_enabled)
         else:
@@ -487,7 +502,12 @@ class Plugin(indigo.PluginBase):
             # Re-init modules with new prefs
             if self.weather:
                 owm_key = _SECRETS_OWM_KEY or values_dict.get("owmApiKey", "")
-                self.weather.api_key        = owm_key
+                # Re-resolve coordinates (IndigoSecrets wins) and rebuild the request
+                # URL, so a changed key OR location takes effect now — not only after
+                # a restart (the URL bakes in key+lat+lon at construction time).
+                lat = _SECRETS_LATITUDE if _SECRETS_LATITUDE is not None else _safe_float(values_dict.get("owmLatitude"), self.weather.lat)
+                lon = _SECRETS_LONGITUDE if _SECRETS_LONGITUDE is not None else _safe_float(values_dict.get("owmLongitude"), self.weather.lon)
+                self.weather.set_credentials(owm_key, lat, lon)
                 self.weather.bypass         = values_dict.get("weatherBypass", False)
                 self.weather.bypass_temp    = _safe_float(values_dict.get("weatherBypassTemp", 6.0), 6.0)
                 ecowitt_raw                 = values_dict.get("ecowittDeviceId", "")
@@ -573,6 +593,12 @@ class Plugin(indigo.PluginBase):
         # RADIATORS_OFF_TEMP and the En Suite floor heating is off. A concise
         # status line is logged once per clock hour to avoid 5-min spam.
         if self._summer_lockout_active():
+            # Reset overheat tracking ONCE on lockout entry: update_room stops being
+            # called during lockout, so a room left mid-alert would otherwise keep a
+            # stale alert_sent for the whole season.
+            if self.overheat and not self.store.get("summer_overheat_cleared"):
+                self.overheat.reset_all_tracking()
+                self.store["summer_overheat_cleared"] = True
             self._apply_summer_off()
             if self.store.get("last_header_hour") != hour:
                 _log(f"[Summer] Whole-house heating OFF for summer — all radiators "
@@ -581,6 +607,9 @@ class Plugin(indigo.PluginBase):
                 self.store["last_header_hour"] = hour
             self._update_controller_device(None, 0.0)
             return
+
+        # Not in summer lockout — re-arm the one-time reset for the next lockout entry.
+        self.store["summer_overheat_cleared"] = False
 
         # Read Indigo mode variables
         self._read_mode_variables()
@@ -1358,12 +1387,12 @@ class Plugin(indigo.PluginBase):
             except Exception as exc:
                 self.logger.debug(f"Ecowitt outdoor humidity lookup failed (dev_id={self.weather.ecowitt_dev_id}): {exc}")
 
-        # Ecowitt indoor sensor — pressure + indoor temp/humidity (configurable ID)
-        indoor_id_raw = self.pluginPrefs.get("ecowittIndoorDeviceId", str(_ECOWITT_INDOOR_DEFAULT))
-        try:
-            indoor_id = int(indoor_id_raw) if indoor_id_raw else None
-        except (ValueError, TypeError):
-            indoor_id = None
+        # Ecowitt indoor sensor — pressure + indoor temp/humidity (configurable ID).
+        # Default None (matching the outdoor path + the empty XML default): a blank
+        # field simply skips the indoor section rather than reading a device id that
+        # only exists on the developer's install.
+        indoor_id_raw = self.pluginPrefs.get("ecowittIndoorDeviceId", "")
+        indoor_id     = _safe_int(indoor_id_raw, None) if indoor_id_raw else None
         if indoor_id:
             try:
                 in_dev  = indigo.devices[indoor_id]
@@ -1417,12 +1446,15 @@ class Plugin(indigo.PluginBase):
             if uvi is not None:
                 _b(f"OWM UV Index                  {uvi}")
 
-            # Solcast solar forecast (read from Indigo variables)
+            # Solcast solar forecast — looked up BY NAME (not hard-coded id) so a
+            # recreated/absent variable can't break it, and it silently omits the
+            # lines on any install where the Solcast feed isn't present.
             try:
-                sol_today    = indigo.variables[_VAR_SOLCAST_TODAY_ID].value
-                sol_tomorrow = indigo.variables[_VAR_SOLCAST_TOMORROW_ID].value
-                _b(f"Solcast Today                 {float(sol_today):.1f} kWh")
-                _b(f"Solcast Tomorrow              {float(sol_tomorrow):.1f} kWh")
+                sol_today    = get_variable_value("solcast_today_kwh")
+                sol_tomorrow = get_variable_value("solcast_tomorrow_kwh")
+                if sol_today is not None and sol_tomorrow is not None:
+                    _b(f"Solcast Today                 {float(sol_today):.1f} kWh")
+                    _b(f"Solcast Tomorrow              {float(sol_tomorrow):.1f} kWh")
             except Exception:
                 pass
         else:
@@ -1629,11 +1661,12 @@ class Plugin(indigo.PluginBase):
                 except (ValueError, TypeError):
                     pass
 
-            # Restore En Suite morning only if still within 06:00-09:59.
-            # Re-assert floor heat ON to ensure the physical state matches the
-            # restored mode (the plugin may have been restarted while the switch
-            # was manually turned off, or never turned on after a crash).
-            if st.get("en_suite_morning_active") and 6 <= datetime.now().hour < 10:
+            # Restore En Suite morning only if still within 06:00-09:59 AND the
+            # summer shut-off is not active. Re-assert floor heat ON to match the
+            # restored mode — but never during summer lockout, which holds the floor
+            # heating OFF (re-asserting it on here would fight the lockout).
+            if (st.get("en_suite_morning_active") and 6 <= datetime.now().hour < 10
+                    and not self._summer_lockout_active()):
                 self.store["en_suite_morning_active"] = True
                 _log("[EnSuiteMorning] Restored from state — still within morning window")
                 try:

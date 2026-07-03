@@ -334,5 +334,62 @@ class TestContactReaderParity(unittest.TestCase):
         self.assertFalse(hl._contact_is_open(4))
 
 
+# ===========================================================================
+class TestWeatherUrlRebuild(unittest.TestCase):
+    """v1.7.2 (#3): a changed API key or location must rebuild the request URL so
+    it takes effect without a plugin restart."""
+# ===========================================================================
+
+    def test_set_credentials_rebuilds_url(self):
+        import weather as wx
+        w = wx.WeatherData(api_key="OLDKEY", cache_path="/tmp/_evo_wx.json", lat=1.0, lon=2.0)
+        self.assertIn("appid=OLDKEY", w.api_url)
+        self.assertIn("lat=1.0", w.api_url)
+        w.set_credentials("NEWKEY", 54.9, -1.8)
+        self.assertIn("appid=NEWKEY", w.api_url)
+        self.assertIn("lat=54.9", w.api_url)
+        self.assertIn("lon=-1.8", w.api_url)
+        self.assertNotIn("OLDKEY", w.api_url)
+
+
+# ===========================================================================
+class TestOverheatResetAllTracking(unittest.TestCase):
+    """v1.7.2 (#6): reset_all_tracking clears alert/counters so a room can't stay
+    stuck alert_sent=True across the summer lockout."""
+# ===========================================================================
+
+    def test_reset_clears_alert_state(self):
+        import overheat_monitor as om
+        m = om.OverheatMonitor("/tmp/_evo_oh_reset.json", run_interval_mins=5)
+        m.history["Bathroom"] = {
+            "consecutive_cycles": 8, "stable_cycles": 1, "alert_sent": True,
+            "all_clear_sent": False, "alert_type": "CRITICAL_IMMEDIATE",
+            "off_since_cycle": 4, "is_coasting": True,
+        }
+        m.reset_all_tracking()
+        b = m.history["Bathroom"]
+        self.assertEqual(b["consecutive_cycles"], 0)
+        self.assertFalse(b["alert_sent"])
+        self.assertTrue(b["all_clear_sent"])
+        self.assertIsNone(b["alert_type"])
+
+
+# ===========================================================================
+class TestHalfDegreeRounding(unittest.TestCase):
+    """v1.7.2 (HL7): setpoints round to the nearest 0.5degC (RAMSES resolution),
+    not to a whole degree."""
+# ===========================================================================
+
+    def test_half_degree_preserved(self):
+        # Mirror the clamp expression used in process_room_temperature
+        def clamp(x):
+            x = round(x * 2) / 2
+            return max(hl.RADIATORS_OFF_TEMP, min(x, hl.MAX_ROOM_TEMP))
+        self.assertEqual(clamp(20.5), 20.5)      # half degree kept
+        self.assertEqual(clamp(21.3), 21.5)      # rounds up to nearest 0.5
+        self.assertEqual(clamp(19.4), 19.5)      # rounds up to nearest 0.5
+        self.assertEqual(clamp(19.1), 19.0)      # rounds down to nearest 0.5
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

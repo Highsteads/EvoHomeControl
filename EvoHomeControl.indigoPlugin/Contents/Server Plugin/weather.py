@@ -61,11 +61,9 @@ class WeatherData:
         # coordinates if anyone instantiates this class directly.
         self.api_key        = api_key
         self.cache_path     = cache_path
-        self.api_url        = (
-            f"https://api.openweathermap.org/data/3.0/onecall"
-            f"?lat={lat}&lon={lon}&appid={api_key}"
-            f"&units=metric&exclude=alerts"
-        )
+        self.lat            = lat
+        self.lon            = lon
+        self._rebuild_url()
         self.bypass         = bypass
         self.bypass_temp    = bypass_temp
         self.ttl            = cache_ttl_secs
@@ -82,6 +80,23 @@ class WeatherData:
         # not flood the event log every cycle.
         self._ecowitt_last_warn = {}   # {reason: timestamp}
         self._ECOWITT_WARN_INTERVAL = 1800  # 30 minutes
+
+    def _rebuild_url(self):
+        """(Re)build the OWM One Call URL from the current key + coordinates."""
+        self.api_url = (
+            f"https://api.openweathermap.org/data/3.0/onecall"
+            f"?lat={self.lat}&lon={self.lon}&appid={self.api_key}"
+            f"&units=metric&exclude=alerts"
+        )
+
+    def set_credentials(self, api_key, lat, lon):
+        """Update key + coordinates and rebuild the request URL. Used by
+        closedPrefsConfigUi so a changed API key or location takes effect
+        immediately rather than only after a plugin restart."""
+        self.api_key = api_key
+        self.lat     = lat
+        self.lon     = lon
+        self._rebuild_url()
 
     # ------------------------------------------------------------------
     # Public API
