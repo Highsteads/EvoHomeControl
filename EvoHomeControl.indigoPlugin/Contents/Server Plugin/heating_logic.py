@@ -7,11 +7,28 @@
 # Date:        30-04-2026
 # Version:     1.3
 
+import logging
 from datetime import datetime as dt
 
 import indigo  # noqa — available in plugin context
 
 import schedules
+
+# indigo.server.log()'s level= wants a Python logging int; a STRING is silently
+# ignored and the line logs as Info. Translate string levels at the choke points.
+_LOG_LEVELS = {
+    "INFO":     logging.INFO,
+    "WARNING":  logging.WARNING,
+    "ERROR":    logging.ERROR,
+    "DEBUG":    logging.DEBUG,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _to_level(level):
+    if isinstance(level, str):
+        return _LOG_LEVELS.get(level.upper(), logging.INFO)
+    return level
 
 # ---------------------------------------------------------------------------
 # DEVICE IDs — contact sensors and radiators (RAMSES ESP zones)
@@ -158,7 +175,7 @@ def _log(message, level="INFO", log_buffer=None, file_only=False):
     file_only=True suppresses the Indigo event log; data still goes to log_buffer."""
     formatted = f"[{dt.now().strftime('%H:%M:%S.%f')[:-3]}] {message}"
     if not file_only:
-        indigo.server.log(formatted, level=level)
+        indigo.server.log(formatted, level=_to_level(level))
     if log_buffer is not None:
         log_buffer.append(formatted)
 
@@ -206,7 +223,7 @@ def validate_configuration():
             errors.append(f"Missing required device: {dev_label} (ID: {dev_id})")
 
     for error in errors:
-        indigo.server.log(error, level="ERROR")
+        indigo.server.log(error, level=_to_level("ERROR"))
     return len(errors) == 0
 
 
@@ -215,7 +232,7 @@ def update_variable(var_id_or_name, value):
     try:
         indigo.variable.updateValue(var_id_or_name, str(value))
     except Exception as e:
-        indigo.server.log(f"[heating_logic] Error updating variable {var_id_or_name}: {e}", level="ERROR")
+        indigo.server.log(f"[heating_logic] Error updating variable {var_id_or_name}: {e}", level=_to_level("ERROR"))
 
 
 def get_variable_value(var_id_or_name, default=None):
@@ -569,7 +586,7 @@ def conservatory_special_rules(temp, msg, windows_open, doors_open,
             temp = 12
             msg  = 5
     except Exception as e:
-        indigo.server.log(f"[conservatory_rules] Error checking slide door: {e}", level="ERROR")
+        indigo.server.log(f"[conservatory_rules] Error checking slide door: {e}", level=_to_level("ERROR"))
     return temp, msg
 
 

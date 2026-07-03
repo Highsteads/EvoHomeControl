@@ -16,19 +16,19 @@
     </Action>
 
     <!-- Timed Boost: all 4 living rooms +2°C for 1 hour -->
-    <Action id="startTimedBoost1h" deviceFilter="self.heatingController" uiPath="DeviceActions">
+    <Action id="startTimedBoost1h" uiPath="DeviceActions">
         <Name>Start Timed Boost (1 hour)</Name>
         <CallbackMethod>actionStartTimedBoost1h</CallbackMethod>
     </Action>
 
     <!-- Timed Boost: all 4 living rooms +2°C for 2 hours -->
-    <Action id="startTimedBoost2h" deviceFilter="self.heatingController" uiPath="DeviceActions">
+    <Action id="startTimedBoost2h" uiPath="DeviceActions">
         <Name>Start Timed Boost (2 hours)</Name>
         <CallbackMethod>actionStartTimedBoost2h</CallbackMethod>
     </Action>
 
     <!-- Cancel timed boost immediately, revert to schedule -->
-    <Action id="cancelTimedBoost" deviceFilter="self.heatingController" uiPath="DeviceActions">
+    <Action id="cancelTimedBoost" uiPath="DeviceActions">
         <Name>Cancel Timed Boost</Name>
         <CallbackMethod>actionCancelTimedBoost</CallbackMethod>
     </Action>
@@ -40,13 +40,13 @@
     </Action>
 
     <!-- Force an immediate heating cycle (useful for testing) -->
-    <Action id="runCycleNow" deviceFilter="self.heatingController" uiPath="DeviceActions">
+    <Action id="runCycleNow" uiPath="DeviceActions">
         <Name>Run Heating Cycle Now</Name>
         <CallbackMethod>actionRunCycleNow</CallbackMethod>
     </Action>
 
     <!-- Away mode toggle -->
-    <Action id="setAwayMode" deviceFilter="self.heatingController" uiPath="DeviceActions">
+    <Action id="setAwayMode" uiPath="DeviceActions">
         <Name>Set Away Mode</Name>
         <CallbackMethod>actionSetAwayMode</CallbackMethod>
         <ConfigUI>

@@ -8,9 +8,28 @@
 
 import os
 import json
+import logging
 from datetime import datetime as dt
 
 import indigo  # noqa — available in plugin context
+
+# _slog()'s level= wants a Python logging int; a STRING is silently
+# ignored and the line logs as Info. Translate string levels at the choke point.
+_LOG_LEVELS = {
+    "INFO":     logging.INFO,
+    "WARNING":  logging.WARNING,
+    "ERROR":    logging.ERROR,
+    "DEBUG":    logging.DEBUG,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _slog(message, level="INFO"):
+    """indigo.server.log with string-level translation (string levels are otherwise
+    silently downgraded to Info by Indigo)."""
+    lvl = _LOG_LEVELS.get(level.upper(), logging.INFO) if isinstance(level, str) else level
+    indigo.server.log(message, level=lvl)
+
 
 # ---------------------------------------------------------------------------
 # Alert thresholds (defaults — may be overridden per room via room_specific_thresholds)
@@ -33,6 +52,14 @@ class OverheatMonitor:
 
     def __init__(self, history_path, run_interval_mins=5):
         self.history_file             = history_path
+        # Defensive coercion: a blank/zero/non-numeric interval must never reach the
+        # integer divisions below (ZeroDivisionError / TypeError on the startup path).
+        try:
+            run_interval_mins = int(run_interval_mins)
+        except (ValueError, TypeError):
+            run_interval_mins = 5
+        if run_interval_mins <= 0:
+            run_interval_mins = 5
         self.run_interval_mins        = run_interval_mins
 
         self.critical_overheat_temp   = ALERT_CRITICAL_TEMP
@@ -72,7 +99,7 @@ class OverheatMonitor:
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                indigo.server.log(
+                _slog(
                     f"[OverheatMonitor] Error loading history: {e}",
                     level="WARNING"
                 )
@@ -85,7 +112,7 @@ class OverheatMonitor:
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.history, f, indent=2)
         except Exception as e:
-            indigo.server.log(
+            _slog(
                 f"[OverheatMonitor] Error saving history: {e}",
                 level="ERROR"
             )
@@ -162,7 +189,7 @@ class OverheatMonitor:
                     # Valve has been off 3+ cycles — passive warmth (solar/internal gain)
                     # Not a TRV fault; suppress alert and mark sent so it does not
                     # re-trigger every cycle.
-                    indigo.server.log(
+                    _slog(
                         f"[OverheatMonitor] {room_name}: alert suppressed "
                         f"(passive warmth — solar/internal gain, no TRV action)"
                     )
@@ -170,7 +197,7 @@ class OverheatMonitor:
                     room_data["alert_type"]      = "PASSIVE_GAIN"
                     room_data["all_clear_sent"]  = False
                 elif outdoor_temp is not None and outdoor_temp > self.outdoor_suppress_temp:
-                    indigo.server.log(
+                    _slog(
                         f"[OverheatMonitor] {room_name}: alert suppressed "
                         f"(outdoor {outdoor_temp:.1f}degC > {self.outdoor_suppress_temp}degC)"
                     )
@@ -194,7 +221,7 @@ class OverheatMonitor:
                 suppressed_types = {"PASSIVE_GAIN", "OUTDOOR_SUPPRESSED"}
                 if room_data.get("alert_type") in suppressed_types:
                     # Was suppressed — reset silently, no Pushover all-clear
-                    indigo.server.log(
+                    _slog(
                         f"[OverheatMonitor] {room_name}: returned to normal "
                         f"(was {room_data['alert_type']}, no alert was sent)"
                     )
@@ -258,7 +285,7 @@ class OverheatMonitor:
 
         self._send_pushover(title, message, priority=1)
         self._send_email(title, message)
-        indigo.server.log(
+        _slog(
             f"[OverheatMonitor] CRITICAL OVERHEAT ALERT sent for {room_name}: "
             f"{overheat_amount:+.1f}degC over target",
             level="WARNING"
@@ -304,7 +331,7 @@ class OverheatMonitor:
 
         self._send_pushover(title, message, priority=-1)
         self._send_email(title, message)
-        indigo.server.log(
+        _slog(
             f"[OverheatMonitor] ALL CLEAR sent for {room_name}: room returned to normal"
         )
         if self.event_callback:
@@ -322,7 +349,7 @@ class OverheatMonitor:
         try:
             plugin = indigo.server.getPlugin("io.thechad.indigoplugin.pushover")
             if plugin is None or not plugin.isEnabled():
-                indigo.server.log(
+                _slog(
                     "[OverheatMonitor] Pushover plugin not available",
                     level="WARNING"
                 )
@@ -338,7 +365,7 @@ class OverheatMonitor:
             })
             return True
         except Exception as e:
-            indigo.server.log(
+            _slog(
                 f"[OverheatMonitor] Pushover error: {e}",
                 level="ERROR"
             )
@@ -356,7 +383,7 @@ class OverheatMonitor:
             )
             return True
         except Exception as e:
-            indigo.server.log(
+            _slog(
                 f"[OverheatMonitor] Email error: {e}",
                 level="ERROR"
             )

@@ -4,8 +4,20 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
-# Date:        10-06-2026
-# Version:     1.6.2
+# Date:        03-07-2026
+# Version:     1.7.0
+#
+# v1.7.0 (03-07-2026): Deep-review HIGH batch. (1) runConcurrentThread now isolates
+# each tick (log-and-continue, re-raise StopThread) and each of the 12 zones
+# (_safe_process_room) so one transient error can no longer silently kill the 24/7
+# heating loop. (2) Every pluginPrefs int()/float() on the hot path is now guarded
+# via _safe_int/_safe_float + a clamped _run_interval_mins() helper (a blank/zero
+# config field previously raised on the next tick and stopped the loop; "0" would
+# ZeroDivision the OverheatMonitor timers). (3) String log levels ("WARNING"/"ERROR")
+# were being silently downgraded to Info by Indigo — all four modules now translate
+# to logging ints (_to_level / _slog). (4) The five timed-boost/run-now/away actions
+# were gated behind a Heating Controller device that does not exist on this install,
+# so they were unusable — deviceFilter dropped, they are now plugin-level/scriptable.
 #
 # v1.6.1 (07-06-2026): Added showSummerStatus action (callable via executeAction
 # from the Dashboards heating page control panel; mirrors menuShowSummerStatus).
@@ -72,6 +84,7 @@ import sys
 import json
 import shutil
 import time
+import logging
 import functools
 from datetime import datetime, timedelta
 
@@ -166,7 +179,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.6.2"
+PLUGIN_VERSION  = "1.7.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
@@ -208,9 +221,30 @@ _changes_log_fh  = None
 _log_date        = None
 
 
+_LOG_LEVELS = {
+    "INFO":    logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR":   logging.ERROR,
+    "DEBUG":   logging.DEBUG,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _to_level(level):
+    """Translate a string log level to a Python logging int.
+
+    indigo.server.log()'s level= expects a logging int; a STRING is silently
+    ignored and the line is logged as Info. Callers throughout this plugin pass
+    string levels ('WARNING'/'ERROR'), so translate here at the single choke point.
+    """
+    if isinstance(level, str):
+        return _LOG_LEVELS.get(level.upper(), logging.INFO)
+    return level
+
+
 def _log(message, level="INFO"):
     """Log with timestamp to Indigo event log."""
-    indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {message}", level=level)
+    indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {message}", level=_to_level(level))
 
 
 def _wind_compass(degrees):
@@ -308,10 +342,20 @@ class Plugin(indigo.PluginBase):
     # Indigo lifecycle
     # -----------------------------------------------------------------------
 
+    def _run_interval_mins(self):
+        """Configured heating-cycle interval in minutes, coerced and clamped to >= 1.
+
+        Config textfields come back as strings (blank after a dialog save), so a bare
+        int() would raise on the hot path; a 0 would ZeroDivision the OverheatMonitor
+        timers. Route every read of runIntervalMins through here.
+        """
+        n = _safe_int(self.pluginPrefs.get("runIntervalMins", 5), 5)
+        return max(1, n)
+
     def startup(self):
         _log(f"{PLUGIN_NAME} v{PLUGIN_VERSION} starting")
 
-        run_interval = int(self.pluginPrefs.get("runIntervalMins", 5))
+        run_interval = self._run_interval_mins()
 
         # OWM API key: IndigoSecrets.py wins over PluginConfig
         owm_key = _SECRETS_OWM_KEY or self.pluginPrefs.get("owmApiKey", "")
@@ -405,9 +449,9 @@ class Plugin(indigo.PluginBase):
                 owm_key = _SECRETS_OWM_KEY or values_dict.get("owmApiKey", "")
                 self.weather.api_key        = owm_key
                 self.weather.bypass         = values_dict.get("weatherBypass", False)
-                self.weather.bypass_temp    = float(values_dict.get("weatherBypassTemp", 6.0))
+                self.weather.bypass_temp    = _safe_float(values_dict.get("weatherBypassTemp", 6.0), 6.0)
                 ecowitt_raw                 = values_dict.get("ecowittDeviceId", "")
-                self.weather.ecowitt_dev_id = int(ecowitt_raw) if ecowitt_raw else None
+                self.weather.ecowitt_dev_id = _safe_int(ecowitt_raw, None) if ecowitt_raw else None
             if self.overheat:
                 self.overheat.pushover_user_key = (
                     _SECRETS_PUSHOVER_KEY or values_dict.get("pushoverUserKey", "")
@@ -415,7 +459,7 @@ class Plugin(indigo.PluginBase):
                 self.overheat.email_address = (
                     _SECRETS_OVERHEAT_EMAIL or values_dict.get("alertEmailAddress", "")
                 )
-                run_interval = int(values_dict.get("runIntervalMins", 5))
+                run_interval = max(1, _safe_int(values_dict.get("runIntervalMins", 5), 5))
                 self.overheat.run_interval_mins        = run_interval
                 self.overheat.critical_duration_cycles = (6 * 60) // run_interval
                 self.overheat.all_clear_cycles         = max(2, 30 // run_interval)
@@ -428,17 +472,24 @@ class Plugin(indigo.PluginBase):
     # -----------------------------------------------------------------------
 
     def runConcurrentThread(self):
-        try:
-            while True:
-                now = time.time()
-                self._tick(now)
+        while True:
+            try:
+                self._tick(time.time())
+            except self.StopThread:
+                raise
+            except Exception as e:
+                # Per-tick isolation: one transient error (blank pref, deleted
+                # variable, a bad zone, a weather edge case) must NOT permanently
+                # kill the 24/7 heating loop. Log and carry on to the next tick.
+                self.logger.exception(f"[Cycle] Unhandled error in heating tick — continuing: {e}")
+            try:
                 self.sleep(POLL_SLEEP_SECS)
-        except self.StopThread:
-            pass
+            except self.StopThread:
+                raise
 
     def _tick(self, now):
         """Called every POLL_SLEEP_SECS. Dispatches timed tasks."""
-        run_interval_secs = int(self.pluginPrefs.get("runIntervalMins", 5)) * 60
+        run_interval_secs = self._run_interval_mins() * 60
 
         # Summer 24h force-on expiry check (every tick) — revert to shut-off
         self._check_summer_force_expiry()
@@ -503,7 +554,7 @@ class Plugin(indigo.PluginBase):
         self.store["snow_forecast"] = snow_forecast
         temp_offset   = calculate_temp_offset(outdoor_temp)
         if snow_forecast and self.pluginPrefs.get("snowHeatingEnabled", True):
-            snow_boost   = float(self.pluginPrefs.get("snowHeatingBoost", "1.0"))
+            snow_boost   = _safe_float(self.pluginPrefs.get("snowHeatingBoost", "1.0"), 1.0)
             temp_offset += snow_boost
             _log(f"[Snow] Forecast detected — applying +{snow_boost:.1f}degC heating boost")
             # Fire only on rising edge (was no snow last cycle, snow this cycle)
@@ -529,7 +580,7 @@ class Plugin(indigo.PluginBase):
             self.store["last_header_hour"] = hour
 
         # Process all 12 rooms
-        run_interval = int(self.pluginPrefs.get("runIntervalMins", 5))
+        run_interval = self._run_interval_mins()
         self._process_all_rooms(hour, minute, temp_offset, outdoor_temp, run_interval,
                                 force_hourly=do_hourly)
 
@@ -545,6 +596,16 @@ class Plugin(indigo.PluginBase):
 
         if self.debug:
             _log(f"[Debug] Cycle complete — {datetime.now().strftime('%H:%M:%S')}")
+
+    def _safe_process_room(self, **kwargs):
+        """Per-room isolation wrapper: one failing zone (missing device, bad sensor
+        read) must not abort the remaining zones or the save/flush tail of the cycle."""
+        room = kwargs.get("room_name", "?")
+        try:
+            process_room_temperature(**kwargs)
+        except Exception as e:
+            _log(f"[Cycle] Room '{room}' processing failed — skipped this cycle: {e}",
+                 level="ERROR")
 
     def _process_all_rooms(self, hour, minute, temp_offset, outdoor_temp, run_interval,
                            force_hourly=False):
@@ -581,7 +642,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 1. Bathroom
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Bathroom",
             room_schedule  = schedules.Bathroom,
             guest_schedule = schedules.Bathroom_Guest if guest_active else None,
@@ -592,7 +653,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 2. Bedroom 1
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Bedroom 1",
             room_schedule  = schedules.Bedroom_1,
             window_devices = [DEV_BEDROOM_1_WINDOW_ID],
@@ -601,7 +662,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 3. Bedroom 2
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Bedroom 2",
             room_schedule  = schedules.Bedroom_2,
             guest_schedule = schedules.Bedroom_2_Guest if guest_2 else None,
@@ -612,7 +673,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 4. Bedroom 3
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Bedroom 3",
             room_schedule  = schedules.Bedroom_3,
             guest_schedule = schedules.Bedroom_3_Guest if guest_3 else None,
@@ -624,7 +685,7 @@ class Plugin(indigo.PluginBase):
 
         # 5. En Suite (with morning schedule special rules + floor heating)
         morning_active = self.store.get("en_suite_morning_active", False)
-        process_room_temperature(
+        self._safe_process_room(
             room_name                  = "En Suite",
             room_schedule              = schedules.En_Suite,
             window_devices             = [DEV_EN_SUITE_WINDOW_ID],
@@ -639,7 +700,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 6. Conservatory
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Conservatory",
             room_schedule  = schedules.Conservatory,
             window_devices = [DEV_GARDEN_WINDOW_L_ID, DEV_GARDEN_WINDOW_R_ID],
@@ -650,7 +711,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 7. Dining Room (garden window/door reduces rather than closes valve)
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Dining Room",
             room_schedule  = schedules.Dining_Room,
             window_devices = [DEV_GARDEN_WINDOW_L_ID, DEV_GARDEN_WINDOW_R_ID],
@@ -661,7 +722,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 8. Hall Bedroom
-        process_room_temperature(
+        self._safe_process_room(
             room_name     = "Hall Bedroom",
             room_schedule = schedules.Hall_Bedroom,
             ha_device_id  = DEV_HALL_BEDROOM_ID,
@@ -669,7 +730,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 9. Hall Kitchen
-        process_room_temperature(
+        self._safe_process_room(
             room_name     = "Hall Kitchen",
             room_schedule = schedules.Hall_Kitchen,
             ha_device_id  = DEV_HALL_KITCHEN_ID,
@@ -677,7 +738,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 10. Living Room Front
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Living Room Front",
             room_schedule  = schedules.Living_Room_Front,
             window_devices = [DEV_LIVING_ROOM_L_WIN_ID, DEV_LIVING_ROOM_R_WIN_ID],
@@ -686,7 +747,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 11. Living Room Door
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Living Room Door",
             room_schedule  = schedules.Living_Room_Door,
             window_devices = [DEV_LIVING_ROOM_L_WIN_ID, DEV_LIVING_ROOM_R_WIN_ID],
@@ -695,7 +756,7 @@ class Plugin(indigo.PluginBase):
         )
 
         # 12. Utility Room
-        process_room_temperature(
+        self._safe_process_room(
             room_name      = "Utility Room",
             room_schedule  = schedules.Utility_Room,
             window_devices = [DEV_UTILITY_WINDOW_ID],
@@ -1150,7 +1211,7 @@ class Plugin(indigo.PluginBase):
         """Return snow forecast list, or [] if disabled / no snow expected."""
         if not self.weather:
             return []
-        hours = int(self.pluginPrefs.get("snowForecastHours", "12"))
+        hours = _safe_int(self.pluginPrefs.get("snowForecastHours", "12"), 12)
         return self.weather.get_snow_forecast(hours)
 
     # -----------------------------------------------------------------------
@@ -1173,7 +1234,7 @@ class Plugin(indigo.PluginBase):
         # Don't pollute the running cycle's snow_forecast cache from a menu click
         temp_offset   = calculate_temp_offset(outdoor_temp)
         if snow_forecast and self.pluginPrefs.get("snowHeatingEnabled", True):
-            temp_offset += float(self.pluginPrefs.get("snowHeatingBoost", "1.0"))
+            temp_offset += _safe_float(self.pluginPrefs.get("snowHeatingBoost", "1.0"), 1.0)
 
         # Swap the log buffer for a throwaway one for the duration of this call
         saved_buf = self.store["log_buffer"]
@@ -1205,7 +1266,7 @@ class Plugin(indigo.PluginBase):
         """
         def _b(msg, level="INFO"):
             formatted = f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}"
-            indigo.server.log(formatted, level=level)
+            indigo.server.log(formatted, level=_to_level(level))
             self.store["log_buffer"].append(formatted)
 
         _b("")
@@ -1470,7 +1531,7 @@ class Plugin(indigo.PluginBase):
                 shutil.copy2(_OLD_SETPOINT_CACHE, cache_path)
                 indigo.server.log("[EvoHomeControl] Migrated setpoint cache from Python Scripts dir")
             except Exception as e:
-                indigo.server.log(f"[EvoHomeControl] Setpoint cache migration failed: {e}", level="WARNING")
+                indigo.server.log(f"[EvoHomeControl] Setpoint cache migration failed: {e}", level=_to_level("WARNING"))
 
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
@@ -1624,7 +1685,7 @@ class Plugin(indigo.PluginBase):
         Forces an immediate heating cycle so the change applies now rather
         than waiting up to runIntervalMins minutes for the next scheduled cycle.
         """
-        active = action.props.get("awayActive", "true").lower() == "true"
+        active = str(action.props.get("awayActive", "true")).lower() == "true"
         update_variable(VAR_HOME_AWAY_ID, "true" if active else "false")
         _log(f"[Action] Away mode {'activated' if active else 'deactivated'} — forcing immediate cycle")
         self.store["last_heating_cycle"] = 0.0

@@ -8,10 +8,29 @@
 
 import os
 import json
+import logging
 import datetime
 import time
 
 import indigo  # noqa — available in plugin context
+
+# _slog()'s level= wants a Python logging int; a STRING is silently
+# ignored and the line logs as Info. Translate string levels at the choke point.
+_LOG_LEVELS = {
+    "INFO":     logging.INFO,
+    "WARNING":  logging.WARNING,
+    "ERROR":    logging.ERROR,
+    "DEBUG":    logging.DEBUG,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _slog(message, level="INFO"):
+    """indigo.server.log with string-level translation (string levels are otherwise
+    silently downgraded to Info by Indigo)."""
+    lvl = _LOG_LEVELS.get(level.upper(), logging.INFO) if isinstance(level, str) else level
+    indigo.server.log(message, level=lvl)
+
 
 # OWM weather condition codes that indicate snow or freezing precipitation
 # 600-622: all snow variants  |  511: freezing rain
@@ -91,14 +110,14 @@ class WeatherData:
                         self.last_update = datetime.datetime.now()
                         return True  # cache hit — no log to avoid file write noise
         except (OSError, ValueError, KeyError) as e:
-            indigo.server.log(
+            _slog(
                 f"[Weather] Cache read error (will fetch fresh): {e}",
                 level="WARNING"
             )
 
         # --- Cache miss or stale: fetch from OWM ---
         if not self.api_key:
-            indigo.server.log(
+            _slog(
                 "[Weather] No OWM API key configured — cannot fetch weather",
                 level="WARNING"
             )
@@ -111,7 +130,7 @@ class WeatherData:
             data = response.json()
 
             if not isinstance(data.get('current'), dict):
-                indigo.server.log(
+                _slog(
                     "[Weather] Missing 'current' in OWM response",
                     level="ERROR"
                 )
@@ -131,7 +150,7 @@ class WeatherData:
                 with open(self.cache_path, 'w', encoding='utf-8') as f:
                     json.dump({'fetched_at': now_ts, 'data': data}, f)
             except OSError as e:
-                indigo.server.log(
+                _slog(
                     f"[Weather] Cache write error (data still usable): {e}",
                     level="WARNING"
                 )
@@ -139,7 +158,7 @@ class WeatherData:
             return True
 
         except Exception as e:
-            indigo.server.log(
+            _slog(
                 f"[Weather] Error fetching from OWM: {e}",
                 level="ERROR"
             )
@@ -215,7 +234,7 @@ class WeatherData:
         now_ts   = time.time()
         last_ts  = self._ecowitt_last_warn.get(reason, 0)
         if now_ts - last_ts >= self._ECOWITT_WARN_INTERVAL:
-            indigo.server.log(f"[Weather] {message}", level="WARNING")
+            _slog(f"[Weather] {message}", level="WARNING")
             self._ecowitt_last_warn[reason] = now_ts
 
     def get_snow_forecast(self, hours=12):

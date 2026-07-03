@@ -216,5 +216,54 @@ class TestSummerWindow(unittest.TestCase):
         self.assertIn(hl.DEV_EN_SUITE_ID, hl.ALL_RADIATOR_IDS)
 
 
+# ===========================================================================
+class TestLogLevelTranslation(unittest.TestCase):
+    """v1.7.0: string log levels must translate to logging ints, else Indigo
+    silently downgrades WARNING/ERROR lines to Info."""
+# ===========================================================================
+
+    def test_heating_logic_to_level(self):
+        import logging
+        self.assertEqual(hl._to_level("WARNING"), logging.WARNING)
+        self.assertEqual(hl._to_level("error"),   logging.ERROR)     # case-insensitive
+        self.assertEqual(hl._to_level("INFO"),    logging.INFO)
+        self.assertEqual(hl._to_level("bogus"),   logging.INFO)      # unknown -> Info
+        self.assertEqual(hl._to_level(logging.ERROR), logging.ERROR)  # int passes through
+
+    def test_overheat_and_weather_slog_maps(self):
+        import logging
+        import overheat_monitor as om
+        import weather as wx
+        for mod in (om, wx):
+            self.assertEqual(mod._LOG_LEVELS["WARNING"], logging.WARNING)
+            self.assertEqual(mod._LOG_LEVELS["ERROR"],   logging.ERROR)
+
+
+# ===========================================================================
+class TestOverheatIntervalClamp(unittest.TestCase):
+    """v1.7.0: OverheatMonitor.__init__ must coerce/clamp run_interval_mins so a
+    blank or zero interval cannot ZeroDivision the derived cycle counters."""
+# ===========================================================================
+
+    def _make(self, interval):
+        import overheat_monitor as om
+        # history_path in a throwaway temp location; load_history tolerates absence
+        return om.OverheatMonitor("/tmp/_evohome_test_overheat_history.json", run_interval_mins=interval)
+
+    def test_zero_interval_does_not_crash(self):
+        m = self._make(0)
+        self.assertEqual(m.run_interval_mins, 5)
+        self.assertGreater(m.critical_duration_cycles, 0)
+
+    def test_blank_interval_does_not_crash(self):
+        m = self._make("")
+        self.assertEqual(m.run_interval_mins, 5)
+
+    def test_string_numeric_interval(self):
+        m = self._make("10")
+        self.assertEqual(m.run_interval_mins, 10)
+        self.assertEqual(m.critical_duration_cycles, (6 * 60) // 10)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
