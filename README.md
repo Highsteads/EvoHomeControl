@@ -2,14 +2,14 @@
 
 An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) bridge plugin.
 
-Converted from a scheduled Python script to a persistent plugin, adding timed boost, En Suite morning schedule, warm-morning skip, a whole-house summer shut-off, and window-aware floor heating control.
+It began life as a scheduled Python script and became a plugin that stays running, which brought timed boost, the En Suite morning schedule, the warm-morning skip, a whole-house summer shut-off, and window-aware floor heating control.
 
 ## Features
 
 - **12-zone heating control** — processes all Evohome TRV zones every 5 minutes via `runConcurrentThread`
-- **Overheat prevention** — detects rooms overheating and reduces setpoints; 3-tier logic (predictive, trigger, hysteresis)
-- **Window/door detection** — closes valves when windows or doors are open; restores on close
-- **Timed boost** — raise Dining Room, Living Room (door + front), and Hall Kitchen by +2°C for 1 or 2 hours; auto-reverts at expiry
+- **Overheat prevention** — spots a room getting too warm and drops its setpoint, using three tiers of logic (predictive, trigger, hysteresis)
+- **Window/door detection** — closes the valves while a window or door is open, and restores them when it shuts
+- **Timed boost** — lifts Dining Room, Living Room (door + front) and Hall Kitchen by +2°C for one or two hours, then reverts on its own
 - **Whole-house summer shut-off** — turns the whole house off for summer (default 1 June to 30 September): every radiator is held at the 8 °C frost setpoint and the En Suite floor heating is switched off. Dates are configurable and there is a master on/off toggle. A 24-hour **Force Heating On** action or menu item brings everything back to normal for a day, then it reverts on its own
 - **En Suite morning schedule** — automatic 22°C from 06:00–10:00 daily with floor heating; cancelled immediately if En Suite window opens; **also skipped entirely on warm mornings** (outdoor ≥ 10 °C at 06:00 → radiator stays off, floor heat not turned on)
 - **Weather integration** — OpenWeatherMap API with local Ecowitt bypass option
@@ -55,6 +55,7 @@ dialog — `IndigoSecrets.py` wins over the dialog when both are set.
 If a required value is set in NEITHER source the plugin logs an ERROR
 pointing the user to either fill in the matching field or add the key to
 `IndigoSecrets.py`.
+
 ## Actions
 
 | Action | Description |
@@ -79,14 +80,14 @@ pointing the user to either fill in the matching field or add the key to
 
 At 06:00 the plugin checks the current outdoor temperature. If it is at or above the warm-morning threshold (**10 °C**, hardcoded in `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD`):
 
-- The 22 °C morning slot is **not activated** — `enSuiteMorningActive` stays `false`
-- The floor heating switch is **not turned on**
-- The floor thermostat is **not modified**
-- The radiator is held at **8 °C** (`RADIATORS_OFF_TEMP`) for the remainder of 06:00–09:59 — otherwise the schedule's 19–20 °C values for those hours would still run
-- `cancelled_reason` in plugin state is set to `"warm_outdoor"` (visible via `_log_modes_section`)
+- The plugin skips the 22 °C morning slot — `enSuiteMorningActive` stays `false`
+- It leaves the floor heating switch off
+- It leaves the floor thermostat alone
+- It holds the radiator at **8 °C** (`RADIATORS_OFF_TEMP`) for the rest of 06:00–09:59, because the schedule's 19–20 °C values for those hours would otherwise still run
+- It sets `cancelled_reason` in plugin state to `"warm_outdoor"` (visible via `_log_modes_section`)
 - Event log shows: `Warm morning skip  (out >=10degC, rad+floor off)` (message code 24)
 
-If outdoor drops below 10 °C on a cold morning, the normal 22 °C slot runs as usual. The threshold is a single constant — edit `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD` to tune for a different installation.
+On a colder morning, with outdoor below 10 °C, the normal 22 °C slot runs as usual. The threshold is a single constant — edit `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD` to tune for a different installation.
 
 ## Whole-house Summer Shut-off
 
