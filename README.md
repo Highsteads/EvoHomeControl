@@ -11,7 +11,7 @@ It began life as a scheduled Python script and became a plugin that stays runnin
 - **Window/door detection** — closes the valves while a window or door is open, and restores them when it shuts
 - **Timed boost** — lifts Dining Room, Living Room (door + front) and Hall Kitchen by +2°C for one or two hours, then reverts on its own
 - **Whole-house summer shut-off** — turns the whole house off for summer (default 1 June to 30 September): every radiator is held at the 8 °C frost setpoint and the En Suite floor heating is switched off. Dates are configurable and there is a master on/off toggle. A 24-hour **Force Heating On** action or menu item brings everything back to normal for a day, then it reverts on its own
-- **En Suite morning schedule** — automatic 22°C from 06:00–10:00 daily with floor heating; cancelled immediately if En Suite window opens; **also skipped entirely on warm mornings** (outdoor ≥ 10 °C at 06:00 → radiator stays off, floor heat not turned on)
+- **En Suite morning schedule** — 22°C from 06:00 to 10:00 every day with the floor heating on, cancelled the moment the En Suite window opens, and **skipped altogether on warm mornings** (outdoor ≥ 10 °C at 06:00 leaves the radiator off and the floor heat untouched)
 - **Weather integration** — OpenWeatherMap API with local Ecowitt bypass option
 - **Away / Both-Out / Guest modes** — freeze protection and alternative schedules
 - **Daily rotating logs** — append-only daily log files with 14-day retention
