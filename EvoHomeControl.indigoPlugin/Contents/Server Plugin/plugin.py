@@ -4,8 +4,19 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
-# Date:        04-07-2026
-# Version:     1.7.2
+# Date:        21-07-2026
+# Version:     1.7.3
+#
+# v1.7.3 (21-07-2026): shared plugin_utils.py refreshed to v1.3 — the
+# estate-wide propagation of the four Appliance Monitor deep-review fixes.
+# * install_timestamp_filter() is idempotent — a second call used to stack a
+#   second filter, so every log line came out with two timestamps.
+# * `import indigo` is soft, so the module imports outside the Indigo host and
+#   can be exercised by offline tests.
+# * A malformed log call keeps its arguments in the log instead of dropping
+#   them, so a %-placeholder mismatch is visible.
+# * New shared as_bool() — a pref re-serialised as the string "false" is
+#   truthy, which is exactly the wrong answer.
 #
 # v1.7.2 (04-07-2026): Deep-review LOW batch. (1) A changed OWM API key OR location
 # now takes effect on config-save without a restart — WeatherData rebuilds its
@@ -210,7 +221,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.7.2"
+PLUGIN_VERSION  = "1.7.3"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
