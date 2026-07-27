@@ -64,6 +64,7 @@ the key and telling you to either fill in the matching field or add the key to
 | Start Timed Boost (1 hour) | Raises Dining Room, Living Room, Hall Kitchen by +2°C for 1 hour |
 | Start Timed Boost (2 hours) | Same rooms, 2 hour duration |
 | Cancel Timed Boost | Immediately reverts boost rooms to schedule |
+| Show Summer Shut-off Status | Logs the current summer shut-off state, for dashboards and scripts to read |
 | Run Heating Cycle Now | Forces an immediate heating cycle |
 | Set Away Mode | Activates or deactivates away mode |
 | Force Heating On (24 hours) | Overrides the summer shut-off and restores fully normal heating for 24 hours, then auto-reverts |
@@ -154,6 +155,11 @@ survives a restart. It defaults to ON.
 | 1.6.2 | 10-06-2026 | Housekeeping — lint tidy-up and a continuous-integration check added as part of a fleet-wide audit. No behaviour change. |
 | 1.6.1 | 07-06-2026 | Added a **Show Summer Shut-off Status** action so the heating dashboard can report the summer state on demand. |
 | 1.6.0 | 06-06-2026 | Whole-house summer shut-off (default 1 Jun–30 Sep, configurable): all radiators held at 8 °C and the En Suite floor heating off for the window, with the normal cycle and En Suite morning boost skipped. New 24-hour **Force Heating On** / **Cancel Forced Heating** actions and menu items (override persists across restarts), two custom events, and a `summerStatus` device state. Co-authored with Claude Opus 4.8. |
+| 1.5.7 | 05-06-2026 | Estate bug-sweep. Every numeric setting is now read defensively — the Ecowitt device ID, the latitude and longitude, and the weather bypass temperature were all converted straight from their text fields, so anything non-numeric left in one of them stopped the plugin loading. The Pushover alert priority is now passed as text, which is what the Pushover plugin expects. |
+| 1.5.6 | 04-06-2026 | The heating-cycle log lines moved from second to millisecond timestamps, matching the rest of the plugin and the other CliveS plugins. |
+| 1.5.5 | 03-06-2026 | The outdoor-temperature record variables are now looked up by name rather than by a hard-coded ID. Recreating those variables used to break the lookup and spam an error every cycle. Records only — no effect on heating. |
+| 1.5.4 | 29-05-2026 | The hourly radiator report now fires on the first cycle of each new clock hour instead of waiting for minute zero. The heating cycle drifts a few seconds an hour, so once its firing time crept past the hour boundary the report silently stopped for days at a stretch. |
+| 1.5.3 | 25-05-2026 | Housekeeping — the plugin no longer cycles a device's communication every time it writes that device's own properties. No change in behaviour. |
 | 1.5.2 | 23-05-2026 | Millisecond timestamp `[HH:MM:SS.mmm]` prefix on every `self.logger` line via `plugin_utils.install_timestamp_filter()`; new "Toggle Timestamps in Log" menu item. |
 | 1.5.1 | 23-05-2026 | Secrets-policy housekeeping — `weather.py` `OWMWeather` constructor default lat/lon switched from CliveS coords (54.882, -1.818) to `0.0, 0.0`. The plugin startup path always passes real values resolved from `IndigoSecrets` / PluginConfig; the defensive default just stops the developer location leaking if anyone ever instantiates the class directly. No user-visible behaviour change. |
 | 1.5 | 23-05-2026 | En Suite warm-morning skip — if outdoor ≥ 10 °C at 06:00 the morning slot is not activated (radiator stays off, floor heat off, floor thermostat untouched). New `cancelled_reason` value `"warm_outdoor"` and new event-log message code 24. Co-authored with Claude Opus 4.7. |
