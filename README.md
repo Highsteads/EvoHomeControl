@@ -44,7 +44,6 @@ shared master file:
 
 | File | Purpose | Real data? | Committed to GitHub? |
 |------|---------|------------|----------------------|
-| 1.7.4 | 08-Aug-2026 | **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed. |
 | `IndigoSecrets.py` | Working file the plugin reads at runtime. Keep a backup in a password manager. | YES | **NO** — listed in `.gitignore` |
 | `IndigoSecrets_example.py` | Template only — empty placeholders. Shipped in the plugin bundle. | NO | YES |
 
@@ -149,6 +148,7 @@ survives a restart. It defaults to ON.
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.7.4 | 08-Aug-2026 | **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed. |
 | 1.7.3 | 21-07-2026 | Housekeeping. Named log levels now map to the real logging levels — warnings and errors raised through the shared helper had been appearing as plain info lines, so amber and red entries people relied on for diagnosis never showed. Shared-utility refresh: calling the log timestamp filter twice no longer double-stamps every line, and the module imports cleanly outside Indigo. |
 | 1.7.2 | 04-07-2026 | Final tidy-up pass from the review. Changing the OpenWeatherMap key or your location in the settings now takes effect straight away rather than only after a restart. The morning En Suite floor heating is no longer switched back on while the summer shut-off is holding everything off. The overheat monitor is a bit sturdier — its status readouts no longer trip over a reading arriving at the same moment, and it starts each heating season with a clean slate. Alerts now quote the actual amount a radiator was turned down by. Setpoints keep their half-degree precision instead of being rounded to the nearest whole degree. A couple of developer-specific device references were removed so the plugin behaves the same on anyone's system. Co-authored with Claude Opus 4.8. |
 | 1.7.1 | 03-07-2026 | Second robustness pass from the same review. The saved state files (boost and force-on timers, the setpoint cache, the overheat history and the weather cache) are now written safely so a crash or power cut part-way through a save can no longer leave a corrupt file, and a corrupt or old state file is now shrugged off at startup rather than stopping the plugin from loading. The overheat alert no longer trips over a missing outdoor temperature. If a radiator briefly stops reporting its temperature the plugin now leaves that room on its current setting for the cycle rather than treating it as freezing cold. Door sensors are now read the same reliable way as window sensors. The weather error log no longer echoes the OpenWeatherMap key. Co-authored with Claude Opus 4.8. |
