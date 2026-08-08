@@ -44,6 +44,7 @@ shared master file:
 
 | File | Purpose | Real data? | Committed to GitHub? |
 |------|---------|------------|----------------------|
+| 1.7.4 | 08-Aug-2026 | **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed. |
 | `IndigoSecrets.py` | Working file the plugin reads at runtime. Keep a backup in a password manager. | YES | **NO** — listed in `.gitignore` |
 | `IndigoSecrets_example.py` | Template only — empty placeholders. Shipped in the plugin bundle. | NO | YES |
 
