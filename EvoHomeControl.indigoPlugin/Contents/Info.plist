@@ -10,8 +10,6 @@
 	<string>com.clives.indigoplugin.evohomecontrol</string>
 	<key>CFBundleName</key>
 	<string>EvoHomeControl</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.7.2</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
