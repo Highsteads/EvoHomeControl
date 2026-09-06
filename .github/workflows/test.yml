@@ -20,6 +20,13 @@ jobs:
           python-version: "3.13"   # matches Indigo 2025.2's embedded Python
       - name: Syntax check
         run: python -m compileall -q "EvoHomeControl.indigoPlugin/Contents/Server Plugin"
+      # This job has been named "tests" since it was created and until now it ran
+      # none. The suite needs no third-party packages and no Indigo: it stubs
+      # `indigo` and `schedules` at import. Verified green in a clean 3.13
+      # virtualenv against a tracked-files-only tree, with IndigoSecrets absent.
+      - name: Unit tests
+        working-directory: "EvoHomeControl.indigoPlugin/Contents/Server Plugin"
+        run: python -m unittest discover -p "test_*.py" -v
       - name: Lint (ruff — errors only, see ruff.toml)
         run: |
           pip install ruff

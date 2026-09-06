@@ -499,12 +499,20 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
                               last_setpoints, last_messages,
                               log_buffer, changes_buffer,
                               dev_temp=None, scheduled_temp=None,
-                              overheat_amount=None, force_log=False):
+                              overheat_amount=None, force_log=False,
+                              event_log_dump=True):
     """
     Send new setpoint to RAMSES ESP thermostat and log if changed.
 
     force_log=True  -> always write the room log line (hourly full dump)
     force_log=False -> only write if setpoint calculation changed
+
+    event_log_dump=False -> the hourly full dump still reaches log_buffer, and so
+    the plugin's own daily log file, but is NOT echoed into the shared Indigo
+    event log. Twelve room lines an hour is 288 lines a day of routine narration
+    in a log the whole estate reads. Defaults True so any caller that does not
+    pass it keeps the previous behaviour. Error lines are unaffected - they never
+    set file_only and always reach the event log.
 
     Uses last_setpoints cache (not RAMSES device state) for change detection,
     because RAMSES does not always update setpointHeat promptly after a W 2349.
@@ -560,7 +568,11 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
                 message, room_name, setpoint_before, new_temp,
                 dev_temp, scheduled_temp, overheat_amount
             )
-            _log(log_line, log_buffer=log_buffer, file_only=(not force_log))
+            # The hourly dump reaches the event log only when the caller still
+            # wants it there; the daily file gets the line either way, because
+            # file_only gates indigo.server.log alone and never log_buffer.
+            _log(log_line, log_buffer=log_buffer,
+                 file_only=(not (force_log and event_log_dump)))
             if not force_log:
                 _log(get_reason_line(message, new_temp, overheat_amount),
                      log_buffer=log_buffer, file_only=True)
@@ -693,6 +705,11 @@ def process_room_temperature(
         # The plugin passes the clock-hour-change flag here so the dump is not
         # lost to heating-cycle drift past the :00 boundary.
         force_log_override=None,
+        # Whether the hourly full dump is also echoed into the shared Indigo
+        # event log. The plugin passes its logHourlyDumpToEventLog pref, which is
+        # quiet by default; the per-room lines always reach log_buffer and so the
+        # plugin's own daily log file regardless.
+        event_log_dump=True,
 ):
     """
     Process temperature update for one room.
@@ -954,4 +971,5 @@ def process_room_temperature(
         dev_temp, original_scheduled_temp, overheat_amount,
         force_log=(force_log_override if force_log_override is not None
                    else (current_minute == 0)),
+        event_log_dump=event_log_dump,
     )

@@ -5,7 +5,7 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
 # Date:        21-07-2026
-# Version:     1.7.4
+# Version:     1.8.0
 #
 # v1.7.4 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
 # EMPTY, so the plugin shipped without the support URL that becomes its
@@ -152,6 +152,21 @@ try:
     from plugin_utils import install_timestamp_filter
 except ImportError:
     install_timestamp_filter = None
+try:
+    from plugin_utils import as_bool
+except ImportError:
+    # Local fallback so a stale bundled plugin_utils cannot break pref reads.
+    def as_bool(value, default=False):
+        if isinstance(value, bool):
+            return value
+        if value is None or value == "":
+            return default
+        s = str(value).strip().lower()
+        if s in ("true", "1", "yes", "on", "t"):
+            return True
+        if s in ("false", "0", "no", "off", "f"):
+            return False
+        return default
 
 # ---------------------------------------------------------------------------
 # OWM API key from IndigoSecrets.py (overrides PluginConfig if present)
@@ -381,6 +396,15 @@ class Plugin(indigo.PluginBase):
         self.store["summer_force_active"] = False
         self.store["summer_force_expiry"] = None   # datetime object or None
 
+        # Once-on-change latch for the summer shut-off status line. Holds the
+        # exact sentence last put in the shared Indigo event log, or None when
+        # the shut-off is not being announced. The shut-off is a STATE, not an
+        # event: it was re-logged once per clock hour, which was 106 of this
+        # plugin's 113 event-log lines over the 5 days to 06-09-2026 (about 21
+        # identical sentences a day) in a log the whole estate shares. In-memory
+        # only, so a plugin restart re-announces once and then stays quiet.
+        self.store["summer_lockout_logged"] = None
+
         # En Suite morning schedule (auto 22°C 06:00-09:59, cancelled by window open)
         self.store["en_suite_morning_active"]           = False
         self.store["en_suite_morning_cancelled_date"]   = None  # "YYYY-MM-DD"
@@ -425,6 +449,21 @@ class Plugin(indigo.PluginBase):
         """
         n = _safe_int(self.pluginPrefs.get("runIntervalMins", 5), 5)
         return max(1, n)
+
+    def _event_log_dump_enabled(self):
+        """True if the hourly weather header and room table should also be
+        echoed into the shared Indigo event log.
+
+        Defaults to FALSE (quiet). In season this dump is by far the largest
+        thing this plugin puts in the event log: measured from the dated event
+        logs, the day after the hourly gate was fixed in v1.7.0 the plugin went
+        from ~210 lines a day to 965-991 a day (24 dumps x ~40 lines), against
+        an estate-wide total of about 2,031 lines a day. Every one of those
+        lines is already written to this plugin's own daily radiator_<date>.log
+        by _flush_log_buffers, so turning the echo off loses nothing - it just
+        stops routine narration filling a log the whole house shares. Set the
+        checkbox, or use the 'Show Full Weather Log' menu item, to see it."""
+        return as_bool(self.pluginPrefs.get("logHourlyDumpToEventLog", False), False)
 
     def startup(self):
         _log(f"{PLUGIN_NAME} v{PLUGIN_VERSION} starting")
@@ -485,6 +524,12 @@ class Plugin(indigo.PluginBase):
 
         _log(f"{PLUGIN_NAME} ready (cycle every {run_interval} min, poll every {POLL_SLEEP_SECS}s)")
         _log(f"[Summer] {self._summer_status_str()}")
+
+        # Seed the once-on-change latch. The line just logged IS this restart's
+        # announcement of the shut-off, so the first heating cycle must not say
+        # it again - a restart is worth one line in the event log, not two.
+        if self._summer_lockout_active():
+            self.store["summer_lockout_logged"] = self._summer_lockout_summary()
 
     def shutdown(self):
         global _heating_log_fh, _changes_log_fh
@@ -609,8 +654,9 @@ class Plugin(indigo.PluginBase):
         # ----------------------------------------------------------------
         # When the seasonal window is active (and no 24h force-on override is
         # running) skip the entire normal cycle: every radiator is held at
-        # RADIATORS_OFF_TEMP and the En Suite floor heating is off. A concise
-        # status line is logged once per clock hour to avoid 5-min spam.
+        # RADIATORS_OFF_TEMP and the En Suite floor heating is off. The status
+        # sentence goes to the shared event log once on change and to this
+        # plugin's own log every cycle - see _announce_summer_lockout.
         if self._summer_lockout_active():
             # Reset overheat tracking ONCE on lockout entry: update_room stops being
             # called during lockout, so a room left mid-alert would otherwise keep a
@@ -619,16 +665,19 @@ class Plugin(indigo.PluginBase):
                 self.overheat.reset_all_tracking()
                 self.store["summer_overheat_cleared"] = True
             self._apply_summer_off()
-            if self.store.get("last_header_hour") != hour:
-                _log(f"[Summer] Whole-house heating OFF for summer — all radiators "
-                     f"at {RADIATORS_OFF_TEMP:.0f}degC, En Suite floor heat off. "
-                     f"Resumes {self._summer_on_date_str()}.")
-                self.store["last_header_hour"] = hour
+            self._announce_summer_lockout()
+            # No hourly header is emitted during the shut-off, so the tracked hour
+            # would go stale for the whole season and could still match the hour
+            # heating resumes in, silently skipping the first full dump of the
+            # season. None guarantees that dump fires on the first in-season cycle.
+            self.store["last_header_hour"] = None
             self._update_controller_device(None, 0.0)
             return
 
         # Not in summer lockout — re-arm the one-time reset for the next lockout entry.
         self.store["summer_overheat_cleared"] = False
+        # Close the once-on-change latch if the season itself has ended.
+        self._announce_summer_lockout_end()
 
         # Read Indigo mode variables
         self._read_mode_variables()
@@ -733,6 +782,9 @@ class Plugin(indigo.PluginBase):
             timed_boost_active   = self.store["timed_boost_active"],
             timed_boost_rooms    = schedules.TIMED_BOOST_ROOMS,
             force_log_override   = force_hourly,
+            # Quiet by default: the hourly table still goes to the plugin's own
+            # daily log, just not into the shared estate event log.
+            event_log_dump       = self._event_log_dump_enabled(),
         )
 
         # 1. Bathroom
@@ -958,15 +1010,26 @@ class Plugin(indigo.PluginBase):
         on_d    = _safe_int(self.pluginPrefs.get("summerOnDay",        30), 30)
         return start_m, start_d, on_m, on_d
 
-    def _summer_lockout_active(self):
-        """True when the whole-house shut-off should be enforced right now:
-        feature enabled, today inside the off-window, and no 24h force override."""
+    def _summer_window_active(self):
+        """True when the feature is enabled AND today falls inside the seasonal
+        off-window, IGNORING any 24h force-on override.
+
+        Separate from _summer_lockout_active because the two answer different
+        questions: "is the season on?" versus "is the shut-off being enforced
+        this minute?". A force-on makes the second False while the first stays
+        True, and only the first should close the once-on-change latch - the
+        force-on logs its own START and END lines."""
         if not self._summer_enabled():
-            return False
-        if self.store.get("summer_force_active"):
             return False
         start_m, start_d, on_m, on_d = self._summer_window()
         return is_within_summer_off(datetime.now().date(), start_m, start_d, on_m, on_d)
+
+    def _summer_lockout_active(self):
+        """True when the whole-house shut-off should be enforced right now:
+        feature enabled, today inside the off-window, and no 24h force override."""
+        if self.store.get("summer_force_active"):
+            return False
+        return self._summer_window_active()
 
     def _summer_on_date_str(self):
         _, _, on_m, on_d = self._summer_window()
@@ -996,6 +1059,47 @@ class Plugin(indigo.PluginBase):
                     f"heating resumes {self._summer_on_date_str()}")
         return (f"In-season — heating normal. Summer shut-off runs "
                 f"{self._summer_off_start_str()} to {self._summer_on_date_str()}")
+
+    def _summer_lockout_summary(self):
+        """The one-line summary of an ACTIVE whole-house shut-off.
+
+        Kept as its own method so the cycle, the startup seed and the tests all
+        compare the same sentence - the latch works by string equality, so a
+        second copy of this text would re-announce on every cycle."""
+        return (f"[Summer] Whole-house heating OFF for summer — all radiators "
+                f"at {RADIATORS_OFF_TEMP:.0f}degC, En Suite floor heat off. "
+                f"Resumes {self._summer_on_date_str()}.")
+
+    def _announce_summer_lockout(self):
+        """Record the active shut-off: event log ONCE per change, own log always.
+
+        The shared Indigo event log is the estate's dashboard and this sentence
+        was being re-logged once per clock hour - about 21 identical lines a day,
+        106 of this plugin's 113 lines over the 5 days to 06-09-2026. It states a
+        SEASON, so it belongs in the event log when the shut-off starts (or when
+        its wording changes, e.g. the resume date is edited in prefs) and nowhere
+        else. self.logger.debug still writes it every cycle to the plugin's own
+        log file, which does not echo to the event log, so nothing is lost."""
+        summary = self._summer_lockout_summary()
+        self.logger.debug(summary)
+        if self.store.get("summer_lockout_logged") != summary:
+            _log(summary)
+            self.store["summer_lockout_logged"] = summary
+
+    def _announce_summer_lockout_end(self):
+        """Announce the end of the shut-off once, and disarm the latch.
+
+        Only fires when the SEASON has ended (or the feature was switched off).
+        A 24h force-on also stops the lockout being enforced, but it already
+        logs its own START and END lines, so the latch is deliberately left
+        armed through it - otherwise ending a force-on would put the shut-off
+        summary back in the event log a second time."""
+        if not self.store.get("summer_lockout_logged"):
+            return
+        if self._summer_window_active():
+            return
+        _log("[Summer] Summer shut-off ENDED - normal heating resumed.")
+        self.store["summer_lockout_logged"] = None
 
     def _apply_summer_off(self):
         """Hold every radiator at RADIATORS_OFF_TEMP and turn the En Suite floor
@@ -1340,7 +1444,12 @@ class Plugin(indigo.PluginBase):
             self.store["log_buffer"]    = []
             self.store["snow_forecast"] = snow_forecast
             try:
-                self._log_hourly_header(outdoor_temp, temp_offset, menu_mode=True)
+                # to_event_log=True unconditionally: the user clicked a menu item
+                # asking to SEE this, so it must appear whatever the quiet-by-default
+                # logHourlyDumpToEventLog pref says. Throwing it only into the daily
+                # file would make the menu item look broken.
+                self._log_hourly_header(outdoor_temp, temp_offset, menu_mode=True,
+                                        to_event_log=True)
             finally:
                 self.store["log_buffer"]    = saved_buf
                 self.store["snow_forecast"] = saved_snow
@@ -1349,22 +1458,42 @@ class Plugin(indigo.PluginBase):
     # Hourly log header
     # -----------------------------------------------------------------------
 
-    def _log_hourly_header(self, outdoor_temp, temp_offset, menu_mode=False):
+    def _log_hourly_header(self, outdoor_temp, temp_offset, menu_mode=False,
+                           to_event_log=None):
         """Log full weather header and mode status.
 
         menu_mode=True: omits the room-processing header lines — used by the
         'Show Full Weather Log' menu item which has no per-room table to
         precede.
 
-        Split into focused helpers (_b emits to both Indigo log and the
-        per-cycle log buffer):
+        to_event_log: None (default) asks the logHourlyDumpToEventLog pref,
+        which is quiet by default; True forces the echo for the on-demand menu
+        item. Either way every line still reaches the per-cycle log buffer and
+        so the plugin's own daily radiator_<date>.log, so the dump is never
+        lost - only its copy in the shared estate event log is optional.
+
+        Split into focused helpers (_b emits to the per-cycle log buffer, and
+        to the Indigo event log when that is enabled):
           _log_weather_section  - Ecowitt + OWM + Solcast + snow + offset + suntimes
           _log_records_section  - all-time high/low
           _log_modes_section    - per-mode active/inactive + overheat status
         """
+        echo = self._event_log_dump_enabled() if to_event_log is None else to_event_log
+
         def _b(msg, level="INFO"):
             formatted = f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}"
-            indigo.server.log(formatted, level=_to_level(level))
+            # A fault must never be silenced by a verbosity pref: WARNING and
+            # above always reach the event log, because Log_Error_Watch.py reads
+            # the event log and nothing else. This guard is load-bearing today,
+            # not merely defensive: the SNOW FORECAST line in
+            # _log_weather_section is emitted at WARNING, and it is the only
+            # line in this header above INFO. Without the guard it would go
+            # quiet whenever the dump pref is off, which is the default.
+            # test_event_log_volume.py pins both halves of that claim.
+            if echo or _to_level(level) >= logging.WARNING:
+                indigo.server.log(formatted, level=_to_level(level))
+            else:
+                self.logger.debug(formatted)
             self.store["log_buffer"].append(formatted)
 
         _b("")

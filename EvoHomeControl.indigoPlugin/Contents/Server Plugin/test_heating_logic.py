@@ -17,16 +17,22 @@ import unittest
 # Stub the `indigo` module so heating_logic / overheat_monitor can be imported
 # outside the Indigo runtime.
 # ---------------------------------------------------------------------------
-_indigo = types.ModuleType("indigo")
+# Reuse an already-installed stub rather than replacing it. heating_logic binds
+# `indigo` at ITS import, so if another test module imported it first, swapping
+# the module object here leaves heating_logic reading a stub this file no longer
+# updates - two tests failed in exactly that way when test_event_log_volume.py
+# was added, because unittest discovery imported that file first.
+_indigo = sys.modules.get("indigo") or types.ModuleType("indigo")
 
 
 class _ServerStub:
     @staticmethod
-    def log(msg, level="INFO", isError=False):
+    def log(msg, level="INFO", isError=False, **kwargs):
         pass  # silent
 
 
-_indigo.server    = _ServerStub()
+if not hasattr(_indigo, "server"):
+    _indigo.server = _ServerStub()
 _indigo.devices   = {}
 _indigo.variables = {}
 sys.modules["indigo"] = _indigo
