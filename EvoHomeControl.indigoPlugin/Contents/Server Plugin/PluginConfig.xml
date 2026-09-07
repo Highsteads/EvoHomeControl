@@ -180,7 +180,9 @@
     </Field>
     <Field id="logHourlyDumpToEventLog" type="checkbox" defaultValue="false">
         <Label>Show the hourly weather and room table in the Indigo Event Log:</Label>
-        <Description>Off by default. Every hour this plugin builds a full weather header plus a line for each of the 12 rooms - about 40 lines, so roughly 960 a day in the Event Log the whole server shares. Those lines are always written to this plugin's own daily log (radiator_YYYY-MM-DD.log, in its Preferences folder), so leaving this off loses nothing. Warnings and errors always reach the Event Log whatever this is set to. To see one full dump without turning this on, use Plugins - EvoHome Heating Controller - Show Full Weather Log.</Description>
+    </Field>
+    <Field id="label_logHourlyDumpToEventLog_info" type="label">
+        <Label>Off by default. Every hour this plugin builds a full weather header plus a line for each of the 12 rooms - about 40 lines, so roughly 960 a day in the Event Log the whole server shares. Those lines are always written to this plugin's own daily log (radiator_YYYY-MM-DD.log, in its Preferences folder), so leaving this off loses nothing. Warnings and errors always reach the Event Log whatever this is set to. To see one full dump without turning this on, use Plugins - EvoHome Heating Controller - Show Full Weather Log.</Label>
     </Field>
 
     <Field id="sep_debug" type="separator"/>

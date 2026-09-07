@@ -5,7 +5,7 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 4.8
 # Date:        21-07-2026
-# Version:     1.8.0
+# Version:     1.8.1
 #
 # v1.7.4 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
 # EMPTY, so the plugin shipped without the support URL that becomes its
