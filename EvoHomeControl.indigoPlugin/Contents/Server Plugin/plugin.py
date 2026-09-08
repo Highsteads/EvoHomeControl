@@ -244,7 +244,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.7.3"
+PLUGIN_VERSION  = "1.8.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 
