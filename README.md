@@ -1,5 +1,7 @@
 # EvoHome Heating Controller
 
+**Version:** 1.8.1
+
 An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) bridge plugin.
 
 It began life as a scheduled Python script and became a plugin that stays running, which brought timed boost, the En Suite morning schedule, the warm-morning skip, a whole-house summer shut-off, and window-aware floor heating control.
