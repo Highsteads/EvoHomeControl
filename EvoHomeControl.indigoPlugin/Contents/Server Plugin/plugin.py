@@ -3,9 +3,9 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Opus 4.8
-# Date:        21-07-2026
-# Version:     1.8.1
+# Author:      CliveS & Claude Fable 5.1
+# Date:        11-09-2026
+# Version:     1.8.2
 #
 # v1.7.4 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
 # EMPTY, so the plugin shipped without the support URL that becomes its
@@ -244,7 +244,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.8.1"
+PLUGIN_VERSION  = "1.8.2"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 

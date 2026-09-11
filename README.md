@@ -1,6 +1,6 @@
 # EvoHome Heating Controller
 
-**Version:** 1.8.1
+**Version:** 1.8.2
 
 An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) bridge plugin.
 
@@ -150,6 +150,7 @@ survives a restart. It defaults to ON.
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.8.2 | 11-Sep-2026 | **The GitHub record inside the bundle now uses the standard spelling.** The plugin bundle carries a small record of where its source lives on GitHub. Ours spelt the two field names its own way, while the plugins Indigo Domotics and the community publish spell them `GithubUser` and `GithubRepo`. It now matches them. Nothing else changed. |
 | 1.8.1 | 07-Sep-2026 | **The settings dialog was stretched wider than its own window, so the help text beside each setting was cut off mid-sentence.** The short help that can be attached to a setting is drawn on a single line and never wraps, so the longest one decides how wide every row is — and the window cannot be widened past a fixed maximum. one long one have moved into ordinary description paragraphs, which do wrap. Two new checks fail the build if any help text or setting label grows long enough to do it again. No setting or behaviour changed. |
 | 1.8.0 | 06-Sep-2026 | **The summer shut-off says its piece once.** The line reporting that the heating is off for summer and the radiators sit at 8 degrees was repeating about 21 times a day. It is a state, not an event, so it now speaks once when summer shut-off begins and once when it ends - and that ending line did not exist at all before, so the log showed the shut-off starting and never finishing. Every actual switch thrown in the house still appears: force-on start and end, the en suite floor heating, the morning schedule. 55 -> 57 tests. |
 | 1.7.4 | 08-Aug-2026 | **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed. |
