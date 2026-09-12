@@ -60,4 +60,22 @@
         </ConfigUI>
     </Action>
 
+
+    <!-- En Suite drying run — a 30-minute test whatever the clock says, so the
+         path is not first exercised at 5am -->
+    <Action id="startEnSuiteDryingTest" uiPath="DeviceActions">
+        <Name>Start En Suite Drying Run (30 minute test)</Name>
+        <CallbackMethod>actionStartEnSuiteDryingTest</CallbackMethod>
+    </Action>
+
+    <Action id="stopEnSuiteDrying" uiPath="DeviceActions">
+        <Name>Stop En Suite Drying Run</Name>
+        <CallbackMethod>actionStopEnSuiteDrying</CallbackMethod>
+    </Action>
+
+    <Action id="showEnSuiteDryingStatus" uiPath="DeviceActions">
+        <Name>Show En Suite Drying Run Status</Name>
+        <CallbackMethod>actionShowEnSuiteDryingStatus</CallbackMethod>
+    </Action>
+
 </Actions>

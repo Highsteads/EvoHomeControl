@@ -3,9 +3,31 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Fable 5.1
-# Date:        11-09-2026
-# Version:     1.8.2
+# Author:      CliveS & Claude Opus 5
+# Date:        12-09-2026
+# Version:     1.9.0
+#
+# v1.9.0 (12-09-2026): EN SUITE DRYING RUN. A daily warm-through of the En Suite
+# radiator, 05:00 to 10:00 at 22 degC, ending the moment the window is opened —
+# wet towels keep the room humid (70.9% measured on 12-09-2026, against the
+# humidity sensor's own comfort ceiling of 60%). RADIATOR ONLY: the floor heating
+# is CliveS's to switch by hand and nothing here touches it.
+#
+# Three of this plugin's own rules would each have cancelled it, and all three are
+# exempted: the whole-house summer shut-off (which otherwise pushes 8 degC back
+# over any zone that differs, every five minutes — the reason this could not be a
+# Python Script), the 06:00 warm-morning skip at 10 degC outdoors, and the
+# OUTDOOR_TEMP_TRIGGER 14 degC cut-off. Away mode still wins, because an empty
+# house has no wet towels, and an open window still closes the valve.
+#
+# _check_en_suite_drying is the ONE owner of start and stop, ticked every 30 s
+# rather than on the 5-minute cycle: that ends the run promptly on an opened
+# window, and it is the only path that runs at all during the summer shut-off.
+# An unreadable window sensor STOPS the run and warns once — heating the garden
+# for five hours is the expensive error, a damp towel the cheap one. The run logs
+# the humidity at both ends so a threshold for "skip if already dry" can be chosen
+# from real mornings later rather than invented now. A menu item starts a 30-minute
+# test run outside the hours, so the path is not first exercised at 5am.
 #
 # v1.7.4 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
 # EMPTY, so the plugin shipped without the support URL that becomes its
@@ -229,6 +251,9 @@ from heating_logic    import (
     DEV_LIVING_ROOM_DOOR_ID, DEV_LIVING_ROOM_FRONT_ID, DEV_UTILITY_ROOM_ID,
     EN_SUITE_MORNING_TEMP,
     EN_SUITE_WARM_MORNING_THRESHOLD,
+    EN_SUITE_DRYING_TEMP,
+    EN_SUITE_DRYING_START_HOUR,
+    EN_SUITE_DRYING_END_HOUR,
     ALL_RADIATOR_IDS,
     RADIATORS_OFF_TEMP,
     TEMP_CHANGE_TOLERANCE,
@@ -244,8 +269,20 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.8.2"
+PLUGIN_VERSION  = "1.9.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
+
+# En Suite humidity reading — used only to LOG what the drying run achieved, never
+# to decide whether it runs. A reading older than this is reported as unknown: a
+# zigbee2mqtt sensor holds its last value for ever once it drops off the mesh, and
+# this one is known to go offline from time to time. The SNZB-02D reports at least
+# hourly, so three hours of silence is well past normal.
+EN_SUITE_HUMIDITY_MAX_AGE_MINS = 180
+# A never-written numeric state reads 0.0, and this device logged exactly that four
+# seconds before its first real report on 12-09-2026. A sensor that is transmitting
+# cannot be in air of 0% relative humidity, so anything outside this band is not a
+# reading.
+EN_SUITE_HUMIDITY_VALID_RANGE  = (1.0, 100.0)
 
 
 def _safe_float(value, default=0.0):
@@ -409,6 +446,20 @@ class Plugin(indigo.PluginBase):
         self.store["en_suite_morning_active"]           = False
         self.store["en_suite_morning_cancelled_date"]   = None  # "YYYY-MM-DD"
         self.store["en_suite_morning_cancelled_reason"] = None
+
+        # En Suite drying run — radiator only, independent of the morning schedule
+        # above and of the floor heating. Runs inside the summer shut-off, which is
+        # why _check_en_suite_drying is ticked rather than driven from the per-room
+        # cycle (that cycle is skipped entirely while the shut-off is on).
+        self.store["en_suite_drying_active"]         = False
+        self.store["en_suite_drying_cancelled_date"] = None  # "YYYY-MM-DD"
+        self.store["en_suite_drying_started"]        = None  # ISO timestamp
+        self.store["en_suite_drying_start_humidity"] = None  # float or None
+        self.store["en_suite_drying_temp"]           = EN_SUITE_DRYING_TEMP
+        self.store["en_suite_drying_manual_expiry"]  = None  # datetime or None
+        # Warn-once latch for a window contact that cannot be read. Ticking every
+        # 30 s would otherwise put ~600 identical warnings in the log across one run.
+        self.store["en_suite_window_warned"]         = None
 
         # Per-room setpoint + message cache (replaces _last_setpoints/_last_messages globals)
         self.store["last_setpoints"] = {}  # {room_name: float}
@@ -620,6 +671,10 @@ class Plugin(indigo.PluginBase):
 
         # En Suite morning auto-start / auto-cancel (every tick for responsiveness)
         self._check_en_suite_morning()
+
+        # En Suite drying run — every tick, so an opened window ends it within 30 s
+        # rather than at the next 5-minute cycle.
+        self._check_en_suite_drying()
 
         # Timed boost expiry check (every tick)
         self._check_timed_boost_expiry()
@@ -839,9 +894,7 @@ class Plugin(indigo.PluginBase):
             special_rules              = en_suite_rules,
             ha_device_id               = DEV_EN_SUITE_ID,
             floor_heat_restore_enabled = morning_active,
-            # When morning schedule is active, use 22°C as the overheat baseline
-            # so the room is not falsely flagged as overheating below 22°C
-            overheat_target_override   = EN_SUITE_MORNING_TEMP if morning_active else None,
+            overheat_target_override   = self._en_suite_overheat_target(),
             **common,
         )
 
@@ -1105,13 +1158,22 @@ class Plugin(indigo.PluginBase):
         """Hold every radiator at RADIATORS_OFF_TEMP and turn the En Suite floor
         heating off. Idempotent — only writes a TRV when its setpoint differs
         from the off temperature or its zone mode has drifted, mirroring the
-        W 2349 decision in process_room_temperature() to avoid RAMSES spam."""
+        W 2349 decision in process_room_temperature() to avoid RAMSES spam.
+
+        The En Suite is the one exception: while its drying run is live it is held
+        at the drying temperature instead of the off temperature. Without that this
+        method would push 8 degC back over the run every five minutes, which is
+        exactly why the run could not have been a Python Script."""
+        drying = self.store.get("en_suite_drying_active", False)
         for dev_id in ALL_RADIATOR_IDS:
             try:
                 dev = indigo.devices[dev_id]
             except Exception as e:
                 _log(f"[Summer] Radiator {dev_id} not found: {e}", level="WARNING")
                 continue
+            target = RADIATORS_OFF_TEMP
+            if drying and dev_id == DEV_EN_SUITE_ID:
+                target = self._en_suite_drying_temp()
             setpoint_str = dev.states.get("setpointHeat", "0")
             available    = setpoint_str not in (None, "null", "None", "", "unavailable", "unknown")
             try:
@@ -1120,13 +1182,13 @@ class Plugin(indigo.PluginBase):
                 before = None
             zone_mode     = dev.states.get("zoneMode", "")
             not_permanent = (zone_mode != "permanent override")
-            changed       = (before is None) or (abs(before - RADIATORS_OFF_TEMP) > TEMP_CHANGE_TOLERANCE)
+            changed       = (before is None) or (abs(before - target) > TEMP_CHANGE_TOLERANCE)
             if changed or not_permanent:
                 try:
-                    indigo.thermostat.setHeatSetpoint(dev, value=RADIATORS_OFF_TEMP)
+                    indigo.thermostat.setHeatSetpoint(dev, value=target)
                 except Exception as e:
                     _log(f"[Summer] Could not set radiator {dev.name} to "
-                         f"{RADIATORS_OFF_TEMP:.0f}degC: {e}", level="WARNING")
+                         f"{target:.0f}degC: {e}", level="WARNING")
 
         # En Suite floor heating switch off (idempotent on onState)
         try:
@@ -1187,6 +1249,293 @@ class Plugin(indigo.PluginBase):
         _log(f"  Enabled:      {self._summer_enabled()}")
         _log(f"  Lockout now:  {self._summer_lockout_active()}")
         _log(f"  Force active: {self.store.get('summer_force_active', False)}")
+
+    # -----------------------------------------------------------------------
+    # En Suite drying run
+    # -----------------------------------------------------------------------
+    # Radiator only. The floor heating is CliveS's to switch by hand and nothing
+    # here touches it. Ticked every POLL_SLEEP_SECS rather than driven from the
+    # per-room cycle, because (a) an opened window then ends the run within 30 s
+    # instead of up to five minutes, and (b) the per-room cycle does not run at all
+    # during the summer shut-off, which the drying run is deliberately exempt from.
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _hour_in_window(hour, start, end):
+        """True when `hour` falls inside [start, end).
+
+        A window that crosses midnight (start > end) needs `hour >= start or
+        hour < end`. The obvious `start <= hour < end` is FALSE for every hour of
+        such a window, so setting 22 -> 6 would silently CLOSE the run rather than
+        widen it, with nothing logged and nothing to see.
+        """
+        if start == end:
+            return False
+        if start < end:
+            return start <= hour < end
+        return hour >= start or hour < end
+
+    def _en_suite_drying_enabled(self):
+        return as_bool(self.pluginPrefs.get("enSuiteDryingEnabled", True), True)
+
+    def _en_suite_drying_window(self):
+        """(start_hour, end_hour) for the drying run, guarded against junk prefs."""
+        start = _safe_int(self.pluginPrefs.get("enSuiteDryingStartHour"), EN_SUITE_DRYING_START_HOUR)
+        end   = _safe_int(self.pluginPrefs.get("enSuiteDryingEndHour"),   EN_SUITE_DRYING_END_HOUR)
+        if start is None or not 0 <= start <= 23:
+            start = EN_SUITE_DRYING_START_HOUR
+        if end is None or not 0 <= end <= 23:
+            end = EN_SUITE_DRYING_END_HOUR
+        return start, end
+
+    def _en_suite_drying_temp(self):
+        """The drying target, clamped to something it is sane to ask a radiator for."""
+        target = _safe_float(self.pluginPrefs.get("enSuiteDryingTemp"), EN_SUITE_DRYING_TEMP)
+        return max(RADIATORS_OFF_TEMP, min(target, 26.0))
+
+    def _en_suite_humidity(self):
+        """The En Suite humidity as a float, or None when no reading is worth trusting.
+
+        Used only to describe what a run achieved. Nothing decides whether to run on
+        it, so returning None costs a sentence in the log and nothing else. None is
+        returned - never a number - when the device is missing, disabled, its owning
+        plugin is stopped, zigbee2mqtt reports it offline, its last contact is older
+        than EN_SUITE_HUMIDITY_MAX_AGE_MINS, or the value sits outside
+        EN_SUITE_HUMIDITY_VALID_RANGE. A zigbee sensor holds its last value for ever
+        once it drops off the mesh, and a state that has never been written reads
+        0.0 - this device logged exactly that four seconds before its first real
+        report on 12-09-2026 - so neither an absent nor a stale reading may pass
+        itself off as dry air.
+        """
+        raw    = self.pluginPrefs.get("enSuiteHumidityDeviceId", "")
+        dev_id = _safe_int(raw, None) if str(raw).strip() else None
+        if dev_id is None:
+            return None
+        try:
+            dev = indigo.devices[dev_id]
+        except Exception:
+            return None
+        if not dev.enabled:
+            return None
+        try:
+            owner = indigo.server.getPlugin(dev.pluginId)
+            if owner.isInstalled() and not owner.isRunning():
+                return None
+        except Exception:
+            pass
+        if str(dev.states.get("availability", "online")).strip().lower() == "offline":
+            return None
+        last = dev.lastSuccessfulComm
+        if last is None:
+            return None
+        try:
+            age_mins = (datetime.now() - last).total_seconds() / 60.0
+        except TypeError:
+            return None
+        if age_mins > EN_SUITE_HUMIDITY_MAX_AGE_MINS:
+            return None
+        try:
+            value = float(dev.states.get("humidity"))
+        except (TypeError, ValueError):
+            return None
+        low, high = EN_SUITE_HUMIDITY_VALID_RANGE
+        return value if low <= value <= high else None
+
+    def _warn_window_once(self, message):
+        """Log a window-sensor problem once, and again only when it changes.
+
+        The run is checked every 30 s, so an unlatched warning would put roughly 600
+        identical lines in the log across a single five-hour run.
+        """
+        if message is None:
+            self.store["en_suite_window_warned"] = None
+            return
+        if self.store.get("en_suite_window_warned") == message:
+            return
+        self.store["en_suite_window_warned"] = message
+        _log(f"[EnSuiteDrying] The drying run is held off because {message}.", level="WARNING")
+
+    def _en_suite_window_is_shut(self):
+        """True only when the window contact positively reports SHUT.
+
+        Deliberately NOT heating_logic._contact_is_open, which answers "closed" on
+        any error because that is the safer side for ordinary heating. It is the
+        wrong side here: an unreadable sensor would leave the radiator at the drying
+        temperature into an open window for five hours. Heating the garden is the
+        expensive error and a damp towel is the cheap one, so a doubtful read stops
+        the run - and warns, because a guard that silently switches a feature off is
+        worse than one that fails loudly.
+        """
+        try:
+            dev = indigo.devices[DEV_EN_SUITE_WINDOW_ID]
+        except Exception:
+            self._warn_window_once("its window sensor is missing from Indigo")
+            return False
+        if not dev.enabled:
+            self._warn_window_once("its window sensor is disabled")
+            return False
+        try:
+            owner = indigo.server.getPlugin(dev.pluginId)
+            if owner.isInstalled() and not owner.isRunning():
+                self._warn_window_once("the plugin that owns its window sensor is stopped")
+                return False
+        except Exception:
+            pass
+        if str(dev.states.get("availability", "online")).strip().lower() == "offline":
+            self._warn_window_once("zigbee2mqtt reports its window sensor offline")
+            return False
+        contact = dev.states.get("contact")
+        if contact is None:
+            self._warn_window_once("its window sensor has never said whether it is open")
+            return False
+        self._warn_window_once(None)
+        # zigbee2mqtt reports contact False for an OPEN window.
+        return str(contact).strip().lower() not in ("false", "0", "open")
+
+    @staticmethod
+    def _drying_points(n):
+        """"1 point" or "N points" - a bare {n:.0f} says "1 points" at 0.6."""
+        return "1 point" if round(abs(n)) == 1 else f"{abs(n):.0f} points"
+
+    @classmethod
+    def _drying_humidity_sentence(cls, before, after):
+        """One plain-English sentence about what the run did to the humidity."""
+        if before is None and after is None:
+            return "There was no humidity reading at either end, so there is nothing to compare."
+        if before is None:
+            return (f"The room is at {after:.0f}% humidity now, but there was no reading "
+                    f"when the run began.")
+        if after is None:
+            return f"It began at {before:.0f}% humidity and there is no reading now."
+        change = before - after
+        if round(change) == 0:
+            return f"Humidity held at about {after:.0f}%, so the run made no measurable difference."
+        if change > 0:
+            return (f"Humidity fell from {before:.0f}% to {after:.0f}%, so the room dried out "
+                    f"by {cls._drying_points(change)}.")
+        return (f"Humidity rose from {before:.0f}% to {after:.0f}%, so the room got damper "
+                f"by {cls._drying_points(change)}.")
+
+    def _start_en_suite_drying(self, reason="the morning schedule", manual_minutes=None):
+        """Begin a drying run and push the setpoint out on the next tick."""
+        if self.store.get("en_suite_drying_active"):
+            return
+        humidity = self._en_suite_humidity()
+        target   = self._en_suite_drying_temp()
+        _, end   = self._en_suite_drying_window()
+        self.store["en_suite_drying_active"]         = True
+        self.store["en_suite_drying_started"]        = datetime.now().isoformat(timespec="seconds")
+        self.store["en_suite_drying_start_humidity"] = humidity
+        self.store["en_suite_drying_temp"]           = target
+        self.store["en_suite_drying_manual_expiry"]  = (
+            datetime.now() + timedelta(minutes=manual_minutes) if manual_minutes else None
+        )
+        if manual_minutes:
+            until = f"for the next {manual_minutes} minutes"
+        else:
+            until = f"until {end}:00"
+        damp = (f"The room is at {humidity:.0f}% humidity."
+                if humidity is not None else "There is no humidity reading to hand.")
+        _log(f"[EnSuiteDrying] Started ({reason}) - holding the En Suite radiator at "
+             f"{target:.0f}degC {until}, or until the window is opened. {damp}")
+        self._save_state()
+        self._fire_event("enSuiteDryingStarted")
+        # Send the setpoint now rather than waiting up to a full cycle for it.
+        self.store["last_heating_cycle"] = 0.0
+
+    def _stop_en_suite_drying(self, reason, cancel_for_today=False):
+        """End a drying run and let the radiator return to its normal setpoint."""
+        if not self.store.get("en_suite_drying_active"):
+            return
+        before = self.store.get("en_suite_drying_start_humidity")
+        after  = self._en_suite_humidity()
+        self.store["en_suite_drying_active"]         = False
+        self.store["en_suite_drying_started"]        = None
+        self.store["en_suite_drying_start_humidity"] = None
+        self.store["en_suite_drying_manual_expiry"]  = None
+        if cancel_for_today:
+            self.store["en_suite_drying_cancelled_date"] = datetime.now().strftime("%Y-%m-%d")
+        _log(f"[EnSuiteDrying] Finished ({reason}). "
+             f"{self._drying_humidity_sentence(before, after)}")
+        self._save_state()
+        self._fire_event("enSuiteDryingEnded")
+        # Return the radiator to its normal setpoint now, not at the next cycle.
+        self.store["last_heating_cycle"] = 0.0
+
+    def _check_en_suite_drying(self):
+        """The ONE owner of the drying run's start and stop decision."""
+        active = self.store.get("en_suite_drying_active", False)
+
+        if not self._en_suite_drying_enabled():
+            if active:
+                self._stop_en_suite_drying("the drying run was switched off in the settings")
+            return
+
+        now        = datetime.now()
+        today      = now.strftime("%Y-%m-%d")
+        start, end = self._en_suite_drying_window()
+        in_window  = self._hour_in_window(now.hour, start, end)
+
+        # A manual test run ignores the clock entirely and ends on its own timer, so
+        # a forgotten one cannot hold the radiator warm all day.
+        manual_expiry = self.store.get("en_suite_drying_manual_expiry")
+        if active and manual_expiry:
+            if now >= manual_expiry:
+                self._stop_en_suite_drying("the test run reached its time limit")
+            elif not self._en_suite_window_is_shut():
+                self._stop_en_suite_drying("the window was opened")
+            return
+
+        if active:
+            if not self._en_suite_window_is_shut():
+                self._stop_en_suite_drying("the window was opened", cancel_for_today=True)
+            elif not in_window:
+                self._stop_en_suite_drying(f"the {end}:00 finish was reached")
+            return
+
+        if not in_window:
+            # Tidy yesterday's cancellation away so the log and the state file agree.
+            if self.store.get("en_suite_drying_cancelled_date") not in (None, today):
+                self.store["en_suite_drying_cancelled_date"] = None
+                self._save_state()
+            return
+
+        if self.store.get("en_suite_drying_cancelled_date") == today:
+            return
+        if self._en_suite_window_is_shut():
+            self._start_en_suite_drying()
+
+    def _en_suite_overheat_target(self):
+        """The temperature the En Suite's overheat check should judge the room against.
+
+        None means "use the schedule". An elevated run needs the baseline raised to
+        match it, or the room is measured against its 18-20 degC schedule and a
+        perfectly ordinary 19.6 degC reads as overheating - which closes the valve on
+        the very run that opened it. Drying wins over the morning schedule because it
+        is the higher-priority rule in en_suite_special_rules, and the baseline has to
+        agree with whichever target is actually being asked for.
+        """
+        if self.store.get("en_suite_drying_active"):
+            return self._en_suite_drying_temp()
+        if self.store.get("en_suite_morning_active"):
+            return EN_SUITE_MORNING_TEMP
+        return None
+
+    def _log_en_suite_drying_status(self):
+        """Log the drying run's settings and current state (menu / on-demand)."""
+        start, end = self._en_suite_drying_window()
+        humidity   = self._en_suite_humidity()
+        _log("=== En Suite Drying Run ===")
+        _log(f"  Enabled:      {self._en_suite_drying_enabled()}")
+        _log(f"  Window:       {start}:00 to {end}:00, radiator only, "
+             f"target {self._en_suite_drying_temp():.0f}degC")
+        _log(f"  Running now:  {self.store.get('en_suite_drying_active', False)}")
+        if self.store.get("en_suite_drying_started"):
+            _log(f"  Started at:   {self.store['en_suite_drying_started']}")
+        _log(f"  Window shut:  {self._en_suite_window_is_shut()}")
+        _log("  Humidity:     " + (f"{humidity:.1f}%" if humidity is not None
+                                   else "no reading worth trusting"))
+        _log(f"  Cancelled:    {self.store.get('en_suite_drying_cancelled_date') or 'not today'}")
 
     # -----------------------------------------------------------------------
     # En Suite morning schedule
@@ -1824,6 +2173,33 @@ class Plugin(indigo.PluginBase):
 
             self.store["en_suite_morning_cancelled_date"] = st.get("en_suite_morning_cancelled_date")
 
+            # Restore the drying run only if it is still legitimately live. A run
+            # restored outside its hours would hold the radiator warm with nothing
+            # left to end it until the next midnight. A stored MANUAL test run is
+            # judged on its own expiry, never on the clock window it ignores.
+            self.store["en_suite_drying_cancelled_date"] = st.get("en_suite_drying_cancelled_date")
+            if st.get("en_suite_drying_active"):
+                manual_raw = st.get("en_suite_drying_manual_expiry")
+                manual_exp = None
+                if manual_raw:
+                    try:
+                        manual_exp = datetime.fromisoformat(manual_raw)
+                    except (ValueError, TypeError):
+                        manual_exp = None
+                if manual_raw:
+                    still_live = manual_exp is not None and manual_exp > datetime.now()
+                else:
+                    d_start, d_end = self._en_suite_drying_window()
+                    still_live = self._hour_in_window(datetime.now().hour, d_start, d_end)
+                if self._en_suite_drying_enabled() and still_live:
+                    self.store["en_suite_drying_active"]         = True
+                    self.store["en_suite_drying_started"]        = st.get("en_suite_drying_started")
+                    self.store["en_suite_drying_start_humidity"] = st.get("en_suite_drying_start_humidity")
+                    self.store["en_suite_drying_manual_expiry"]  = manual_exp
+                    _log("[EnSuiteDrying] Restored from state — the run is still live")
+                else:
+                    _log("[EnSuiteDrying] The stored run was no longer live — not restored")
+
         except (OSError, ValueError, TypeError, AttributeError) as e:
             # Missing/corrupt/legacy plugin_state.json must never crash __init__ —
             # a malformed file just means a fresh start for the persisted flags.
@@ -1843,6 +2219,14 @@ class Plugin(indigo.PluginBase):
             "summer_force_expiry":          force_exp.isoformat() if force_exp else None,
             "en_suite_morning_active":      self.store["en_suite_morning_active"],
             "en_suite_morning_cancelled_date": self.store.get("en_suite_morning_cancelled_date"),
+            "en_suite_drying_active":          self.store.get("en_suite_drying_active", False),
+            "en_suite_drying_cancelled_date":  self.store.get("en_suite_drying_cancelled_date"),
+            "en_suite_drying_started":         self.store.get("en_suite_drying_started"),
+            "en_suite_drying_start_humidity":  self.store.get("en_suite_drying_start_humidity"),
+            "en_suite_drying_manual_expiry":   (
+                self.store["en_suite_drying_manual_expiry"].isoformat()
+                if self.store.get("en_suite_drying_manual_expiry") else None
+            ),
         }
         try:
             _atomic_write_json(state_path, data, indent=2)
@@ -1904,6 +2288,21 @@ class Plugin(indigo.PluginBase):
         """Action: Cancel the 24h force-on and revert to the summer shut-off."""
         self._cancel_summer_force(reason="manual cancel")
 
+    def actionStartEnSuiteDryingTest(self, action):
+        """Action: start a 30-minute En Suite drying test run, whatever the clock says."""
+        self._start_en_suite_drying(reason="a test run was requested", manual_minutes=30)
+
+    def actionStopEnSuiteDrying(self, action):
+        """Action: stop the En Suite drying run now."""
+        if not self.store.get("en_suite_drying_active"):
+            _log("[EnSuiteDrying] Nothing to stop — no drying run is going.")
+            return
+        self._stop_en_suite_drying("it was stopped by hand")
+
+    def actionShowEnSuiteDryingStatus(self, action):
+        """Action: log the En Suite drying run status."""
+        self._log_en_suite_drying_status()
+
     def actionShowSummerStatus(self, action):
         """Action: Log the whole-house summer shut-off status (dashboard-invocable)."""
         self._log_summer_status()
@@ -1951,6 +2350,24 @@ class Plugin(indigo.PluginBase):
     def menuCancelForcedHeating(self, values_dict=None, type_id=None):
         """Menu: Cancel the 24h force-on and revert to the summer shut-off."""
         self._cancel_summer_force(reason="menu cancel")
+        return True
+
+    def menuStartEnSuiteDryingTest(self, values_dict=None, type_id=None):
+        """Menu: start a 30-minute En Suite drying test run."""
+        self._start_en_suite_drying(reason="a test run was requested", manual_minutes=30)
+        return True
+
+    def menuStopEnSuiteDrying(self, values_dict=None, type_id=None):
+        """Menu: stop the En Suite drying run now."""
+        if not self.store.get("en_suite_drying_active"):
+            _log("[EnSuiteDrying] Nothing to stop — no drying run is going.")
+            return True
+        self._stop_en_suite_drying("it was stopped by hand")
+        return True
+
+    def menuShowEnSuiteDryingStatus(self, values_dict=None, type_id=None):
+        """Menu: log the En Suite drying run status."""
+        self._log_en_suite_drying_status()
         return True
 
     def menuShowSummerStatus(self, values_dict=None, type_id=None):

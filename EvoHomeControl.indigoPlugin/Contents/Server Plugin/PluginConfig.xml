@@ -174,6 +174,100 @@
         <Label>The "returns" date is the day heating comes back on — e.g. 30 September means off 1 June to 29 September inclusive, normal heating from 30 September.</Label>
     </Field>
 
+    <Field id="sep_drying" type="separator"/>
+    <Field id="lbl_drying" type="label">
+        <Label>EN SUITE DRYING RUN</Label>
+    </Field>
+    <Field id="lbl_drying_help" type="label">
+        <Label>Holds the En Suite radiator warm each morning to dry the room out, and stops the moment the window is opened. It keeps running through the summer shut-off and ignores both the warm-morning skip and the mild-weather cut-off, because a warm damp morning still leaves wet towels. Radiator only - the floor heating is never touched. Away mode still wins, and an open window always closes the valve.</Label>
+    </Field>
+    <Field id="enSuiteDryingEnabled" type="checkbox" defaultValue="true">
+        <Label>Dry the En Suite out every morning:</Label>
+    </Field>
+    <Field id="enSuiteDryingStartHour" type="menu" defaultValue="5"
+           visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
+        <Label>Starts at:</Label>
+        <List>
+            <Option value="0">midnight</Option>
+            <Option value="1">1am</Option>
+            <Option value="2">2am</Option>
+            <Option value="3">3am</Option>
+            <Option value="4">4am</Option>
+            <Option value="5">5am</Option>
+            <Option value="6">6am</Option>
+            <Option value="7">7am</Option>
+            <Option value="8">8am</Option>
+            <Option value="9">9am</Option>
+            <Option value="10">10am</Option>
+            <Option value="11">11am</Option>
+            <Option value="12">noon</Option>
+            <Option value="13">1pm</Option>
+            <Option value="14">2pm</Option>
+            <Option value="15">3pm</Option>
+            <Option value="16">4pm</Option>
+            <Option value="17">5pm</Option>
+            <Option value="18">6pm</Option>
+            <Option value="19">7pm</Option>
+            <Option value="20">8pm</Option>
+            <Option value="21">9pm</Option>
+            <Option value="22">10pm</Option>
+            <Option value="23">11pm</Option>
+        </List>
+    </Field>
+    <Field id="enSuiteDryingEndHour" type="menu" defaultValue="10"
+           visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
+        <Label>Finishes at:</Label>
+        <List>
+            <Option value="0">midnight</Option>
+            <Option value="1">1am</Option>
+            <Option value="2">2am</Option>
+            <Option value="3">3am</Option>
+            <Option value="4">4am</Option>
+            <Option value="5">5am</Option>
+            <Option value="6">6am</Option>
+            <Option value="7">7am</Option>
+            <Option value="8">8am</Option>
+            <Option value="9">9am</Option>
+            <Option value="10">10am</Option>
+            <Option value="11">11am</Option>
+            <Option value="12">noon</Option>
+            <Option value="13">1pm</Option>
+            <Option value="14">2pm</Option>
+            <Option value="15">3pm</Option>
+            <Option value="16">4pm</Option>
+            <Option value="17">5pm</Option>
+            <Option value="18">6pm</Option>
+            <Option value="19">7pm</Option>
+            <Option value="20">8pm</Option>
+            <Option value="21">9pm</Option>
+            <Option value="22">10pm</Option>
+            <Option value="23">11pm</Option>
+        </List>
+    </Field>
+    <Field id="enSuiteDryingTemp" type="menu" defaultValue="22.0"
+           visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
+        <Label>Hold the radiator at:</Label>
+        <List>
+            <Option value="18.0">18 degrees</Option>
+            <Option value="19.0">19 degrees</Option>
+            <Option value="20.0">20 degrees</Option>
+            <Option value="21.0">21 degrees</Option>
+            <Option value="22.0">22 degrees</Option>
+            <Option value="23.0">23 degrees</Option>
+            <Option value="24.0">24 degrees</Option>
+            <Option value="25.0">25 degrees</Option>
+            <Option value="26.0">26 degrees</Option>
+        </List>
+    </Field>
+    <Field id="enSuiteHumidityDeviceId" type="textfield" defaultValue=""
+           visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
+        <Label>En Suite humidity sensor device ID:</Label>
+    </Field>
+    <Field id="lbl_drying_humidity_info" type="label"
+           visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
+        <Label>Optional. It is used only to record how damp the room was at the start and the end of each run, so that a "skip it when the room is already dry" rule can be set later from real mornings rather than a guessed number. Leave it blank if there is no sensor.</Label>
+    </Field>
+
     <Field id="sep_logging" type="separator"/>
     <Field id="lbl_logging" type="label">
         <Label>LOGGING</Label>

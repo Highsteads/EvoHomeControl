@@ -1,6 +1,6 @@
 # EvoHome Heating Controller
 
-**Version:** 1.8.2
+**Version:** 1.9.0
 
 An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) bridge plugin.
 
@@ -12,6 +12,7 @@ It began life as a scheduled Python script and became a plugin that stays runnin
 - **Overheat prevention** — spots a room getting too warm and drops its setpoint, using three tiers of logic (predictive, trigger, hysteresis)
 - **Window/door detection** — closes the valves while a window or door is open, and restores them when it shuts
 - **Timed boost** — lifts Dining Room, Living Room (door + front) and Hall Kitchen by +2°C for one or two hours, then reverts on its own
+- **En Suite drying run** — holds the En Suite radiator warm each morning to dry the room out, and stops the moment the window is opened. Wet towels keep an en suite humid, so this one runs right through the summer shut-off and ignores the mild-weather rules, on the grounds that a warm damp morning still leaves wet towels. Radiator only: it never touches the floor heating. Away mode still wins, and the times, the target and an optional humidity sensor are all configurable
 - **Whole-house summer shut-off** — turns the whole house off for summer (default 1 June to 30 September): every radiator is held at the 8 °C frost setpoint and the En Suite floor heating is switched off. Dates are configurable and there is a master on/off toggle. A 24-hour **Force Heating On** action or menu item brings everything back to normal for a day, then it reverts on its own
 - **En Suite morning schedule** — 22°C from 06:00 to 10:00 every day with the floor heating on, cancelled the moment the En Suite window opens, and **skipped altogether on warm mornings** (outdoor ≥ 10 °C at 06:00 leaves the radiator off and the floor heat untouched)
 - **Weather integration** — OpenWeatherMap API with local Ecowitt bypass option
@@ -71,6 +72,9 @@ the key and telling you to either fill in the matching field or add the key to
 | Set Away Mode | Activates or deactivates away mode |
 | Force Heating On (24 hours) | Overrides the summer shut-off and restores fully normal heating for 24 hours, then auto-reverts |
 | Cancel Forced Heating | Ends the 24-hour force-on early and re-applies the summer shut-off |
+| Start En Suite Drying Run (30 minute test) | Starts a drying run right now, whatever the clock says, and ends it after 30 minutes |
+| Stop En Suite Drying Run | Ends the drying run immediately |
+| Show En Suite Drying Run Status | Logs the settings, whether a run is going, and the current humidity |
 
 ## En Suite Morning Schedule
 
@@ -92,6 +96,37 @@ At 06:00 the plugin checks the current outdoor temperature. If it is at or above
 - Event log shows: `Warm morning skip  (out >=10degC, rad+floor off)` (message code 24)
 
 On a colder morning, with outdoor below 10 °C, the normal 22 °C slot runs as usual. The threshold is a single constant — edit `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD` to tune for a different installation.
+
+## En Suite Drying Run
+
+Our en suite sits above 70% humidity most of the time, and the wet towels are almost certainly the reason, so from v1.9.0 the plugin gives the room a warm-through every morning to dry it out.
+
+- Runs from **05:00 to 10:00** and holds the En Suite radiator at **22 °C**
+- Ends the instant the **En Suite window** is opened, and does not restart that day
+- **Radiator only.** It never touches the floor heating switch or the floor thermostat — those stay yours to control by hand
+- Times, target temperature and the whole feature can be changed in the plugin settings
+
+Three of the plugin's own rules would each have cancelled it, and it is deliberately exempt from all three: the **summer shut-off**, the **warm-morning skip**, and the **mild-weather cut-off** that closes every valve above 14 °C outdoors. A warm damp morning still leaves wet towels. Two things still beat it, on purpose — **away mode**, because an empty house has no wet towels, and an **open window**, which always closes the valve.
+
+This is also why it lives in the plugin rather than in a script. During the summer shut-off the plugin pushes 8 °C back over any radiator that differs, every five minutes, so a script setting 22 °C at five in the morning would be quietly undone before anyone was awake to notice.
+
+### Humidity
+
+If you point the **En Suite humidity sensor device ID** setting at a temperature-and-humidity sensor, each run records how damp the room was at the start and at the end, and says so in plain English when it finishes:
+
+```
+[EnSuiteDrying] Finished (the 10:00 finish was reached). Humidity fell from 78% to 64%, so the room dried out by 14 points.
+```
+
+Nothing decides whether to run on that reading — it is there so that a sensible "skip it when the room is already dry" threshold can be picked later from real mornings, rather than guessed now. The reading is treated as unknown, never as dry air, when the sensor is missing, disabled, offline, silent for more than three hours, or reporting something outside 1–100%. A sensor that has never reported reads 0%, and a Zigbee one holds its last value for ever once it drops off the mesh, so neither is allowed to pass itself off as a dry room.
+
+### If the window sensor cannot be read
+
+The run stops, and says why in the log. That is the opposite of how the rest of the plugin treats an unreadable contact, where "assume it is shut" is the safer answer — here it is not, because holding a radiator at 22 °C into an open window for five hours is the expensive mistake and a damp towel is the cheap one. The warning is logged once rather than every thirty seconds.
+
+### Testing it
+
+**Plugins → EvoHome Heating Controller → Start En Suite Drying Run (30 minute test)** starts a run immediately whatever the time is, and ends it after half an hour. Worth using once after any change, so that the first time the code runs for real is not at five in the morning.
 
 ## Whole-house Summer Shut-off
 
@@ -150,6 +185,7 @@ survives a restart. It defaults to ON.
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.9.0 | 12-Sep-2026 | **The En Suite now gets dried out every morning.** The radiator is held at 22 °C from 5am to 10am and stops the moment the window is opened, because the room sits above 70% humidity and the wet towels are the likely cause. It runs through the summer shut-off and ignores both the warm-morning skip and the mild-weather cut-off, since a warm damp morning still leaves wet towels; away mode and an open window still win. It drives the radiator and nothing else — the floor heating is left alone. If a humidity sensor is configured, each run records how damp the room was at both ends and reports it in plain English, so a "skip it when the room is already dry" rule can be set later from real mornings instead of a guessed number. An unreadable window sensor stops the run and says so, rather than quietly holding the radiator on into an open window. A menu item starts a 30-minute test run at any time of day. 72 -> 114 tests. |
 | 1.8.2 | 11-Sep-2026 | **The GitHub record inside the bundle now uses the standard spelling.** The plugin bundle carries a small record of where its source lives on GitHub. Ours spelt the two field names its own way, while the plugins Indigo Domotics and the community publish spell them `GithubUser` and `GithubRepo`. It now matches them. Nothing else changed. |
 | 1.8.1 | 07-Sep-2026 | **The settings dialog was stretched wider than its own window, so the help text beside each setting was cut off mid-sentence.** The short help that can be attached to a setting is drawn on a single line and never wraps, so the longest one decides how wide every row is — and the window cannot be widened past a fixed maximum. one long one have moved into ordinary description paragraphs, which do wrap. Two new checks fail the build if any help text or setting label grows long enough to do it again. No setting or behaviour changed. |
 | 1.8.0 | 06-Sep-2026 | **The summer shut-off says its piece once.** The line reporting that the heating is off for summer and the radiators sit at 8 degrees was repeating about 21 times a day. It is a state, not an event, so it now speaks once when summer shut-off begins and once when it ends - and that ending line did not exist at all before, so the log showed the shut-off starting and never finishing. Every actual switch thrown in the house still appears: force-on start and end, the en suite floor heating, the morning schedule. 55 -> 57 tests. |

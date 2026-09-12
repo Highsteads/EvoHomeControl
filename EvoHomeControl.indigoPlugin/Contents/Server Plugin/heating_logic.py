@@ -154,7 +154,8 @@ OVERHEAT_EXCLUDED_ROOMS = {"Bedroom 3"}
 # 21=door open (reduced)  22=En Suite morning schedule
 # 23=above target (passive warmth — solar/internal gain, valve has been off 3+ cycles)
 # 24=En Suite warm-morning skip (radiator off + floor heat suppressed)
-ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23, 24}
+# 25=En Suite drying run (radiator held warm to dry the room out)
+ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23, 24, 25}
 
 # En Suite morning schedule temperature
 EN_SUITE_MORNING_TEMP = 22.0
@@ -165,6 +166,28 @@ EN_SUITE_MORNING_TEMP = 22.0
 # fires at 6am even on warm days. 10.0 catches genuinely warm mornings where
 # the room is already comfortable and the floor isn't cold to the touch.
 EN_SUITE_WARM_MORNING_THRESHOLD = 10.0
+
+# ---------------------------------------------------------------------------
+# EN SUITE DRYING RUN
+# ---------------------------------------------------------------------------
+# A daily warm-through to dry the room out. Wet towels keep the En Suite humid,
+# and it sits above the humidity sensor's own comfort ceiling of 60% (measured
+# 70.9% at 13:54 on 12-09-2026, from a sensor with under four hours of history,
+# so nothing is claimed here about the usual MORNING figure - the run logs its
+# own start and end readings precisely so that a threshold can be chosen from
+# real mornings later).
+#
+# Deliberately separate from the morning schedule above, and RADIATOR ONLY: the
+# En Suite floor heating is CliveS's to switch by hand and this run must never
+# touch it (his instruction, 12-09-2026).
+#
+# It is exempt from the summer shut-off, from the warm-morning skip and from the
+# OUTDOOR_TEMP_TRIGGER cut-off, because a warm damp morning still leaves wet
+# towels. Away mode still wins - an empty house has no wet towels - and an open
+# window still closes the valve.
+EN_SUITE_DRYING_TEMP       = 22.0
+EN_SUITE_DRYING_START_HOUR = 5
+EN_SUITE_DRYING_END_HOUR   = 10
 
 # ---------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -454,6 +477,7 @@ def get_log_message(message_code, room_name, current_setpoint, new_temp,
         21: "Door open          (valve reduced)",
         22: "En Suite morning   (22degC)",
         24: f"Warm morning skip  (out >={EN_SUITE_WARM_MORNING_THRESHOLD:.0f}degC, rad+floor off)",
+        25: "En Suite drying    (radiator only)",
     }
 
     action = action_map.get(message_code, "Status update")
@@ -487,6 +511,7 @@ def get_reason_line(message_code, new_temp, overheat_amount=None):
         20: f"Reduced to {t} - Window opened",
         21: f"Reduced to {t} - Door opened",
         22: f"Set to {t} - En Suite morning schedule active",
+        25: f"Set to {t} - En Suite drying run",
     }
     return "  " + reason_map.get(message_code, f"Set to {t}")
 
@@ -640,6 +665,18 @@ def en_suite_special_rules(temp, msg, windows_open, doors_open,
     """
     if store is None:
         return temp, msg
+
+    # Drying run wins over everything else this room's rules decide. plugin.py's
+    # _check_en_suite_drying owns start and stop - it ticks every 30 s, so it ends
+    # the run on an opened window far sooner than this 5-minute cycle could, and it
+    # is the only path that runs at all during the summer shut-off. This branch only
+    # reports the target while the run is live. The window is re-checked here so a
+    # window opened between ticks closes the valve on THIS cycle instead of holding
+    # the room at the drying temperature for up to five more minutes.
+    if store.get("en_suite_drying_active"):
+        if _contact_is_open(DEV_EN_SUITE_WINDOW_ID):
+            return temp, msg   # fall through to the windows_open branch
+        return store.get("en_suite_drying_temp", EN_SUITE_DRYING_TEMP), 25
 
     morning_active   = store.get("en_suite_morning_active", False)
     cancelled_reason = store.get("en_suite_morning_cancelled_reason")
@@ -910,9 +947,11 @@ def process_room_temperature(
                  level="ERROR", log_buffer=log_buffer)
 
     # High outdoor temperature
+    # 25 (drying run) is exempt: a warm damp morning still leaves wet towels, so a
+    # mild day outside must not close the valve on a run that exists to dry the room.
     if (current_outdoor_temp is not None and
             current_outdoor_temp > OUTDOOR_TEMP_TRIGGER and
-            message not in (17, 23, 5)):
+            message not in (17, 23, 5, 25)):
         new_temp = RADIATORS_OFF_TEMP
         message  = 7
 
@@ -925,8 +964,9 @@ def process_room_temperature(
         new_temp += schedules.BOOST_AMOUNTS[room_name]
         message   = 12
 
-    # Both-out
-    if is_both_out and message not in (17, 23, 5):
+    # Both-out. 25 is exempt so the drying run holds one predictable temperature
+    # whoever happens to be in the house at 5am.
+    if is_both_out and message not in (17, 23, 5, 25):
         new_temp += BOTH_OUT_OFFSET
         message   = 13
 
@@ -951,11 +991,11 @@ def process_room_temperature(
     _OPEN_MESSAGES = {1, 2, 3, 4, 20, 21}
 
     if dev_temp is not None and abs(dev_temp - new_temp) <= TEMP_CHANGE_TOLERANCE:
-        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23):
+        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23, 25):
             message = 11
 
     elif abs(dev_setpoint - new_temp) <= TEMP_CHANGE_TOLERANCE:
-        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23):
+        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23, 25):
             message = 11
 
     # Window/door closed transition (open -> closed detection)

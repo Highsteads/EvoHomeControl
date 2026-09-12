@@ -16,6 +16,23 @@
         <CallbackMethod>menuCancelTimedBoost</CallbackMethod>
     </MenuItem>
 
+    <MenuItem id="sepDrying" isSeparator="true"/>
+
+    <MenuItem id="menuStartEnSuiteDryingTest">
+        <Name>Start En Suite Drying Run (30 minute test)</Name>
+        <CallbackMethod>menuStartEnSuiteDryingTest</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="menuStopEnSuiteDrying">
+        <Name>Stop En Suite Drying Run</Name>
+        <CallbackMethod>menuStopEnSuiteDrying</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="menuShowEnSuiteDryingStatus">
+        <Name>Show En Suite Drying Run Status</Name>
+        <CallbackMethod>menuShowEnSuiteDryingStatus</CallbackMethod>
+    </MenuItem>
+
     <MenuItem id="sepSummer" isSeparator="true"/>
 
     <MenuItem id="menuForceHeatingOn24h">

@@ -46,4 +46,15 @@
         <Name>Summer Force-On Ended</Name>
     </Event>
 
+
+    <!-- Fired when the En Suite drying run starts -->
+    <Event id="enSuiteDryingStarted">
+        <Name>En Suite Drying Run Started</Name>
+    </Event>
+
+    <!-- Fired when the En Suite drying run ends (finished, window opened, or stopped) -->
+    <Event id="enSuiteDryingEnded">
+        <Name>En Suite Drying Run Ended</Name>
+    </Event>
+
 </Events>
