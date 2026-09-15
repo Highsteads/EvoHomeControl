@@ -20,11 +20,13 @@
 # setpoint, which is the one test that fails if any exemption is lost.
 
 import ast
+import inspect
 import os
 import sys
 import types
 import unittest
 from datetime import datetime, timedelta
+from unittest import mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -87,6 +89,9 @@ if "schedules" not in sys.modules:
 
 import heating_logic as hl        # noqa: E402
 import plugin as plugin_mod       # noqa: E402
+
+# The module name mock.patch needs for the plugin's own `datetime` symbol.
+_PLUGIN = plugin_mod.__name__
 
 
 class FakeDevice:
@@ -650,3 +655,124 @@ class TestStructure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ---------------------------------------------------------------------------
+class TestTheHeatingSeasonOwnsTheRoom(unittest.TestCase):
+    """The drying run stands down the day normal heating returns.
+
+    The 06:00 morning schedule is hardcoded at EN_SUITE_MORNING_TEMP and runs the En
+    Suite from the moment the summer shut-off lifts. The drying rule sits ABOVE the
+    morning rule in en_suite_special_rules and returns first, so a run left going
+    would hold the room at the drying temperature and the morning setpoint would
+    never be reached. CliveS, 15-09-2026: the drying temperature "should only be used
+    when the hard coded 06:00 morning schedule is not running".
+
+    Keyed on the summer shut-off rather than a literal date, because that flag IS
+    "the morning schedule is not running" — _check_en_suite_morning returns on the
+    same condition, so the two cannot disagree, and changing the configured summer
+    window moves both together.
+    """
+
+    def _plugin(self, lockout, store=None, prefs=None):
+        p = _bare_plugin(prefs=prefs or {}, store=store or {})
+        self.consulted = []
+        p._summer_lockout_active = lambda: (self.consulted.append(True) or lockout)
+        self.stopped = []
+        p._stop_en_suite_drying = lambda reason, cancel_for_today=False: \
+            self.stopped.append(reason)
+        self.started = []
+        p._start_en_suite_drying = lambda: self.started.append(True)
+        p._en_suite_window_is_shut = lambda: True
+        p._save_state = lambda: None
+        return p
+
+    # -- in summer, nothing changes --------------------------------------------
+    def test_a_run_starts_in_the_window_during_the_summer_shut_off(self):
+        p = self._plugin(lockout=True)
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 7, 4, 6, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(self.started, [True])
+        self.assertEqual(self.stopped, [])
+
+    def test_a_running_run_is_left_alone_during_the_summer_shut_off(self):
+        p = self._plugin(lockout=True, store={"en_suite_drying_active": True})
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 7, 4, 6, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(self.stopped, [])
+
+    # -- once heating returns, it stands down -----------------------------------
+    def test_no_run_starts_once_normal_heating_has_returned(self):
+        p = self._plugin(lockout=False)
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 10, 1, 6, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(self.started, [], "the morning schedule owns the room")
+
+    def test_a_run_still_going_is_stopped_the_moment_heating_returns(self):
+        """The 30-Sep crossover: a run started at 05:00 under the shut-off."""
+        p = self._plugin(lockout=False, store={"en_suite_drying_active": True})
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 9, 30, 6, 30)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(len(self.stopped), 1)
+        self.assertIn("morning schedule", self.stopped[0])
+
+    def test_the_decision_actually_consults_the_summer_lockout(self):
+        """Pins the coupling, not just the outcome — the date must not be hardcoded."""
+        p = self._plugin(lockout=False)
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 12, 25, 6, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertTrue(self.consulted, "_summer_lockout_active was never called")
+
+    def test_no_literal_october_date_anywhere_in_the_decision(self):
+        """A hardcoded month would not follow the configured summer window."""
+        src = inspect.getsource(plugin_mod.Plugin._check_en_suite_drying)
+        body = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+        for literal in ("month", "== 10", "October"):
+            self.assertNotIn(literal, body, f"{literal!r} hardcodes the season")
+
+    # -- a hand-fired test run is a deliberate act and still works ---------------
+    def test_a_manual_test_run_is_not_killed_by_the_season(self):
+        """The menu item is the only way to exercise this, and blocking it for eight
+        months of the year is how a feature quietly rots. It has its own timer."""
+        p = self._plugin(lockout=False, store={
+            "en_suite_drying_active": True,
+            "en_suite_drying_manual_expiry": datetime(2026, 12, 25, 7, 0),
+        })
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 12, 25, 6, 30)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(self.stopped, [], "a deliberate test run must survive")
+
+    def test_a_manual_test_run_still_ends_on_its_own_timer_in_winter(self):
+        p = self._plugin(lockout=False, store={
+            "en_suite_drying_active": True,
+            "en_suite_drying_manual_expiry": datetime(2026, 12, 25, 6, 0),
+        })
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 12, 25, 6, 30)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(len(self.stopped), 1)
+        self.assertIn("time limit", self.stopped[0])
+
+    # -- the switch-off still wins over everything ------------------------------
+    def test_the_enabled_switch_is_still_checked_first(self):
+        p = self._plugin(lockout=True, store={"en_suite_drying_active": True},
+                         prefs={"enSuiteDryingEnabled": "false"})
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 7, 4, 6, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(len(self.stopped), 1)
+        self.assertIn("switched off", self.stopped[0])

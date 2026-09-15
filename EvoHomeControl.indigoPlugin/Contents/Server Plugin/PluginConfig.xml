@@ -179,7 +179,7 @@
         <Label>EN SUITE DRYING RUN</Label>
     </Field>
     <Field id="lbl_drying_help" type="label">
-        <Label>Holds the En Suite radiator warm each morning to dry the room out, and stops the moment the window is opened. It keeps running through the summer shut-off and ignores both the warm-morning skip and the mild-weather cut-off, because a warm damp morning still leaves wet towels. Radiator only - the floor heating is never touched. Away mode still wins, and an open window always closes the valve.</Label>
+        <Label>Holds the En Suite radiator warm each morning to dry the room out, and stops the moment the window is opened. It runs through the summer shut-off and ignores both the warm-morning skip and the mild-weather cut-off, because a warm damp morning still leaves wet towels. It does NOT run once normal heating returns: from that day the 06:00 morning schedule heats this room anyway, and the drying run would otherwise sit on top of it and hold the room at the temperature set below. It picks itself up again when the next summer shut-off begins. Radiator only - the floor heating is never touched. Away mode still wins, and an open window always closes the valve.</Label>
     </Field>
     <Field id="enSuiteDryingEnabled" type="checkbox" defaultValue="true">
         <Label>Dry the En Suite out every morning:</Label>

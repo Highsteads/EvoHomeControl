@@ -5,7 +5,38 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5
 # Date:        12-09-2026
-# Version:     1.9.0
+# Version:     1.9.1
+#
+# v1.9.1 (15-09-2026): THE DRYING RUN STANDS DOWN WHEN THE HEATING SEASON STARTS.
+# The 06:00 morning schedule is hardcoded at EN_SUITE_MORNING_TEMP and runs the En
+# Suite from the day the summer shut-off lifts. The drying rule sits ABOVE the morning
+# rule in en_suite_special_rules and returns first, so a run left going would hold the
+# room at the drying temperature and the morning setpoint would never be reached — and
+# with the drying target now 20 degC against the morning schedule's 22, the room would
+# quietly run two degrees cooler all winter. CliveS: the drying temperature "should
+# only be used when the hard coded 06:00 morning schedule is not running".
+#
+# * KEYED ON THE SUMMER SHUT-OFF, NOT ON A DATE. That flag IS "the morning schedule is
+#   not running": _check_en_suite_morning returns on the identical condition, so the
+#   two can never disagree. It also follows the CONFIGURED summer window rather than a
+#   literal 1 October, so moving those dates moves this with them — and note the
+#   default window ends on the 30th, so the real changeover is 30 September, not the
+#   1 October it is easy to assume.
+# * A 24h force-on wakes the normal cycle mid-summer, and _summer_lockout_active is
+#   already False throughout one, so the drying run stands down for its duration too.
+#   That falls out of the coupling rather than being a second rule.
+# * A HAND-FIRED TEST RUN STILL WORKS. It is handled by the manual branch, which has
+#   already returned before the gate. The menu item is the only way to exercise this
+#   feature, and making it silently do nothing for eight months of the year is how a
+#   feature rots unnoticed; it has its own 30-minute timer, so it cannot be forgotten.
+# * THE GATE IS ON SCREEN WHERE IT MATTERS. "Show En Suite Drying Run Status" gains a
+#   Season line naming which side of the changeover we are on and when heating returns,
+#   and the Configure help no longer claims the run works all year. A setting whose
+#   behaviour has a hidden seasonal gate is a trap.
+# * 9 tests in TestTheHeatingSeasonOwnsTheRoom, driving the real _check_en_suite_drying
+#   on a frozen clock; 5 deliberate breakages (gate removed, gate inverted, a live run
+#   left alone, the season hardcoded to October, a manual run killed) each verified to
+#   turn the suite red. 131 -> 140.
 #
 # v1.9.0 (12-09-2026): EN SUITE DRYING RUN. A daily warm-through of the En Suite
 # radiator, 05:00 to 10:00 at 22 degC, ending the moment the window is opened —
@@ -269,7 +300,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.9.0"
+PLUGIN_VERSION  = "1.9.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1486,6 +1517,29 @@ class Plugin(indigo.PluginBase):
                 self._stop_en_suite_drying("the window was opened")
             return
 
+        # THE HEATING SEASON OWNS THIS ROOM. From the day normal heating returns, the
+        # hardcoded 06:00 morning schedule runs the En Suite, and the drying rule sits
+        # ABOVE the morning rule in en_suite_special_rules and returns first — so an
+        # active run would hold the room at the drying temperature and the morning
+        # setpoint would never be reached. The drying run exists to dry the room while
+        # nothing else is heating it, so it stands down.
+        #
+        # Keyed on the summer shut-off, NOT on a date. That flag IS "the morning
+        # schedule is not running": the morning check returns immediately while the
+        # lockout is in force and runs as soon as it lifts, so the two can never
+        # disagree. It also follows the configured summer window rather than a literal
+        # 1 October, so changing those dates moves this with them, and a 24h force-on —
+        # which wakes the normal cycle mid-summer — stands the drying run down for its
+        # duration too.
+        #
+        # A hand-fired TEST run is deliberate and still works: it is handled by the
+        # manual branch above, which has already returned by here.
+        if not self._summer_lockout_active():
+            if active:
+                self._stop_en_suite_drying(
+                    "normal heating has resumed, so the morning schedule owns the room")
+            return
+
         if active:
             if not self._en_suite_window_is_shut():
                 self._stop_en_suite_drying("the window was opened", cancel_for_today=True)
@@ -1527,6 +1581,14 @@ class Plugin(indigo.PluginBase):
         humidity   = self._en_suite_humidity()
         _log("=== En Suite Drying Run ===")
         _log(f"  Enabled:      {self._en_suite_drying_enabled()}")
+        # A setting whose behaviour has a seasonal gate is a trap unless the gate is
+        # on screen beside it — this is the line that says why nothing ran in January.
+        if self._summer_lockout_active():
+            _log(f"  Season:       summer shut-off, so the drying run may start "
+                 f"(normal heating returns {self._summer_on_date_str()})")
+        else:
+            _log("  Season:       normal heating, so the 06:00 morning schedule owns "
+                 "the room and the drying run stands down")
         _log(f"  Window:       {start}:00 to {end}:00, radiator only, "
              f"target {self._en_suite_drying_temp():.0f}degC")
         _log(f"  Running now:  {self.store.get('en_suite_drying_active', False)}")
