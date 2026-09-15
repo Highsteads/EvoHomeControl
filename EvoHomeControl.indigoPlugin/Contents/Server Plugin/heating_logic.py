@@ -186,6 +186,11 @@ EN_SUITE_WARM_MORNING_THRESHOLD = 10.0
 # towels. Away mode still wins - an empty house has no wet towels - and an open
 # window still closes the valve.
 EN_SUITE_DRYING_TEMP       = 22.0
+# Only dry the room on a cold morning. MEASURED on the Ecowitt outdoor sensor
+# (device 889210700) on 15-09-2026: 16.9 degC at 06:00, falling to 14.7 by 08:00 —
+# a mild September morning on which the radiator ran for three and a half hours.
+# 12 is CliveS's figure, set that evening. It is a pref; this is only its default.
+EN_SUITE_DRYING_MAX_OUTDOOR = 12.0
 EN_SUITE_DRYING_START_HOUR = 5
 EN_SUITE_DRYING_END_HOUR   = 10
 

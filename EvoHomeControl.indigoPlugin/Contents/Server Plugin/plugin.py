@@ -5,7 +5,39 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5
 # Date:        12-09-2026
-# Version:     1.9.1
+# Version:     1.9.2
+#
+# v1.9.2 (15-09-2026): THE DRYING RUN ONLY STARTS ON A COLD MORNING. CliveS, after
+# watching it hold the radiator at 20 degC for three and a half hours on a mild
+# morning: only turn the En Suite radiator on "when the outside temp goes below 12c".
+# MEASURED that morning on the Ecowitt outdoor sensor (889210700) — 16.9 degC at
+# 06:00, 14.7 by 08:00. The run is deliberately exempt from the warm-morning skip
+# (10 degC) and the mild-weather cut-off (14 degC), so nothing else was going to stop
+# it; this is the drying run's own limit.
+#
+# * New pref enSuiteDryingMaxOutdoor (menu, default 12). 0 is the "no limit" token,
+#   so a blank or junk pref can never silently become "only below freezing" — it
+#   falls back to the default instead, which a mutation pins.
+# * Reads self.weather.get_outdoor_temp(), the SAME source as the warm-morning skip
+#   and the mild-weather cut-off, so the three rules cannot disagree about the weather.
+# * NO READING MEANS NO RUN, and that is deliberately the OPPOSITE of the warm-morning
+#   skip, which proceeds when the temperature is unknown. The rules differ in kind:
+#   that one CANCELS when it is definitely warm, so the schedule is the default; this
+#   one PERMITS only when it is definitely cold, so evidence is the precondition.
+#   Running without a reading would defeat the gate. Logged as a WARNING once a day —
+#   a feature that silently stops is worse than one that misbehaves loudly.
+# * GATES THE START ONLY. A run already going finishes at its hour or on an opened
+#   window; stopping it because the sun came up would flap the valve on a warming
+#   morning and the room still needs drying. The gate is re-asked every tick, so a
+#   morning that only turns cold at 07:00 still gets a run.
+# * The start line now records the outdoor temperature, so the threshold can be judged
+#   later from real mornings rather than from memory, and the status menu item gained
+#   an Outdoor line naming the limit, the current reading and the verdict.
+# * 14 tests; 7 deliberate breakages each verified to turn the suite red. 140 -> 154.
+#   ONE first-pass survivor was a badly built mutation, not a blind test: it put the
+#   stop AFTER the `if active: ... return` branch, which an active run never reaches.
+#   Re-run inside that branch it went red at once. An unreachable mutation proves
+#   nothing — check reachability before reading a survivor as a finding.
 #
 # v1.9.1 (15-09-2026): THE DRYING RUN STANDS DOWN WHEN THE HEATING SEASON STARTS.
 # The 06:00 morning schedule is hardcoded at EN_SUITE_MORNING_TEMP and runs the En
@@ -283,6 +315,7 @@ from heating_logic    import (
     EN_SUITE_MORNING_TEMP,
     EN_SUITE_WARM_MORNING_THRESHOLD,
     EN_SUITE_DRYING_TEMP,
+    EN_SUITE_DRYING_MAX_OUTDOOR,
     EN_SUITE_DRYING_START_HOUR,
     EN_SUITE_DRYING_END_HOUR,
     ALL_RADIATOR_IDS,
@@ -300,7 +333,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.9.1"
+PLUGIN_VERSION  = "1.9.2"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1324,6 +1357,56 @@ class Plugin(indigo.PluginBase):
         target = _safe_float(self.pluginPrefs.get("enSuiteDryingTemp"), EN_SUITE_DRYING_TEMP)
         return max(RADIATORS_OFF_TEMP, min(target, 26.0))
 
+    def _en_suite_drying_max_outdoor(self):
+        """Only dry the room below this outdoor temperature. None means no limit.
+
+        0 is the "no limit" token rather than a real threshold: nobody wants a drying
+        run that fires only below freezing, and a blank or junk pref must not silently
+        become one.
+        """
+        raw = _safe_float(self.pluginPrefs.get("enSuiteDryingMaxOutdoor"),
+                          EN_SUITE_DRYING_MAX_OUTDOOR)
+        if raw is None or raw <= 0:
+            return None
+        return min(raw, 30.0)
+
+    def _en_suite_drying_cold_enough(self, today):
+        """Is it cold enough outside to be worth heating the room dry?
+
+        CliveS, 15-09-2026, after watching a run heat the room for three and a half
+        hours on a 16.9 degC morning: only turn the radiator on "when the outside temp
+        goes below 12c".
+
+        NO READING MEANS NO RUN, and that is deliberately the OPPOSITE of the
+        warm-morning skip twenty lines down, which proceeds when the temperature is
+        unknown. The two differ because the rules differ in kind: that one CANCELS a
+        schedule when it is definitely warm, so the schedule is the default; this one
+        permits a run ONLY when it is definitely cold, so evidence is the precondition.
+        Running without a reading would defeat the whole point of the gate.
+
+        A feature that silently stops is worse than one that misbehaves loudly, so a
+        skip for want of a reading is logged as a WARNING once a day — enough for
+        Log_Error_Watch to record it and for the status menu to show it, without a line
+        every thirty seconds.
+        """
+        limit = self._en_suite_drying_max_outdoor()
+        if limit is None:
+            return True
+
+        outdoor = self.weather.get_outdoor_temp() if self.weather else None
+        if outdoor is None:
+            if self.store.get("en_suite_drying_no_outdoor_date") != today:
+                self.store["en_suite_drying_no_outdoor_date"] = today
+                self._save_state()
+                _log("[EnSuiteDrying] No outdoor temperature to hand, so the run is "
+                     f"held: it only starts below {limit:.0f}degC and that cannot be "
+                     "confirmed.", level="WARNING")
+            return False
+
+        if outdoor >= limit:
+            return False
+        return True
+
     def _en_suite_humidity(self):
         """The En Suite humidity as a float, or None when no reading is worth trusting.
 
@@ -1467,6 +1550,11 @@ class Plugin(indigo.PluginBase):
             until = f"until {end}:00"
         damp = (f"The room is at {humidity:.0f}% humidity."
                 if humidity is not None else "There is no humidity reading to hand.")
+        # The outdoor reading that let this run start, recorded so the threshold can be
+        # judged later from real mornings rather than from memory.
+        outdoor = self.weather.get_outdoor_temp() if self.weather else None
+        if outdoor is not None:
+            damp += f" It is {outdoor:.1f}degC outside."
         _log(f"[EnSuiteDrying] Started ({reason}) - holding the En Suite radiator at "
              f"{target:.0f}degC {until}, or until the window is opened. {damp}")
         self._save_state()
@@ -1556,6 +1644,13 @@ class Plugin(indigo.PluginBase):
 
         if self.store.get("en_suite_drying_cancelled_date") == today:
             return
+        # Gates the START only. A run already going is left to finish at its own hour
+        # or on an opened window: stopping it because the sun came up would flap the
+        # valve on a warming morning, and the room still needs drying. The flip side
+        # is that a morning which only drops below the limit at 07:00 starts then —
+        # this is re-asked every tick, not once at 05:00.
+        if not self._en_suite_drying_cold_enough(today):
+            return
         if self._en_suite_window_is_shut():
             self._start_en_suite_drying()
 
@@ -1591,6 +1686,18 @@ class Plugin(indigo.PluginBase):
                  "the room and the drying run stands down")
         _log(f"  Window:       {start}:00 to {end}:00, radiator only, "
              f"target {self._en_suite_drying_temp():.0f}degC")
+        limit   = self._en_suite_drying_max_outdoor()
+        outdoor = self.weather.get_outdoor_temp() if self.weather else None
+        now_out = f"{outdoor:.1f}degC" if outdoor is not None else "no reading"
+        if limit is None:
+            _log(f"  Outdoor:      no limit set, so the weather cannot stop a run "
+                 f"(it is {now_out} now)")
+        else:
+            verdict = ("cold enough" if outdoor is not None and outdoor < limit
+                       else "too mild" if outdoor is not None
+                       else "unknown, so a run is held")
+            _log(f"  Outdoor:      starts below {limit:.0f}degC, now {now_out} "
+                 f"({verdict})")
         _log(f"  Running now:  {self.store.get('en_suite_drying_active', False)}")
         if self.store.get("en_suite_drying_started"):
             _log(f"  Started at:   {self.store['en_suite_drying_started']}")

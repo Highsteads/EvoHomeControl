@@ -127,6 +127,9 @@ def _bare_plugin(prefs=None, store=None):
     p = plugin_mod.Plugin.__new__(plugin_mod.Plugin)
     p.pluginPrefs = prefs if prefs is not None else {}
     p.store       = store if store is not None else {}
+    # startup() always sets this, to a module or to None. A bare instance had neither,
+    # so a test reaching the weather gate got AttributeError instead of a verdict.
+    p.weather     = None
     return p
 
 
@@ -675,7 +678,11 @@ class TestTheHeatingSeasonOwnsTheRoom(unittest.TestCase):
     """
 
     def _plugin(self, lockout, store=None, prefs=None):
-        p = _bare_plugin(prefs=prefs or {}, store=store or {})
+        # "0" = no outdoor limit: this class is about the season, and a second gate
+        # in the way would make a pass here mean two different things.
+        prefs = dict(prefs or {})
+        prefs.setdefault("enSuiteDryingMaxOutdoor", "0")
+        p = _bare_plugin(prefs=prefs, store=store or {})
         self.consulted = []
         p._summer_lockout_active = lambda: (self.consulted.append(True) or lockout)
         self.stopped = []
@@ -776,3 +783,135 @@ class TestTheHeatingSeasonOwnsTheRoom(unittest.TestCase):
             p._check_en_suite_drying()
         self.assertEqual(len(self.stopped), 1)
         self.assertIn("switched off", self.stopped[0])
+
+
+# ---------------------------------------------------------------------------
+class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
+    """CliveS, 15-09-2026, after a run heated the room for three and a half hours on
+    a 16.9 degC morning: only turn the radiator on "when the outside temp goes below
+    12c". Measured on the Ecowitt outdoor sensor that morning — 16.9 at 06:00, 14.7
+    by 08:00.
+    """
+
+    def _plugin(self, outdoor, limit="12.0", store=None):
+        p = _bare_plugin(prefs={"enSuiteDryingMaxOutdoor": limit},
+                         store=store if store is not None else {})
+        p._summer_lockout_active   = lambda: True      # summer, so the season allows it
+        p._en_suite_window_is_shut = lambda: True
+        p._save_state              = lambda: None
+        p.weather = types.SimpleNamespace(get_outdoor_temp=lambda: outdoor)
+        self.started = []
+        p._start_en_suite_drying = lambda: self.started.append(True)
+        self.stopped = []
+        p._stop_en_suite_drying = lambda reason, cancel_for_today=False: \
+            self.stopped.append(reason)
+        return p
+
+    def _run_at_0600(self, p):
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 7, 4, 6, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+
+    # -- the gate itself --------------------------------------------------------
+    def test_a_cold_morning_starts_a_run(self):
+        p = self._plugin(outdoor=8.4)
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [True])
+
+    def test_a_mild_morning_does_not(self):
+        """16.9 degC is the reading that prompted the whole rule."""
+        p = self._plugin(outdoor=16.9)
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
+
+    def test_the_threshold_itself_is_too_mild(self):
+        """'below 12' — 12.0 exactly does not qualify."""
+        p = self._plugin(outdoor=12.0)
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
+        p = self._plugin(outdoor=11.9)
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [True])
+
+    def test_the_limit_is_configurable_not_hardcoded(self):
+        p = self._plugin(outdoor=15.0, limit="16.0")
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [True], "a raised limit must let it through")
+
+    def test_zero_means_no_limit_rather_than_below_freezing(self):
+        p = self._plugin(outdoor=25.0, limit="0")
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [True])
+
+    def test_a_junk_setting_falls_back_to_the_default_not_to_no_limit(self):
+        p = self._plugin(outdoor=16.9, limit="banana")
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [], "a bad pref must not disable the gate")
+
+    # -- no reading is not permission -------------------------------------------
+    def test_no_outdoor_reading_holds_the_run(self):
+        """The opposite of the warm-morning skip, and on purpose: that one cancels
+        when it is definitely warm, this one permits only when definitely cold."""
+        p = self._plugin(outdoor=None)
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
+
+    def test_no_weather_module_at_all_holds_the_run(self):
+        p = self._plugin(outdoor=None)
+        p.weather = None
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
+
+    def test_a_missing_reading_is_announced_once_a_day_not_every_tick(self):
+        """A feature that silently stops is worse than one that misbehaves loudly."""
+        p = self._plugin(outdoor=None)
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run_at_0600(p)
+            self._run_at_0600(p)
+            self._run_at_0600(p)
+        warns = [c for c in log.call_args_list
+                 if c.kwargs.get("level") == "WARNING"
+                 and "outdoor temperature" in c.args[0]]
+        self.assertEqual(len(warns), 1, "once a day, not once a tick")
+
+    def test_a_new_day_gets_its_own_warning(self):
+        p = self._plugin(outdoor=None,
+                         store={"en_suite_drying_no_outdoor_date": "2026-07-03"})
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run_at_0600(p)
+        warns = [c for c in log.call_args_list if c.kwargs.get("level") == "WARNING"]
+        self.assertEqual(len(warns), 1)
+
+    # -- it gates the START, and only the START ---------------------------------
+    def test_a_run_already_going_is_not_stopped_when_it_warms_up(self):
+        """Stopping mid-run would flap the valve on a warming morning, and the room
+        still needs drying. The window and the 10:00 finish end a run, not the sun."""
+        p = self._plugin(outdoor=18.0, store={"en_suite_drying_active": True})
+        self._run_at_0600(p)
+        self.assertEqual(self.stopped, [])
+
+    def test_a_morning_that_turns_cold_later_still_gets_a_run(self):
+        """Re-asked every tick, so 07:00 is as good a start as 05:00."""
+        p = self._plugin(outdoor=16.0)
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
+        p.weather.get_outdoor_temp = lambda: 11.0
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 7, 4, 7, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+        self.assertEqual(self.started, [True])
+
+    # -- it sits below the rules that already existed ---------------------------
+    def test_the_season_gate_still_wins_over_a_cold_morning(self):
+        p = self._plugin(outdoor=2.0)
+        p._summer_lockout_active = lambda: False
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [], "the morning schedule owns the room")
+
+    def test_an_open_window_still_wins_over_a_cold_morning(self):
+        p = self._plugin(outdoor=2.0)
+        p._en_suite_window_is_shut = lambda: False
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
