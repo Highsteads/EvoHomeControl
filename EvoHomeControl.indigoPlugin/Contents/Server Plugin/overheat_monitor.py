@@ -13,6 +13,8 @@ from datetime import datetime as dt
 
 import indigo  # noqa — available in plugin context
 
+from log_stamp import stamp as _stamp
+
 # _slog()'s level= wants a Python logging int; a STRING is silently
 # ignored and the line logs as Info. Translate string levels at the choke point.
 _LOG_LEVELS = {
@@ -28,7 +30,7 @@ def _slog(message, level="INFO"):
     """indigo.server.log with string-level translation (string levels are otherwise
     silently downgraded to Info by Indigo)."""
     lvl = _LOG_LEVELS.get(level.upper(), logging.INFO) if isinstance(level, str) else level
-    indigo.server.log(message, level=lvl)
+    indigo.server.log(_stamp(message), level=lvl)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +368,7 @@ class OverheatMonitor:
                     level="WARNING"
                 )
                 return False
-            plugin.executeAction("send", props={
+            props = {
                 "msgTitle":        title,
                 "msgBody":         message,
                 "msgSound":        "vibrate",
@@ -374,7 +376,14 @@ class OverheatMonitor:
                 "msgDevice":       "",
                 "msgSupLinkUrl":   "",
                 "msgSupLinkTitle": "",
-            })
+            }
+            # The user key from IndigoSecrets.py or the Configure dialog. Sent only
+            # when one is set: without it the Pushover plugin uses its own default
+            # user, which is what a blank setting has always meant.
+            user_key = str(self.pushover_user_key or "").strip()
+            if user_key:
+                props["msgUser"] = user_key
+            plugin.executeAction("send", props=props)
             return True
         except Exception as e:
             _slog(

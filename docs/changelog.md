@@ -7,6 +7,19 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.10.0 — 27 September 2026
+
+These are the things I found wrong while writing this guide.
+
+- **The Dining Room stays at 16 degrees with a garden window or door open.** That was always meant to happen, but the plugin turned it straight back down to 8 degrees a moment later, so it never did.
+- **The Pushover user key setting works.** Overheating alerts go to the key you set, or to the user set up in the Pushover plugin when it is blank. Before, the setting was ignored.
+- **Away mode stops the En Suite drying run,** as the settings always said it would. It starts again that morning if away mode is switched off before the finish hour.
+- **The drying run only starts when it knows it is cold outside.** With no Ecowitt sensor it used the fallback temperature of 6 degrees after a restart, which is below every limit, so it ran every morning whatever the weather. It now fetches the weather itself during the summer shut-off, and when there is no real reading it waits and says so once a day.
+- **The En Suite Morning Cancelled trigger fires when opening the window ends the morning schedule,** as well as at 10am and on a warm morning.
+- **A location of 0.0 and 0.0 in the shared settings file counts as not filled in,** so the Latitude and Longitude boxes are used instead of a point in the sea.
+- **Empty outdoor record variables fill in.** A Highest or Lowest variable left empty used to stay empty for ever.
+- **Toggle Timestamps in Log switches the time on every line** the plugin writes to the Event Log, not just a few of them, and remembers your choice straight away.
+
 ## 1.9.2 — 15 September 2026
 
 - **The drying run only starts when it is cold outside,** below 12 degrees to start with. You can change the figure, or choose **No limit**, in the settings. It had been holding the En Suite radiator warm for three and a half hours on a morning that was 16.9 degrees outside at six.

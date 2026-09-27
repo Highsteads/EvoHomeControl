@@ -3,9 +3,22 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Opus 5
-# Date:        12-09-2026
-# Version:     1.9.2
+# Author:      CliveS & Claude Opus 5, Claude Opus 5.5
+# Date:        27-09-2026
+# Version:     1.10.0
+#
+# v1.10.0 (27-09-2026): the faults found while writing the plain-English guide.
+# Dining Room holds 16 degC with a garden window/door open (the general open-window
+# step no longer overwrites messages 20/21 with 8 degC); the Pushover user key is
+# sent as msgUser; the drying run's cold gate reads a MEASURED outdoor temperature
+# (WeatherData.get_measured_outdoor_temp - Ecowitt or OWM under an hour old, never
+# the 6 degC fallback, which is below every limit) and fetches OWM itself during the
+# shut-off, at most every 5 min; away mode now stops the drying run, read from the
+# variable because the cycle that reads the modes is skipped all summer; En Suite
+# Morning Cancelled fires when the window ends the schedule; LATITUDE/LONGITUDE both
+# 0.0 (the template) count as unset; an empty Highest/Lowest record variable is
+# filled by the next reading; Toggle Timestamps reaches every Event Log route via
+# log_stamp.py and saves at once. Tests 154 -> 198.
 #
 # v1.9.2 (15-09-2026): THE DRYING RUN ONLY STARTS ON A COLD MORNING. CliveS, after
 # watching it hold the radiator at 20 degC for three and a half hours on a mild
@@ -287,6 +300,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Plugin modules
 # ---------------------------------------------------------------------------
+import log_stamp
 from weather          import WeatherData
 from overheat_monitor import OverheatMonitor
 from heating_logic    import (
@@ -333,7 +347,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.9.2"
+PLUGIN_VERSION  = "1.10.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -364,6 +378,24 @@ def _safe_int(value, default=None):
         return int(value)
     except (ValueError, TypeError):
         return default
+
+
+def _resolve_location(prefs, fallback_lat=0.0, fallback_lon=0.0):
+    """(latitude, longitude) for the weather lookup: IndigoSecrets.py first, then
+    the Configure dialog's boxes.
+
+    The shipped IndigoSecrets_example.py carries LATITUDE = 0.0 and LONGITUDE = 0.0
+    as placeholders, and a copy of it used to win over the dialog because 0.0 is a
+    value. 0,0 is open sea that no house sits on, so a pair of zeros counts as NOT
+    set. Both coordinates must come from the same place: half a location from each
+    is not a location.
+    """
+    s_lat = _safe_float(_SECRETS_LATITUDE, None)
+    s_lon = _safe_float(_SECRETS_LONGITUDE, None)
+    if s_lat is not None and s_lon is not None and not (s_lat == 0.0 and s_lon == 0.0):
+        return s_lat, s_lon
+    return (_safe_float(prefs.get("owmLatitude"), fallback_lat),
+            _safe_float(prefs.get("owmLongitude"), fallback_lon))
 
 
 def _atomic_write_json(path, obj, **dump_kwargs):
@@ -424,8 +456,8 @@ def _to_level(level):
 
 
 def _log(message, level="INFO"):
-    """Log with timestamp to Indigo event log."""
-    indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {message}", level=_to_level(level))
+    """Log to the Indigo event log, stamped unless Toggle Timestamps has turned it off."""
+    indigo.server.log(log_stamp.stamp(message), level=_to_level(level))
 
 
 def _wind_compass(degrees):
@@ -454,6 +486,9 @@ class Plugin(indigo.PluginBase):
             self._ts_filter = install_timestamp_filter(self, enabled=self.timestamp_enabled)
         else:
             self._ts_filter = None
+        # The same switch for the lines that reach the Event Log without going
+        # through self.logger - which is most of them.
+        log_stamp.set_enabled(self.timestamp_enabled)
 
         # Startup banner moved to showPluginInfo on demand (revised 25-May-2026 per Jay).
 
@@ -597,8 +632,7 @@ class Plugin(indigo.PluginBase):
         ecowitt_raw    = self.pluginPrefs.get("ecowittDeviceId", "")
         ecowitt_dev_id = _safe_int(ecowitt_raw, None) if ecowitt_raw else None
 
-        lat = _SECRETS_LATITUDE if _SECRETS_LATITUDE is not None else _safe_float(self.pluginPrefs.get("owmLatitude"), 0.0)
-        lon = _SECRETS_LONGITUDE if _SECRETS_LONGITUDE is not None else _safe_float(self.pluginPrefs.get("owmLongitude"), 0.0)
+        lat, lon = _resolve_location(self.pluginPrefs)
 
         self.weather = WeatherData(
             api_key        = owm_key,
@@ -684,8 +718,7 @@ class Plugin(indigo.PluginBase):
                 # Re-resolve coordinates (IndigoSecrets wins) and rebuild the request
                 # URL, so a changed key OR location takes effect now — not only after
                 # a restart (the URL bakes in key+lat+lon at construction time).
-                lat = _SECRETS_LATITUDE if _SECRETS_LATITUDE is not None else _safe_float(values_dict.get("owmLatitude"), self.weather.lat)
-                lon = _SECRETS_LONGITUDE if _SECRETS_LONGITUDE is not None else _safe_float(values_dict.get("owmLongitude"), self.weather.lon)
+                lat, lon = _resolve_location(values_dict, self.weather.lat, self.weather.lon)
                 self.weather.set_credentials(owm_key, lat, lon)
                 self.weather.bypass         = values_dict.get("weatherBypass", False)
                 self.weather.bypass_temp    = _safe_float(values_dict.get("weatherBypassTemp", 6.0), 6.0)
@@ -961,6 +994,7 @@ class Plugin(indigo.PluginBase):
             overheat_target_override   = self._en_suite_overheat_target(),
             **common,
         )
+        self._note_en_suite_morning_cancelled(morning_active)
 
         # 6. Conservatory
         self._safe_process_room(
@@ -1393,7 +1427,7 @@ class Plugin(indigo.PluginBase):
         if limit is None:
             return True
 
-        outdoor = self.weather.get_outdoor_temp() if self.weather else None
+        outdoor = self._en_suite_drying_outdoor_temp()
         if outdoor is None:
             if self.store.get("en_suite_drying_no_outdoor_date") != today:
                 self.store["en_suite_drying_no_outdoor_date"] = today
@@ -1406,6 +1440,42 @@ class Plugin(indigo.PluginBase):
         if outdoor >= limit:
             return False
         return True
+
+    def _en_suite_drying_outdoor_temp(self):
+        """A MEASURED outdoor temperature for the drying run's cold gate, or None.
+
+        Never the configured fallback temperature. get_outdoor_temp() returns that
+        fallback (6 degC to start with) when there is no reading, and 6 is below every
+        limit on offer, so a house with no reading ran every morning whatever the
+        weather - the opposite of what the setting promises.
+
+        The summer shut-off skips the heating cycle, and with it the OpenWeatherMap
+        refresh, so a house without an Ecowitt sensor had no fresh reading all
+        summer. When there is no reading this asks the weather module to refresh, at
+        most once every five minutes: it answers from its 15-minute cache when it can,
+        so this costs no more calls than the heating season does.
+        """
+        if not self.weather:
+            return None
+        outdoor = self.weather.get_measured_outdoor_temp()
+        if outdoor is not None:
+            return outdoor
+        now_ts = time.time()
+        if now_ts - self.store.get("en_suite_drying_weather_tried", 0.0) < 300:
+            return None
+        self.store["en_suite_drying_weather_tried"] = now_ts
+        try:
+            self.weather.update()
+        except Exception as e:
+            _log(f"[EnSuiteDrying] Weather refresh raised {type(e).__name__}: {e}",
+                 level="WARNING")
+            return None
+        return self.weather.get_measured_outdoor_temp()
+
+    def _away_mode_on(self):
+        """Read the Away variable now. The heating cycle's copy in self.store is not
+        refreshed during the summer shut-off, which is when the drying run runs."""
+        return str(get_variable_value(VAR_HOME_AWAY_ID, "false")).strip().lower() == "true"
 
     def _en_suite_humidity(self):
         """The En Suite humidity as a float, or None when no reading is worth trusting.
@@ -1552,7 +1622,7 @@ class Plugin(indigo.PluginBase):
                 if humidity is not None else "There is no humidity reading to hand.")
         # The outdoor reading that let this run start, recorded so the threshold can be
         # judged later from real mornings rather than from memory.
-        outdoor = self.weather.get_outdoor_temp() if self.weather else None
+        outdoor = self.weather.get_measured_outdoor_temp() if self.weather else None
         if outdoor is not None:
             damp += f" It is {outdoor:.1f}degC outside."
         _log(f"[EnSuiteDrying] Started ({reason}) - holding the En Suite radiator at "
@@ -1628,6 +1698,15 @@ class Plugin(indigo.PluginBase):
                     "normal heating has resumed, so the morning schedule owns the room")
             return
 
+        # AWAY MODE WINS: an empty house has no wet towels. Read from the variable on
+        # every tick, because the cycle that normally reads the modes is skipped for
+        # the whole summer shut-off. Not a cancellation for the day, so a household
+        # that comes home at 7am still gets its run.
+        if self._away_mode_on():
+            if active:
+                self._stop_en_suite_drying("away mode was switched on")
+            return
+
         if active:
             if not self._en_suite_window_is_shut():
                 self._stop_en_suite_drying("the window was opened", cancel_for_today=True)
@@ -1684,10 +1763,12 @@ class Plugin(indigo.PluginBase):
         else:
             _log("  Season:       normal heating, so the 06:00 morning schedule owns "
                  "the room and the drying run stands down")
+        if self._away_mode_on():
+            _log("  Away mode:    on, so no run starts until it is switched off")
         _log(f"  Window:       {start}:00 to {end}:00, radiator only, "
              f"target {self._en_suite_drying_temp():.0f}degC")
         limit   = self._en_suite_drying_max_outdoor()
-        outdoor = self.weather.get_outdoor_temp() if self.weather else None
+        outdoor = self.weather.get_measured_outdoor_temp() if self.weather else None
         now_out = f"{outdoor:.1f}degC" if outdoor is not None else "no reading"
         if limit is None:
             _log(f"  Outdoor:      no limit set, so the weather cannot stop a run "
@@ -1809,6 +1890,23 @@ class Plugin(indigo.PluginBase):
             self.store["en_suite_morning_cancelled_date"] = None
             self._save_state()
 
+    def _note_en_suite_morning_cancelled(self, was_active):
+        """Fire En Suite Morning Cancelled when the room's own rule ended the
+        morning schedule during this cycle.
+
+        Opening the window is noticed inside en_suite_special_rules, which runs in
+        the heating cycle and cannot reach Indigo's triggers. Without this the
+        trigger fired for the 10am finish and the warm-morning skip, but never for
+        the window, although the event has always promised it. The cancellation is
+        saved too, so a restart later that morning does not start the schedule again.
+        """
+        if was_active and not self.store.get("en_suite_morning_active", False):
+            reason = self.store.get("en_suite_morning_cancelled_reason")
+            if reason == "window_open":
+                _log("[EnSuiteMorning] Window opened - morning schedule cancelled for today")
+            self._save_state()
+            self._fire_event("enSuiteMorningCancelled")
+
     # -----------------------------------------------------------------------
     # Device state helpers
     # -----------------------------------------------------------------------
@@ -1905,11 +2003,11 @@ class Plugin(indigo.PluginBase):
         """
         if current_temp is None:
             return
-        try:
-            av_high = float(get_variable_value(VAR_AV_OUT_TEMP_HI_ID, "-999"))
-            av_low  = float(get_variable_value(VAR_AV_OUT_TEMP_LO_ID,  "999"))
-        except (ValueError, TypeError):
-            return
+        # An empty or non-numeric variable counts as "no record yet", so the first
+        # reading fills it. float("") used to raise here and the method returned,
+        # which left an empty record variable empty for ever.
+        av_high = _safe_float(get_variable_value(VAR_AV_OUT_TEMP_HI_ID, "-999"), -999.0)
+        av_low  = _safe_float(get_variable_value(VAR_AV_OUT_TEMP_LO_ID,  "999"),  999.0)
 
         ts = datetime.now().strftime("%A %d %b %Y %H:%M:%S")
         if current_temp <= av_low:
@@ -1999,7 +2097,9 @@ class Plugin(indigo.PluginBase):
         echo = self._event_log_dump_enabled() if to_event_log is None else to_event_log
 
         def _b(msg, level="INFO"):
-            formatted = f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}"
+            # The daily file always keeps the time; the Event Log copy follows the
+            # Toggle Timestamps switch, and self.logger has its own stamping filter.
+            formatted = f"{log_stamp.now_stamp()} {msg}"
             # A fault must never be silenced by a verbosity pref: WARNING and
             # above always reach the event log, because Log_Error_Watch.py reads
             # the event log and nothing else. This guard is load-bearing today,
@@ -2009,9 +2109,9 @@ class Plugin(indigo.PluginBase):
             # quiet whenever the dump pref is off, which is the default.
             # test_event_log_volume.py pins both halves of that claim.
             if echo or _to_level(level) >= logging.WARNING:
-                indigo.server.log(formatted, level=_to_level(level))
+                indigo.server.log(log_stamp.stamp(msg), level=_to_level(level))
             else:
-                self.logger.debug(formatted)
+                self.logger.debug(msg)
             self.store["log_buffer"].append(formatted)
 
         _b("")
@@ -2277,9 +2377,9 @@ class Plugin(indigo.PluginBase):
         if not os.path.exists(cache_path) and os.path.exists(_OLD_SETPOINT_CACHE):
             try:
                 shutil.copy2(_OLD_SETPOINT_CACHE, cache_path)
-                indigo.server.log("[EvoHomeControl] Migrated setpoint cache from Python Scripts dir")
+                _log("[EvoHomeControl] Migrated setpoint cache from Python Scripts dir")
             except Exception as e:
-                indigo.server.log(f"[EvoHomeControl] Setpoint cache migration failed: {e}", level=_to_level("WARNING"))
+                _log(f"[EvoHomeControl] Setpoint cache migration failed: {e}", level="WARNING")
 
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
@@ -2427,8 +2527,8 @@ class Plugin(indigo.PluginBase):
         if missing:
             fix = f"pip3 install {' '.join(missing)}"
             indigo.server.log(
-                f"[EvoHomeControl] Missing libraries: {', '.join(missing)} — "
-                f"Fix: open Terminal and run: {fix}",
+                log_stamp.stamp(f"[EvoHomeControl] Missing libraries: {', '.join(missing)} — "
+                                f"Fix: open Terminal and run: {fix}"),
                 isError=True
             )
             raise RuntimeError(f"Missing libraries: {', '.join(missing)}")
@@ -2622,10 +2722,22 @@ class Plugin(indigo.PluginBase):
         self.menuShowStatus(values_dict, type_id)
 
     def menuToggleTimestamps(self, values_dict=None, type_id=None):
+        """Menu: the [HH:MM:SS.mmm] stamp on every line this plugin writes to the
+        Event Log, on or off. The daily radiator log file keeps its times either way.
+
+        One switch covers every route to the Event Log (log_stamp.py) as well as
+        self.logger's filter. Saved straight away: a pref written from a menu
+        callback otherwise only reaches disk on a clean shutdown.
+        """
         self.timestamp_enabled = not self.timestamp_enabled
         self.pluginPrefs["timestampEnabled"] = self.timestamp_enabled
+        log_stamp.set_enabled(self.timestamp_enabled)
         if self._ts_filter:
             self._ts_filter.enabled = self.timestamp_enabled
+        try:
+            self.savePluginPrefs()
+        except AttributeError:
+            pass   # outside Indigo (tests) there is no savePluginPrefs
         state = "ON" if self.timestamp_enabled else "OFF"
-        indigo.server.log(f"[{self.pluginDisplayName}] Timestamps in Log -> {state}")
+        _log(f"[{self.pluginDisplayName}] Timestamps in Log -> {state}")
         return True

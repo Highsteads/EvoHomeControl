@@ -31,7 +31,7 @@ All three can be kept in the shared settings file instead, as described below.
 
 | Setting | What it does |
 |---|---|
-| **Pushover user key** | Not used at present. Alerts go through the Pushover plugin to the user set up in that plugin. The Pushover plugin needs to be installed and enabled. |
+| **Pushover user key** | The Pushover user or group key the overheating alerts go to. Leave it blank and they go to the user set up in the Pushover plugin. `PUSHOVER_USER_TOKEN` in the shared settings file is used first. The Pushover plugin needs to be installed and enabled. |
 | **Overheat alert email** | The address the overheating alerts and all-clears are emailed to, using the email account set up in Indigo. If neither this nor the shared settings file has an address, the plugin logs an error each time it starts. |
 
 ## HEATING CYCLE
@@ -86,7 +86,8 @@ If you run several of my plugins, you can keep keys and addresses in one shared 
 | `OWM_API_KEY` | Your OpenWeatherMap API key |
 | `LATITUDE` and `LONGITUDE` | Where your house is |
 | `OVERHEAT_ALERT_EMAIL` | The address for the overheating alerts |
+| `PUSHOVER_USER_TOKEN` | The Pushover user key for the overheating alerts |
 
-When the file has a value, it is used, whatever the Configure box says. Take care with the location: the blank copy has `LATITUDE = 0.0` and `LONGITUDE = 0.0`, and those count as values, so either fill them in or delete those two lines, or the forecast will be for a point in the sea off West Africa.
+When the file has a value, it is used, whatever the Configure box says. The one exception is the location: the blank copy has `LATITUDE = 0.0` and `LONGITUDE = 0.0`, and when both are still 0.0 the plugin treats them as not filled in and uses the **Latitude** and **Longitude** boxes instead.
 
 Changes to the file take effect when the plugin next starts.

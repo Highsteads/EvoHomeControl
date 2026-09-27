@@ -14,6 +14,8 @@ import time
 
 import indigo  # noqa — available in plugin context
 
+from log_stamp import stamp as _stamp
+
 # _slog()'s level= wants a Python logging int; a STRING is silently
 # ignored and the line logs as Info. Translate string levels at the choke point.
 _LOG_LEVELS = {
@@ -29,7 +31,7 @@ def _slog(message, level="INFO"):
     """indigo.server.log with string-level translation (string levels are otherwise
     silently downgraded to Info by Indigo)."""
     lvl = _LOG_LEVELS.get(level.upper(), logging.INFO) if isinstance(level, str) else level
-    indigo.server.log(message, level=lvl)
+    indigo.server.log(_stamp(message), level=lvl)
 
 
 # OWM weather condition codes that indicate snow or freezing precipitation
@@ -205,31 +207,15 @@ class WeatherData:
         When bypass=True (Ecowitt unavailable):
           1. OWM cached/fetched temperature
           2. bypass_temp
+
+        Never returns None, so it is right for the heating cycle, which must always
+        have a number to work with. A rule that must know whether it is REALLY cold
+        uses get_measured_outdoor_temp() instead.
         """
         # --- Primary: Ecowitt (when bypass=False and device configured) ---
-        if not self.bypass and self.ecowitt_dev_id:
-            try:
-                dev = indigo.devices[self.ecowitt_dev_id]
-                online = dev.states.get("deviceOnline", True)
-                temp   = dev.states.get("temperature")
-                if online and temp is not None:
-                    return float(temp)
-                # Distinguish the two failure modes so the log is meaningful
-                if not online:
-                    self._warn_ecowitt(
-                        "offline",
-                        "Ecowitt device offline — falling back to OWM"
-                    )
-                else:
-                    self._warn_ecowitt(
-                        "no_temp",
-                        "Ecowitt online but temperature state missing — falling back to OWM"
-                    )
-            except (KeyError, ValueError, TypeError) as e:
-                self._warn_ecowitt(
-                    "read_error",
-                    f"Ecowitt read error ({e}) — falling back to OWM"
-                )
+        ecowitt = self._ecowitt_temp()
+        if ecowitt is not None:
+            return ecowitt
 
         # --- Secondary: OWM ---
         owm_temp = self.get_current('temp')
@@ -241,6 +227,60 @@ class WeatherData:
 
         # --- Last resort ---
         return self.bypass_temp
+
+    def get_measured_outdoor_temp(self, max_owm_age_secs=3600):
+        """
+        A real outdoor reading, or None. Never the configured fallback temperature.
+
+        Ecowitt first, then OpenWeatherMap - but only OWM data loaded within the
+        last max_owm_age_secs, because self.current is never cleared: after the
+        summer shut-off stops the hourly fetches it would otherwise hand back a
+        reading from days ago as if it were now.
+        """
+        ecowitt = self._ecowitt_temp()
+        if ecowitt is not None:
+            return ecowitt
+        if self.last_update is None:
+            return None
+        age = (datetime.datetime.now() - self.last_update).total_seconds()
+        if age > max_owm_age_secs:
+            return None
+        owm_temp = self.get_current('temp')
+        if owm_temp is None:
+            return None
+        try:
+            return float(owm_temp)
+        except (ValueError, TypeError):
+            return None
+
+    def _ecowitt_temp(self):
+        """The Ecowitt outdoor reading as a float, or None when bypassed, not
+        configured, offline or unreadable (each failure warns, rate-limited)."""
+        if self.bypass or not self.ecowitt_dev_id:
+            return None
+        try:
+            dev = indigo.devices[self.ecowitt_dev_id]
+            online = dev.states.get("deviceOnline", True)
+            temp   = dev.states.get("temperature")
+            if online and temp is not None:
+                return float(temp)
+            # Distinguish the two failure modes so the log is meaningful
+            if not online:
+                self._warn_ecowitt(
+                    "offline",
+                    "Ecowitt device offline — falling back to OWM"
+                )
+            else:
+                self._warn_ecowitt(
+                    "no_temp",
+                    "Ecowitt online but temperature state missing — falling back to OWM"
+                )
+        except (KeyError, ValueError, TypeError) as e:
+            self._warn_ecowitt(
+                "read_error",
+                f"Ecowitt read error ({e}) — falling back to OWM"
+            )
+        return None
 
     def get_precipitation_forecast(self, minutes=60):
         """Return precipitation forecast for next N minutes."""

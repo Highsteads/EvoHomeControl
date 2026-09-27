@@ -25,8 +25,8 @@ For each room, the plugin starts from the room's plan and works down this list. 
 2. **The weather.** One degree comes off above 8 degrees outside, and two above 9. When snow is forecast, a little is added — one degree to start with.
 3. **Bedroom limits.** Bedroom 1, Bedroom 2 and the Utility Room go no higher than 16 degrees, or 18 for Bedroom 2 when it has a guest. Bedroom 3, which holds my computers, goes no higher than 14.
 4. **Overheating.** If the room is too warm, its radiator is turned down, and nothing below this in the list changes that, except an open window or door, which takes it lower still. The section below explains it.
-5. **The room's own rule.** The Conservatory is held at 12 degrees while its sliding door is shut, whatever its garden windows are doing. The En Suite has its [morning schedule and drying run](en-suite.md).
-6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. Otherwise, an open window or door takes the radiator down to 8 degrees, and in the En Suite switches the underfloor heating off too.
+5. **The room's own rule.** The Conservatory is held at 12 degrees while its sliding door is shut, whatever its garden windows are doing. The Dining Room is held at 16 degrees while a garden window or the garden door is open, rather than going down to 8. The En Suite has its [morning schedule and drying run](en-suite.md).
+6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. Otherwise, an open window or door takes the radiator down to 8 degrees, and in the En Suite switches the underfloor heating off too. The Dining Room keeps the 16 degrees its own rule gave it.
 7. **Mild weather.** Above 14 degrees outside, the radiator goes down to 8 degrees.
 8. **Boost.** The boost, or the timed boost, adds its two or three degrees.
 9. **Both out.** Takes four degrees off.

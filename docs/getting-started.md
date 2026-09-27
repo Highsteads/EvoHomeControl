@@ -56,7 +56,7 @@ The mode variables are six Indigo variables of your own, which the plugin reads 
 | Bedroom 3 guest | `true` when a guest is in Bedroom 3 |
 | Temperature offset | Nothing — the plugin writes the weather adjustment into it for you to see |
 
-The plugin also keeps a record of the highest and lowest outdoor temperature it has seen, with the date and time of each, in four variables it finds by name. Create them with exactly these names: `Average_Outside_Temp_Highest`, `Average_Outside_Temp_Highest_Time`, `Average_Outside_Temp_Lowest` and `Average_Outside_Temp_Lowest_Time`. Give the Highest one a starting value of `-50` and the Lowest one `50`, so the first reading replaces both. The two Time variables can start empty.
+The plugin also keeps a record of the highest and lowest outdoor temperature it has seen, with the date and time of each, in four variables it finds by name. Create them with exactly these names: `Average_Outside_Temp_Highest`, `Average_Outside_Temp_Highest_Time`, `Average_Outside_Temp_Lowest` and `Average_Outside_Temp_Lowest_Time`. All four can start empty: the first outdoor reading fills the Highest and Lowest ones.
 
 ### schedules.py — how warm each room should be
 

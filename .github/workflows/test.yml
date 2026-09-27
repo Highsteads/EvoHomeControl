@@ -25,7 +25,8 @@ jobs:
       # own discovery because that cannot collect plain pytest-style test functions:
       # it found 8 of UniFiHealth's 17 and reported OK, so that job went green having
       # run barely half the suite. pytest collects unittest.TestCase classes too, so
-      # this is strictly wider. 71 tests here at the time of writing.
+      # this is strictly wider. The count is not written here: it grows with every
+      # release, and a figure in a comment is wrong by the next one.
       - name: Tests
         run: |
           pip install pytest

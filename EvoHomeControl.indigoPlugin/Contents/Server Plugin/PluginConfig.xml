@@ -8,7 +8,7 @@
         <Label>OPENWEATHERMAP</Label>
     </Field>
     <Field id="lbl_secrets_owm" type="label">
-        <Label>Values are read from IndigoSecrets.py first (OWM_API_KEY, LATITUDE, LONGITUDE). The fields below are a fallback for users without IndigoSecrets.py.</Label>
+        <Label>Values are read from IndigoSecrets.py first (OWM_API_KEY, LATITUDE, LONGITUDE). The fields below are a fallback for users without IndigoSecrets.py. A LATITUDE and LONGITUDE both left at 0.0, as in the blank template, count as not set.</Label>
     </Field>
     <Field id="owmApiKey" type="textfield" defaultValue="">
         <Label>OWM API key (fallback if not in IndigoSecrets):</Label>
@@ -43,7 +43,10 @@
         <Label>OVERHEAT ALERTS</Label>
     </Field>
     <Field id="pushoverUserKey" type="textfield" defaultValue="">
-        <Label>Pushover user key (leave blank to use IndigoSecrets.py):</Label>
+        <Label>Pushover user key (fallback if PUSHOVER_USER_TOKEN not in IndigoSecrets):</Label>
+    </Field>
+    <Field id="lbl_pushover_info" type="label">
+        <Label>The Pushover user or group key the overheating alerts go to. Leave it blank and they go to the user set up in the Pushover plugin.</Label>
     </Field>
     <Field id="alertEmailAddress" type="textfield" defaultValue="">
         <Label>Overheat alert email (fallback if OVERHEAT_ALERT_EMAIL not in IndigoSecrets):</Label>
@@ -274,7 +277,7 @@
     </Field>
     <Field id="lbl_drying_outdoor_info" type="label"
            visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
-        <Label>Checked against the outdoor temperature each time the run could start, so a morning that only turns cold at 7am still gets one. A run already going is left to finish. If there is no outdoor reading at all the run is held rather than started, and that is logged once a day - the setting only makes sense as evidence that it is cold.</Label>
+        <Label>Checked against the outdoor temperature each time the run could start, so a morning that only turns cold at 7am still gets one. A run already going is left to finish. It needs a real reading, from the Ecowitt sensor or OpenWeatherMap weather under an hour old - the fallback temperature above does not count. With no reading at all the run is held rather than started, and that is logged once a day - the setting only makes sense as evidence that it is cold.</Label>
     </Field>
 
     <Field id="enSuiteHumidityDeviceId" type="textfield" defaultValue=""

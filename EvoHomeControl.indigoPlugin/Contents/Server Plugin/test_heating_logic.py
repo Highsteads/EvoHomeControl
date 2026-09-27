@@ -397,5 +397,154 @@ class TestHalfDegreeRounding(unittest.TestCase):
         self.assertEqual(clamp(19.1), 19.0)      # rounds down to nearest 0.5
 
 
+
+# ===========================================================================
+class TestDiningRoomOpenGardenHoldsSixteen(unittest.TestCase):
+    """v1.10.0: the Dining Room's own rule holds 16 degC when a garden window or
+    door is open. The general open-window step ran after it and wrote 8 degC over
+    the top, so the rule had never once reached the radiator."""
+# ===========================================================================
+
+    class _Dev:
+        def __init__(self, states):
+            self.name   = "fake"
+            self.states = states
+
+    def setUp(self):
+        self._saved_devices = _indigo.devices
+        self._saved_thermo  = getattr(_indigo, "thermostat", None)
+        self.written = []
+        _indigo.thermostat = types.SimpleNamespace(
+            setHeatSetpoint=lambda dev, value=None: self.written.append(value))
+        # Starts at 15 ON PURPOSE: the setpoint write is idempotent, so a radiator
+        # already at the expected value would make "wrote it" and "wrote nothing"
+        # look the same.
+        self.rad = self._Dev({"temperatureInput1": "18.0", "setpointHeat": "15.0",
+                              "zoneMode": "permanent override"})
+        _indigo.devices = {
+            hl.DEV_DINING_ROOM_ID:     self.rad,
+            hl.DEV_GARDEN_WINDOW_L_ID: self._Dev({"contact": True}),
+            hl.DEV_GARDEN_WINDOW_R_ID: self._Dev({"contact": True}),
+            hl.DEV_GARDEN_DOOR_ID:     self._Dev({"contact": True}),
+        }
+
+    def tearDown(self):
+        _indigo.devices = self._saved_devices
+        if self._saved_thermo is None:
+            del _indigo.thermostat
+        else:
+            _indigo.thermostat = self._saved_thermo
+
+    def _open(self, dev_id):
+        _indigo.devices[dev_id] = self._Dev({"contact": False})
+
+    def _run(self, outdoor=5.0, last_messages=None):
+        msgs = {} if last_messages is None else last_messages
+        hl.process_room_temperature(
+            room_name      = "Dining Room",
+            room_schedule  = [20] * 24,
+            window_devices = [hl.DEV_GARDEN_WINDOW_L_ID, hl.DEV_GARDEN_WINDOW_R_ID],
+            door_devices   = [hl.DEV_GARDEN_DOOR_ID],
+            special_rules  = hl.dining_room_special_rules,
+            ha_device_id   = hl.DEV_DINING_ROOM_ID,
+            current_hour   = 12, current_minute = 0,
+            current_outdoor_temp = outdoor,
+            last_setpoints = {}, last_messages = msgs,
+            log_buffer = [], changes_buffer = [], overheat_monitor = None,
+        )
+        return msgs
+
+    def test_an_open_garden_window_holds_sixteen_not_eight(self):
+        self._open(hl.DEV_GARDEN_WINDOW_L_ID)
+        msgs = self._run()
+        self.assertEqual(self.written, [16.0])
+        self.assertEqual(msgs["Dining Room"], 20)
+
+    def test_an_open_garden_door_holds_sixteen_not_eight(self):
+        self._open(hl.DEV_GARDEN_DOOR_ID)
+        msgs = self._run()
+        self.assertEqual(self.written, [16.0])
+        self.assertEqual(msgs["Dining Room"], 21)
+
+    def test_at_sixteen_already_it_still_says_the_window_is_open(self):
+        """The message refinement must not relabel 20 as 'closed' (19) just
+        because the room has reached 16."""
+        self.rad.states["temperatureInput1"] = "16.0"
+        self._open(hl.DEV_GARDEN_WINDOW_R_ID)
+        msgs = self._run(last_messages={"Dining Room": 20})
+        self.assertEqual(msgs["Dining Room"], 20)
+
+    def test_everything_shut_follows_the_schedule(self):
+        self._run()
+        self.assertEqual(self.written, [20.0])
+
+    def test_a_mild_day_still_turns_it_down(self):
+        """Above 14 degC outside every radiator goes to the off temperature, open
+        garden door or not - that rule sits after the window rules on purpose."""
+        self._open(hl.DEV_GARDEN_DOOR_ID)
+        self._run(outdoor=18.0)
+        self.assertEqual(self.written, [hl.RADIATORS_OFF_TEMP])
+
+    def test_any_other_room_with_an_open_window_still_goes_to_eight(self):
+        self._open(hl.DEV_GARDEN_WINDOW_L_ID)
+        hl.process_room_temperature(
+            room_name      = "Conservatory-like room",
+            room_schedule  = [20] * 24,
+            window_devices = [hl.DEV_GARDEN_WINDOW_L_ID],
+            ha_device_id   = hl.DEV_DINING_ROOM_ID,
+            current_hour   = 12, current_minute = 0, current_outdoor_temp = 5.0,
+            last_setpoints = {}, last_messages = {},
+            log_buffer = [], changes_buffer = [], overheat_monitor = None,
+        )
+        self.assertEqual(self.written, [hl.RADIATORS_OFF_TEMP])
+
+
+# ===========================================================================
+class TestPushoverUserKey(unittest.TestCase):
+    """v1.10.0: the Pushover user key setting was read and stored but never sent,
+    so every alert went to the Pushover plugin's default user."""
+# ===========================================================================
+
+    def setUp(self):
+        import overheat_monitor as om
+        self.om = om
+        self.sent = []
+        outer = self
+
+        class _Pushover:
+            def isEnabled(self):
+                return True
+
+            def executeAction(self, action_id, props=None, **kwargs):
+                outer.sent.append((action_id, dict(props or {})))
+
+        self._saved = getattr(_indigo.server, "getPlugin", None)
+        _indigo.server.getPlugin = lambda plugin_id: _Pushover()
+
+    def tearDown(self):
+        if self._saved is None:
+            del _indigo.server.getPlugin
+        else:
+            _indigo.server.getPlugin = self._saved
+
+    def _monitor(self, key):
+        m = self.om.OverheatMonitor("/tmp/_evo_pushover_key.json", run_interval_mins=5)
+        m.pushover_user_key = key
+        return m
+
+    def test_a_set_key_is_sent_as_msg_user(self):
+        self.assertTrue(self._monitor("uTestUserKeyNotARealKey0000000")._send_pushover("T", "B"))
+        action, props = self.sent[0]
+        self.assertEqual(action, "send")
+        self.assertEqual(props.get("msgUser"), "uTestUserKeyNotARealKey0000000")
+
+    def test_a_blank_key_leaves_the_pushover_plugins_default_user(self):
+        self._monitor("")._send_pushover("T", "B")
+        self.assertNotIn("msgUser", self.sent[0][1])
+
+    def test_whitespace_counts_as_blank(self):
+        self._monitor("   ")._send_pushover("T", "B")
+        self.assertNotIn("msgUser", self.sent[0][1])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

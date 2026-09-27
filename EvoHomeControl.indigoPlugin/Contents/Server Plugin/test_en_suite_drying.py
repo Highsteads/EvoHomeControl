@@ -785,6 +785,32 @@ class TestTheHeatingSeasonOwnsTheRoom(unittest.TestCase):
         self.assertIn("switched off", self.stopped[0])
 
 
+class _FakeWeather:
+    """Behaves like WeatherData: get_outdoor_temp() falls back to the configured
+    6 degC when there is no real reading, get_measured_outdoor_temp() says None.
+    The fallback is the whole point - until 1.10.0 the cold gate read
+    get_outdoor_temp(), so "no reading" was 6 degC and every morning ran."""
+
+    def __init__(self, measured, fallback=6.0, refreshed=None):
+        self.measured  = measured
+        self.fallback  = fallback
+        self.refreshed = refreshed      # what a successful update() would bring
+        self.updates   = 0
+
+    def get_measured_outdoor_temp(self):
+        return self.measured
+
+    def get_outdoor_temp(self):
+        return self.measured if self.measured is not None else self.fallback
+
+    def update(self):
+        self.updates += 1
+        if self.refreshed is not None:
+            self.measured = self.refreshed
+            return True
+        return False
+
+
 # ---------------------------------------------------------------------------
 class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
     """CliveS, 15-09-2026, after a run heated the room for three and a half hours on
@@ -799,7 +825,7 @@ class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
         p._summer_lockout_active   = lambda: True      # summer, so the season allows it
         p._en_suite_window_is_shut = lambda: True
         p._save_state              = lambda: None
-        p.weather = types.SimpleNamespace(get_outdoor_temp=lambda: outdoor)
+        p.weather = _FakeWeather(outdoor)
         self.started = []
         p._start_en_suite_drying = lambda: self.started.append(True)
         self.stopped = []
@@ -896,7 +922,7 @@ class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
         p = self._plugin(outdoor=16.0)
         self._run_at_0600(p)
         self.assertEqual(self.started, [])
-        p.weather.get_outdoor_temp = lambda: 11.0
+        p.weather.measured = 11.0
         with mock.patch(_PLUGIN + ".datetime") as dt:
             dt.now.return_value = datetime(2026, 7, 4, 7, 0)
             dt.strptime = datetime.strptime
@@ -915,3 +941,183 @@ class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
         p._en_suite_window_is_shut = lambda: False
         self._run_at_0600(p)
         self.assertEqual(self.started, [])
+
+    # -- no reading means the configured fallback is NOT used (1.10.0) ----------
+    def test_the_fallback_temperature_is_not_a_reading(self):
+        """get_outdoor_temp() says 6 degC here, below the 12 degC limit. That is the
+        configured fallback, not the weather, so the run must still be held."""
+        p = self._plugin(outdoor=None)
+        self.assertEqual(p.weather.get_outdoor_temp(), 6.0)
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
+
+    def test_with_no_reading_it_asks_for_fresh_weather(self):
+        """The summer shut-off skips the heating cycle and its weather fetch, so the
+        drying gate has to ask for one itself or a house without Ecowitt never has
+        a reading all summer."""
+        p = self._plugin(outdoor=None)
+        p.weather.refreshed = 8.0
+        self._run_at_0600(p)
+        self.assertEqual(p.weather.updates, 1)
+        self.assertEqual(self.started, [True])
+
+    def test_a_refresh_that_brings_a_mild_reading_does_not_start_a_run(self):
+        p = self._plugin(outdoor=None)
+        p.weather.refreshed = 15.0
+        self._run_at_0600(p)
+        self.assertEqual(self.started, [])
+
+    def test_the_refresh_is_asked_for_at_most_every_five_minutes(self):
+        p = self._plugin(outdoor=None)
+        with mock.patch(_PLUGIN + ".time") as t:
+            t.time.return_value = 1_000_000.0
+            self._run_at_0600(p)
+            self._run_at_0600(p)
+            t.time.return_value = 1_000_000.0 + 299
+            self._run_at_0600(p)
+            self.assertEqual(p.weather.updates, 1, "a tick every 30 s must not fetch each time")
+            t.time.return_value = 1_000_000.0 + 301
+            self._run_at_0600(p)
+        self.assertEqual(p.weather.updates, 2)
+
+    def test_a_real_reading_needs_no_refresh(self):
+        p = self._plugin(outdoor=8.0)
+        self._run_at_0600(p)
+        self.assertEqual(p.weather.updates, 0)
+
+
+# ---------------------------------------------------------------------------
+class TestAwayModeStopsTheDryingRun(unittest.TestCase):
+    """1.10.0: the settings promised "Away mode still wins", but since 1.9.1 the run
+    only happens during the summer shut-off, when the heating cycle - the only
+    reader of the Away variable - is skipped. Away mode never stopped it."""
+
+    def setUp(self):
+        self._saved_vars = dict(_indigo.variables)
+        _indigo.variables.clear()
+
+    def tearDown(self):
+        _indigo.variables.clear()
+        _indigo.variables.update(self._saved_vars)
+
+    def _away(self, value):
+        _indigo.variables[hl.VAR_HOME_AWAY_ID] = types.SimpleNamespace(value=value)
+
+    def _plugin(self, store=None):
+        p = _bare_plugin(prefs={"enSuiteDryingMaxOutdoor": "0"},
+                         store=store if store is not None else {})
+        p._summer_lockout_active   = lambda: True
+        p._en_suite_window_is_shut = lambda: True
+        p._save_state              = lambda: None
+        self.started, self.stopped = [], []
+        p._start_en_suite_drying = lambda: self.started.append(True)
+
+        def _stop(reason, cancel_for_today=False):
+            self.stopped.append((reason, cancel_for_today))
+            p.store["en_suite_drying_active"] = False
+        p._stop_en_suite_drying = _stop
+        return p
+
+    def _tick(self, p, hour=6):
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 7, 4, hour, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+
+    def test_away_stops_a_run_from_starting(self):
+        self._away("true")
+        p = self._plugin()
+        self._tick(p)
+        self.assertEqual(self.started, [])
+
+    def test_away_ends_a_run_already_going(self):
+        self._away("true")
+        p = self._plugin(store={"en_suite_drying_active": True})
+        self._tick(p)
+        self.assertEqual(len(self.stopped), 1)
+        self.assertIn("away", self.stopped[0][0])
+
+    def test_coming_home_later_in_the_window_still_gets_a_run(self):
+        """Away is not a cancellation for the day."""
+        self._away("true")
+        p = self._plugin(store={"en_suite_drying_active": True})
+        self._tick(p, hour=6)
+        self.assertFalse(self.stopped[0][1], "must not cancel for the day")
+        self._away("false")
+        self._tick(p, hour=7)
+        self.assertEqual(self.started, [True])
+
+    def test_the_variable_is_read_even_though_the_cycle_is_skipped(self):
+        """The heating cycle's copy in store says home; the variable says away."""
+        self._away("true")
+        p = self._plugin(store={"is_away": False})
+        self._tick(p)
+        self.assertEqual(self.started, [])
+
+    def test_home_runs_as_before(self):
+        self._away("false")
+        p = self._plugin()
+        self._tick(p)
+        self.assertEqual(self.started, [True])
+
+    def test_a_missing_away_variable_counts_as_home(self):
+        p = self._plugin()
+        self._tick(p)
+        self.assertEqual(self.started, [True])
+
+    def test_a_hand_fired_test_run_is_not_ended_by_away(self):
+        """The test run is deliberate and has its own 30-minute timer."""
+        self._away("true")
+        p = self._plugin(store={
+            "en_suite_drying_active": True,
+            "en_suite_drying_manual_expiry": datetime(2026, 7, 4, 7, 0),
+        })
+        self._tick(p, hour=6)
+        self.assertEqual(self.stopped, [])
+
+
+# ---------------------------------------------------------------------------
+class TestMeasuredOutdoorReading(unittest.TestCase):
+    """WeatherData.get_measured_outdoor_temp() is a real reading or None, never the
+    configured fallback, and never OpenWeatherMap data gone stale."""
+
+    def setUp(self):
+        import weather as wx
+        self.wx = wx
+        self._saved = dict(_indigo.devices)
+        _indigo.devices.clear()
+
+    def tearDown(self):
+        _indigo.devices.clear()
+        _indigo.devices.update(self._saved)
+
+    def _weather(self, **kw):
+        return self.wx.WeatherData(api_key="", cache_path="/tmp/_evo_wx_measured.json", **kw)
+
+    def test_nothing_at_all_is_none_not_the_fallback(self):
+        w = self._weather(bypass_temp=6.0)
+        self.assertIsNone(w.get_measured_outdoor_temp())
+        self.assertEqual(w.get_outdoor_temp(), 6.0, "the heating cycle still gets its number")
+
+    def test_fresh_openweathermap_data_counts(self):
+        w = self._weather()
+        w.current, w.last_update = {"temp": 9.5}, datetime.now()
+        self.assertEqual(w.get_measured_outdoor_temp(), 9.5)
+
+    def test_stale_openweathermap_data_does_not(self):
+        w = self._weather()
+        w.current     = {"temp": 9.5}
+        w.last_update = datetime.now() - timedelta(hours=3)
+        self.assertIsNone(w.get_measured_outdoor_temp())
+        self.assertEqual(w.get_outdoor_temp(), 9.5, "the heating cycle is unchanged")
+
+    def test_ecowitt_comes_first(self):
+        _indigo.devices[4242] = FakeDevice("Ecowitt", {"temperature": 7.2, "deviceOnline": True})
+        w = self._weather(ecowitt_dev_id=4242)
+        w.current, w.last_update = {"temp": 15.0}, datetime.now()
+        self.assertEqual(w.get_measured_outdoor_temp(), 7.2)
+
+    def test_bypass_skips_ecowitt(self):
+        _indigo.devices[4242] = FakeDevice("Ecowitt", {"temperature": 7.2, "deviceOnline": True})
+        w = self._weather(ecowitt_dev_id=4242, bypass=True)
+        self.assertIsNone(w.get_measured_outdoor_temp())

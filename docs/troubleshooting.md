@@ -64,7 +64,7 @@ The plugin cannot be sure the En Suite window is shut — its sensor is missing,
 ## An overheating alert did not reach my phone
 
 - Check the Pushover plugin is installed and enabled. If it is not, the Event Log says **Pushover plugin not available**.
-- Alerts go to the user set up in the Pushover plugin. The **Pushover user key** setting in this plugin is not used at present.
+- Alerts go to the **Pushover user key** in the settings, or to the user set up in the Pushover plugin when that is blank. Check the key is the one on your Pushover account page.
 - No alert is sent when it is above 12 degrees outside, or when the warmth is from the sun.
 
 ## The hourly room table is not in the Event Log
@@ -73,7 +73,7 @@ That is how it starts. Tick **Show the hourly weather and room table in the Indi
 
 ## The outdoor records say "no record yet" or the log has errors updating them
 
-The four record variables are missing, or the Highest and Lowest ones hold something other than a number. [Getting started](getting-started.md) lists their names and starting values.
+The four record variables are missing. [Getting started](getting-started.md) lists their names. A Highest or Lowest variable that is empty, or holds something other than a number, counts as having no record yet, and the next outdoor reading fills it.
 
 ## Still stuck?
 

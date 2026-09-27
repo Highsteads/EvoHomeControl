@@ -34,6 +34,7 @@ Within that, a run starts when all of these are true:
 - **Dry the En Suite out every morning** is ticked in the settings.
 - The time is between the start and finish hours, **5am and 10am** to start with.
 - It is **colder outside than the limit** you set, **12 degrees** to start with, unless you chose **No limit**.
+- **Away mode** is off.
 - The **En Suite window is shut**, and has not already been opened during a run that day.
 
 The plugin asks again every 30 seconds, so a morning that only turns cold at 7am still gets a run.
@@ -42,12 +43,13 @@ The plugin asks again every 30 seconds, so a morning that only turns cold at 7am
 
 It holds the En Suite radiator at the temperature you choose, **22 degrees** to start with. It drives the radiator only, and never touches the underfloor heating, which stays yours to switch by hand.
 
-The mild-weather rules that turn the rest of the house down do not apply to it, and a morning turning warmer does not stop a run that has started. Away mode does not stop it either, because the modes are not read during the summer shut-off.
+The mild-weather rules that turn the rest of the house down do not apply to it, and a morning turning warmer does not stop a run that has started.
 
 ### When it stops
 
 - At the finish hour, **10am** to start with.
 - Within 30 seconds of the **window being opened**. It does not start again that day.
+- Within 30 seconds of **away mode** being switched on. If it is switched off again before the finish hour, the run starts again.
 - When normal heating returns for the winter, or a 24-hour **Force Heating On** starts.
 - When you untick **Dry the En Suite out every morning**, or choose **Stop En Suite Drying Run**.
 
@@ -71,10 +73,10 @@ Nothing decides whether to run from that reading. I added it so that a rule for 
 
 ### The outdoor temperature in summer
 
-The drying run uses the same outdoor temperature as the rest of the plugin, as the [How it works](how-it-works.md) page explains. During the summer shut-off the plugin does not fetch new weather from OpenWeatherMap, so without an Ecowitt outdoor sensor the drying run judges the weather from the last reading it fetched, or, after a restart, from the **Fallback temperature**, 6 degrees to start with, which is below every limit. An Ecowitt sensor is what makes the outdoor limit useful.
+The drying run needs a real outdoor reading: the Ecowitt sensor, or OpenWeatherMap weather fetched within the last hour. The **Fallback temperature** does not count, because it is a number you chose, not the weather. During the summer shut-off the rest of the plugin fetches no weather, so when the drying run has no reading it fetches OpenWeatherMap itself, no more than once every five minutes. With no reading at all, no run starts, and the Event Log says so once a day.
 
 ### Trying it out
 
-**Plugins → EvoHome Heating Controller → Start En Suite Drying Run (30 minute test)** starts a run straight away, whatever the time, the season or the weather, and ends it after half an hour, or sooner if the window is opened. **Dry the En Suite out every morning** has to be ticked, or the test stops within 30 seconds.
+**Plugins → EvoHome Heating Controller → Start En Suite Drying Run (30 minute test)** starts a run straight away, whatever the time, the season, the weather or away mode, and ends it after half an hour, or sooner if the window is opened. **Dry the En Suite out every morning** has to be ticked, or the test stops within 30 seconds.
 
-**Show En Suite Drying Run Status** writes to the Event Log whether the drying run is switched on, which side of the summer shut-off it is, its hours and temperature, the outdoor limit against the temperature now, whether a run is going, whether the window reads shut, the humidity, and whether a run has been stopped for today.
+**Show En Suite Drying Run Status** writes to the Event Log whether the drying run is switched on, which side of the summer shut-off it is, whether away mode is holding it, its hours and temperature, the outdoor limit against the temperature now, whether a run is going, whether the window reads shut, the humidity, and whether a run has been stopped for today.

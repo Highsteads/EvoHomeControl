@@ -12,6 +12,8 @@ from datetime import datetime as dt
 
 import indigo  # noqa — available in plugin context
 
+from log_stamp import stamp as _stamp, now_stamp as _now_stamp
+
 import schedules
 
 # indigo.server.log()'s level= wants a Python logging int; a STRING is silently
@@ -201,11 +203,12 @@ EN_SUITE_DRYING_END_HOUR   = 10
 def _log(message, level="INFO", log_buffer=None, file_only=False):
     """Log to Indigo event log and optionally to a buffer list.
     file_only=True suppresses the Indigo event log; data still goes to log_buffer."""
-    formatted = f"[{dt.now().strftime('%H:%M:%S.%f')[:-3]}] {message}"
+    # The daily file always carries the time; the Event Log copy follows the
+    # plugin's Toggle Timestamps switch (log_stamp.py).
     if not file_only:
-        indigo.server.log(formatted, level=_to_level(level))
+        indigo.server.log(_stamp(message), level=_to_level(level))
     if log_buffer is not None:
-        log_buffer.append(formatted)
+        log_buffer.append(f"{_now_stamp()} {message}")
 
 
 def validate_configuration():
@@ -251,7 +254,7 @@ def validate_configuration():
             errors.append(f"Missing required device: {dev_label} (ID: {dev_id})")
 
     for error in errors:
-        indigo.server.log(error, level=_to_level("ERROR"))
+        indigo.server.log(_stamp(error), level=_to_level("ERROR"))
     return len(errors) == 0
 
 
@@ -260,7 +263,7 @@ def update_variable(var_id_or_name, value):
     try:
         indigo.variable.updateValue(var_id_or_name, str(value))
     except Exception as e:
-        indigo.server.log(f"[heating_logic] Error updating variable {var_id_or_name}: {e}", level=_to_level("ERROR"))
+        indigo.server.log(_stamp(f"[heating_logic] Error updating variable {var_id_or_name}: {e}"), level=_to_level("ERROR"))
 
 
 def get_variable_value(var_id_or_name, default=None):
@@ -628,7 +631,7 @@ def conservatory_special_rules(temp, msg, windows_open, doors_open,
             temp = 12
             msg  = 5
     except Exception as e:
-        indigo.server.log(f"[conservatory_rules] Error checking slide door: {e}", level=_to_level("ERROR"))
+        indigo.server.log(_stamp(f"[conservatory_rules] Error checking slide door: {e}"), level=_to_level("ERROR"))
     return temp, msg
 
 
@@ -916,8 +919,10 @@ def process_room_temperature(
             new_temp = AWAY_TEMP
             message  = 8
 
-    # Windows open
-    elif windows_open and message != 5:
+    # Windows open. 20/21 are a special rule that has already decided what an open
+    # window means for this room (the Dining Room holds 16 degC rather than closing
+    # its valve), so the general rule must not overwrite that decision with 8 degC.
+    elif windows_open and message not in (5, 20, 21):
         new_temp = RADIATORS_OFF_TEMP
         message  = 2 if window_count >= 2 else 1
 
@@ -933,8 +938,8 @@ def process_room_temperature(
                 _log(f"Error turning off floor heating in {room_name}: {e}",
                      level="ERROR", log_buffer=log_buffer)
 
-    # Doors open
-    elif doors_open and message != 5:
+    # Doors open (20/21 exempt for the same reason as windows above)
+    elif doors_open and message not in (5, 20, 21):
         new_temp = RADIATORS_OFF_TEMP
         message  = 4 if (windows_open and doors_open) else 3
 
@@ -996,11 +1001,11 @@ def process_room_temperature(
     _OPEN_MESSAGES = {1, 2, 3, 4, 20, 21}
 
     if dev_temp is not None and abs(dev_temp - new_temp) <= TEMP_CHANGE_TOLERANCE:
-        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23, 25):
+        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 20, 21, 22, 23, 25):
             message = 11
 
     elif abs(dev_setpoint - new_temp) <= TEMP_CHANGE_TOLERANCE:
-        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 22, 23, 25):
+        if message not in (1, 2, 3, 4, 5, 7, 8, 12, 13, 14, 15, 17, 18, 20, 21, 22, 23, 25):
             message = 11
 
     # Window/door closed transition (open -> closed detection)

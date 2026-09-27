@@ -24,5 +24,5 @@ These are under **Plugins → EvoHome Heating Controller**, in this order.
 | **Show Overheat Monitor Status** | Lists each room that is above its target, for how long, whether the warmth is from the radiator or the sun, and whether an alert was sent. |
 | **Show Timed Boost Status** | Says whether a timed boost is running, and if so when it ends and which rooms it covers. |
 | **Toggle Debug Logging** | Turns on or off the extra line the plugin writes to the Event Log at the end of every heating check. It is the same as the **Enable debug logging** setting. |
-| **Toggle Timestamps in Log (on/off)** | Switches the time stamp on or off at the start of the plugin's standard log lines. Most of this plugin's lines carry their own time whatever this is set to, so the change shows on only a few of them. It stays as you leave it. |
+| **Toggle Timestamps in Log (on/off)** | Switches the time on or off at the start of every line this plugin writes to the Event Log. The plugin's own daily log keeps the times either way. It stays as you leave it. |
 | **Show Plugin Info** | Writes the plugin's version and details of your Mac and Indigo to the Event Log, followed by the heating status. Useful to include if you ask for help on the Indigo forum. |
