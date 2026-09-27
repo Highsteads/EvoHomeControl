@@ -1,214 +1,60 @@
-# EvoHome Heating Controller
+# EvoHome Heating Controller for Indigo
 
-**Version:** 1.9.2
+**Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-An Indigo home automation plugin that provides intelligent 24/7 control of Evohome TRV heating zones via the [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) bridge plugin.
+**Version:** 1.9.2 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
-It began life as a scheduled Python script and became a plugin that stays running, which brought timed boost, the En Suite morning schedule, the warm-morning skip, a whole-house summer shut-off, and window-aware floor heating control.
+**[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
-## Features
+---
 
-- **12-zone heating control** — processes all Evohome TRV zones every 5 minutes via `runConcurrentThread`
-- **Overheat prevention** — spots a room getting too warm and drops its setpoint, using three tiers of logic (predictive, trigger, hysteresis)
-- **Window/door detection** — closes the valves while a window or door is open, and restores them when it shuts
-- **Timed boost** — lifts Dining Room, Living Room (door + front) and Hall Kitchen by +2°C for one or two hours, then reverts on its own
-- **En Suite drying run** — holds the En Suite radiator warm each morning to dry the room out, and stops the moment the window is opened. Wet towels keep an en suite humid, so this one runs right through the summer shut-off and ignores the mild-weather rules, on the grounds that a warm damp morning still leaves wet towels. Radiator only: it never touches the floor heating. Away mode still wins, and the times, the target and an optional humidity sensor are all configurable
-- **Whole-house summer shut-off** — turns the whole house off for summer (default 1 June to 30 September): every radiator is held at the 8 °C frost setpoint and the En Suite floor heating is switched off. Dates are configurable and there is a master on/off toggle. A 24-hour **Force Heating On** action or menu item brings everything back to normal for a day, then it reverts on its own
-- **En Suite morning schedule** — 22°C from 06:00 to 10:00 every day with the floor heating on, cancelled the moment the En Suite window opens, and **skipped altogether on warm mornings** (outdoor ≥ 10 °C at 06:00 leaves the radiator off and the floor heat untouched)
-- **Weather integration** — OpenWeatherMap API with local Ecowitt bypass option
-- **Away / Both-Out / Guest modes** — freeze protection and alternative schedules
-- **Daily rotating logs** — append-only daily log files with 14-day retention
-- **State persistence** — timed boost and En Suite state survive plugin reloads
+## What it does
 
-## Requirements
+This plugin lets [Indigo](https://www.indigodomo.com) run the heating in a house with **Honeywell Evohome** radiator controls. It reaches the radiators through my [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) plugin, which talks to them over their own radio, so nothing goes through Honeywell's servers. Every five minutes it works out the right temperature for each room and sets each radiator to match.
 
-- Indigo 2025.2 or later (Python 3.13)
-- [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) plugin (for Evohome TRV control via RAMSES-II — replaces the earlier HA Agent dependency)
-- OpenWeatherMap API key (free tier sufficient)
-- Ecowitt outdoor weather sensor (optional but recommended — used by warm-morning skip and overheat logic)
-- Pushover plugin (optional, for alerts)
-- Email+ plugin (optional, for alerts)
+- **Heats each room to its own plan,** with a temperature for every hour of the day, and guest plans for when you have visitors.
+- **Follows the weather,** taking a degree or two off as it gets milder outside, turning radiators down above 14 degrees, and adding a little heat when snow is forecast. It reads an Ecowitt weather station if you have one, and OpenWeatherMap if not.
+- **Turns a radiator down when its window or door is open,** and back up when it shuts.
+- **Stops rooms overheating,** turning a radiator down before the room overshoots, and sends a Pushover message and an email if a room gets well above where it should be.
+- **Boosts the living areas** by two degrees for one or two hours, then puts them back.
+- **Away and both out modes,** switched by Indigo variables, hold the house at a safe, cheaper temperature.
+- **Shuts the heating off for summer** between dates you choose, with a menu item to have it back for 24 hours.
+- **Looks after the En Suite** — a warm room from 6am on winter mornings with the underfloor heating on, and a morning drying run on cold summer mornings to deal with wet towels.
 
-## Installation
+## Which houses it works with
 
-1. Go to the [Releases](https://github.com/Highsteads/EvoHomeControl/releases) page and download `EvoHomeControl.indigoPlugin.zip`
+I wrote this plugin for my own house. The twelve rooms, the window and door sensors in each one, and each room's temperature for every hour are written into the plugin, using the Indigo device numbers from my house. To use it on another house, those have to be changed in two of the plugin's files, which the guide explains. If editing a Python file is not for you, this plugin is not ready for your house yet.
+
+It needs:
+
+- Honeywell Evohome radiator controls, with my [RAMSES ESP](https://github.com/Highsteads/RAMSES_ESP) plugin working.
+- A window or door sensor in Indigo for each window and door you want the heating to watch.
+- An OpenWeatherMap API key, for the weather and the snow forecast.
+- Optional: an Ecowitt weather station, the Pushover plugin and email set up in Indigo, for the outdoor temperature and the overheating alerts.
+
+## Installing
+
+1. Go to the [Releases page](https://github.com/Highsteads/EvoHomeControl/releases/latest) and download `EvoHomeControl.indigoPlugin.zip`
 2. Unzip the downloaded file — you will get `EvoHomeControl.indigoPlugin`
 3. Double-click `EvoHomeControl.indigoPlugin` — Indigo will install it automatically
-4. In Indigo, go to **Plugins → Manage Plugins** and enable **EvoHome Heating Controller**
-5. Create a **EvoHome Heating Controller** device (Plugins → EvoHome Heating Controller → New Device)
-6. Configure the plugin preferences (API key, location, intervals)
 
-## Credentials — `IndigoSecrets.py` vs `IndigoSecrets_example.py`
+## Setting it up
 
-This plugin, like every CliveS Indigo plugin, reads sensitive values from one
-shared master file:
+1. Put your own device and variable numbers into the plugin, and your own hour-by-hour temperatures, as the guide's [Getting started](https://highsteads.github.io/EvoHomeControl/getting-started.html) page explains, then choose **Plugins → EvoHome Heating Controller → Reload**.
+2. Open **Plugins → EvoHome Heating Controller → Configure**, fill in your OpenWeatherMap key, your location, your Ecowitt outdoor sensor and the address for alerts, and check the summer shut-off dates — it is on from 1 June to 30 September to start with. Click **Save**.
+3. Check the Event Log has no lines about missing devices or variables, and choose **Show Full Weather Log** to see the outdoor temperature the plugin is using.
 
-`/Library/Application Support/Perceptive Automation/IndigoSecrets.py`
+The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
-| File | Purpose | Real data? | Committed to GitHub? |
-|------|---------|------------|----------------------|
-| `IndigoSecrets.py` | Working file the plugin reads at runtime. Keep a backup in a password manager. | YES | **NO** — listed in `.gitignore` |
-| `IndigoSecrets_example.py` | Template only — empty placeholders. Shipped in the plugin bundle. | NO | YES |
+## What's new
 
-If you don't have `IndigoSecrets.py`, copy `IndigoSecrets_example.py` out of
-the plugin bundle into `/Library/Application Support/Perceptive Automation/`,
-rename it to `IndigoSecrets.py`, and fill in your values. Or skip the file
-altogether and type the values into the plugin's configuration dialog — where
-both are set, `IndigoSecrets.py` wins.
+**v1.9.2** — The En Suite drying run only starts when it is colder outside than a limit you choose, 12 degrees to start with, or **No limit**. A morning that only turns cold at 7am still gets a run, and **Show En Suite Drying Run Status** shows the limit against the temperature now.
 
-If neither source supplies a value the plugin needs, it logs an ERROR naming
-the key and telling you to either fill in the matching field or add the key to
-`IndigoSecrets.py`.
+**v1.9.1** — The drying run stands down once normal heating returns for the winter, when the 6am morning schedule looks after the En Suite, and picks up again at the next summer shut-off.
 
-## Actions
+**v1.9.0** — New En Suite drying run: the radiator is held warm from 5am to 10am to dry the room out, stopping the moment the window is opened, with an optional humidity sensor to record how much drier the room got.
 
-| Action | Description |
-|--------|-------------|
-| Start Timed Boost (1 hour) | Raises Dining Room, Living Room, Hall Kitchen by +2°C for 1 hour |
-| Start Timed Boost (2 hours) | Same rooms, 2 hour duration |
-| Cancel Timed Boost | Immediately reverts boost rooms to schedule |
-| Show Summer Shut-off Status | Logs the current summer shut-off state, for dashboards and scripts to read |
-| Run Heating Cycle Now | Forces an immediate heating cycle |
-| Set Away Mode | Activates or deactivates away mode |
-| Force Heating On (24 hours) | Overrides the summer shut-off and restores fully normal heating for 24 hours, then auto-reverts |
-| Cancel Forced Heating | Ends the 24-hour force-on early and re-applies the summer shut-off |
-| Start En Suite Drying Run (30 minute test) | Starts a drying run right now, whatever the clock says, and ends it after 30 minutes |
-| Stop En Suite Drying Run | Ends the drying run immediately |
-| Show En Suite Drying Run Status | Logs the settings, whether a run is going, and the current humidity |
-
-## En Suite Morning Schedule
-
-- Activates automatically at **06:00** each day
-- Sets En Suite radiator to **22°C** and turns on floor heating
-- Cancelled immediately if the **En Suite window** is opened (window open = shower finished)
-- Auto-expires at **10:00** if window was never opened
-- Resets at midnight — active again the following morning
-
-### Warm-morning skip (v1.5+)
-
-At 06:00 the plugin checks the current outdoor temperature. If it is at or above the warm-morning threshold (**10 °C**, hardcoded in `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD`):
-
-- The plugin skips the 22 °C morning slot — `enSuiteMorningActive` stays `false`
-- It leaves the floor heating switch off
-- It leaves the floor thermostat alone
-- It holds the radiator at **8 °C** (`RADIATORS_OFF_TEMP`) for the rest of 06:00–09:59, because the schedule's 19–20 °C values for those hours would otherwise still run
-- It sets `cancelled_reason` in plugin state to `"warm_outdoor"` (visible via `_log_modes_section`)
-- Event log shows: `Warm morning skip  (out >=10degC, rad+floor off)` (message code 24)
-
-On a colder morning, with outdoor below 10 °C, the normal 22 °C slot runs as usual. The threshold is a single constant — edit `heating_logic.py:EN_SUITE_WARM_MORNING_THRESHOLD` to tune for a different installation.
-
-## En Suite Drying Run
-
-Our en suite sits above 70% humidity most of the time, and the wet towels are almost certainly the reason, so from v1.9.0 the plugin gives the room a warm-through every morning to dry it out.
-
-- Runs from **05:00 to 10:00** and holds the En Suite radiator at **22 °C**
-- Ends the instant the **En Suite window** is opened, and does not restart that day
-- **Radiator only.** It never touches the floor heating switch or the floor thermostat — those stay yours to control by hand
-- Times, target temperature and the whole feature can be changed in the plugin settings
-
-Three of the plugin's own rules would each have cancelled it, and it is deliberately exempt from all three: the **summer shut-off**, the **warm-morning skip**, and the **mild-weather cut-off** that closes every valve above 14 °C outdoors. A warm damp morning still leaves wet towels. Two things still beat it, on purpose — **away mode**, because an empty house has no wet towels, and an **open window**, which always closes the valve.
-
-This is also why it lives in the plugin rather than in a script. During the summer shut-off the plugin pushes 8 °C back over any radiator that differs, every five minutes, so a script setting 22 °C at five in the morning would be quietly undone before anyone was awake to notice.
-
-### Humidity
-
-If you point the **En Suite humidity sensor device ID** setting at a temperature-and-humidity sensor, each run records how damp the room was at the start and at the end, and says so in plain English when it finishes:
-
-```
-[EnSuiteDrying] Finished (the 10:00 finish was reached). Humidity fell from 78% to 64%, so the room dried out by 14 points.
-```
-
-Nothing decides whether to run on that reading — it is there so that a sensible "skip it when the room is already dry" threshold can be picked later from real mornings, rather than guessed now. The reading is treated as unknown, never as dry air, when the sensor is missing, disabled, offline, silent for more than three hours, or reporting something outside 1–100%. A sensor that has never reported reads 0%, and a Zigbee one holds its last value for ever once it drops off the mesh, so neither is allowed to pass itself off as a dry room.
-
-### If the window sensor cannot be read
-
-The run stops, and says why in the log. That is the opposite of how the rest of the plugin treats an unreadable contact, where "assume it is shut" is the safer answer — here it is not, because holding a radiator at 22 °C into an open window for five hours is the expensive mistake and a damp towel is the cheap one. The warning is logged once rather than every thirty seconds.
-
-### Testing it
-
-**Plugins → EvoHome Heating Controller → Start En Suite Drying Run (30 minute test)** starts a run immediately whatever the time is, and ends it after half an hour. Worth using once after any change, so that the first time the code runs for real is not at five in the morning.
-
-## Whole-house Summer Shut-off
-
-Through the warmer months there is no need to run any heating, so the plugin can shut the whole house down for a fixed window each year.
-
-- While the window is active (default **1 June to 30 September**) every radiator is held at the **8 °C** frost setpoint and the **En Suite floor heating** is switched off
-- The normal per-room cycle and the En Suite morning boost are skipped for the duration, so nothing fights the shut-off
-- Heating returns automatically on the **return date** — for example 30 September means off from 1 June to 29 September inclusive, with normal heating from the 30th
-- The radiators sit at 8 °C rather than being forced fully shut, so genuine frost protection is still in place for the rare cold snap
-
-### Forcing heating on for a day
-
-If you want heat during the shut-off — a cold spell, guests, or drying towels — use **Force Heating On (24 hours)**, available as both an Indigo action and a Plugins-menu item. For the next 24 hours the whole house behaves exactly as it does outside the summer window, then it reverts to the shut-off on its own. **Cancel Forced Heating** ends the override early. The 24-hour timer is saved to disk, so it survives a plugin restart.
-
-### Configuration
-
-The four date fields and the master toggle live in **Plugins → EvoHome Heating Controller → Configure**:
-
-| Setting | Default | Notes |
-|---------|---------|-------|
-| Enable summer shut-off | On | Master switch for the whole feature |
-| Shut-off starts (month / day) | 1 June | First day the house goes off |
-| Heating returns (month / day) | 30 September | Day normal heating comes back on (the window end is exclusive) |
-
-A window whose start falls later in the year than its end (for example 1 November to 1 March) is handled correctly as a wrap across the year-end.
-
-## Device States
-
-The `heatingController` device exposes these states in Indigo:
-
-| State | Description |
-|-------|-------------|
-| `activeMode` | Current mode: Schedule / Away / Both-Out / Boost / Timed Boost 1h / Timed Boost 2h / En Suite Morning / Summer Off / Forced On (summer) |
-| `timedBoostActive` | True/False |
-| `timedBoostExpiry` | HH:MM expiry time |
-| `enSuiteMorningActive` | True/False |
-| `summerStatus` | Human-readable summer shut-off state (e.g. "Summer shut-off ACTIVE…", "FORCED ON…") |
-| `overheatRooms` | Comma-separated list of rooms currently suppressed |
-| `outdoorTempC` | Current outdoor temperature used for control |
-| `lastUpdate` | Timestamp of last heating cycle |
-
-## Logging
-
-Every log line carries a millisecond timestamp `[HH:MM:SS.mmm]`, so you can
-line events up precisely against the other CliveS plugins — Device Activity
-Monitor uses the same format.
-
-To turn the prefix off, or back on, at any time:
-
-**Plugins → EvoHome Heating Controller → Toggle Timestamps in Log (on/off)**
-
-The plugin stores the setting in `pluginPrefs` (`timestampEnabled`) and it
-survives a restart. It defaults to ON.
-
-## Version History
-
-| Version | Date | Notes |
-|---------|------|-------|
-| 1.9.2 | 15-Sep-2026 | **The morning drying run now only starts when it is cold outside.** Below 12 degrees by default, and you can change the figure or turn the limit off in the settings. It was holding the radiator at 20 degrees for three and a half hours on a morning that was 16.9 degrees outside at six and still 14.7 by eight, because the run is deliberately exempt from the two mild-weather rules that stop everything else. If there is no outdoor reading at all the run is held rather than started, and that is written to the log once a day, because a setting that says "only when it is cold" is worthless if it runs without knowing. The check is made each time a run could begin, so a morning that only turns cold at seven still gets one, and a run already going is left to finish rather than stopped because the sun came out. The status menu item now shows the limit, the current temperature and whether it counts. |
-| 1.9.1 | 15-Sep-2026 | **The morning drying run now stands down for the heating season, and its temperature is 20 degrees.** From the day normal heating returns, the built-in 06:00 En Suite schedule heats that room anyway. The drying run sits above it and would have held the room at the drying temperature instead, so with the target lowered to 20 the room would have quietly run two degrees cooler all winter. It now stops when the summer shut-off lifts and picks itself up again when the next one begins. That is tied to the configured summer dates rather than to a fixed day in the calendar, so moving those dates moves this with them - note the default window ends on the 30th, so the changeover is 30 September rather than the 1 October it is easy to assume. A 24 hour force-on wakes normal heating mid-summer and stands the drying run down for its duration too. A test run fired by hand from the menu still works all year, because it is a deliberate act with its own time limit and it is the only way to try the feature out. The status menu item now names which side of the changeover you are on and when heating returns. |
-| 1.9.0 | 12-Sep-2026 | **The En Suite now gets dried out every morning.** The radiator is held at 22 °C from 5am to 10am and stops the moment the window is opened, because the room sits above 70% humidity and the wet towels are the likely cause. It runs through the summer shut-off and ignores both the warm-morning skip and the mild-weather cut-off, since a warm damp morning still leaves wet towels; away mode and an open window still win. It drives the radiator and nothing else — the floor heating is left alone. If a humidity sensor is configured, each run records how damp the room was at both ends and reports it in plain English, so a "skip it when the room is already dry" rule can be set later from real mornings instead of a guessed number. An unreadable window sensor stops the run and says so, rather than quietly holding the radiator on into an open window. A menu item starts a 30-minute test run at any time of day. 72 -> 114 tests. |
-| 1.8.2 | 11-Sep-2026 | **The GitHub record inside the bundle now uses the standard spelling.** The plugin bundle carries a small record of where its source lives on GitHub. Ours spelt the two field names its own way, while the plugins Indigo Domotics and the community publish spell them `GithubUser` and `GithubRepo`. It now matches them. Nothing else changed. |
-| 1.8.1 | 07-Sep-2026 | **The settings dialog was stretched wider than its own window, so the help text beside each setting was cut off mid-sentence.** The short help that can be attached to a setting is drawn on a single line and never wraps, so the longest one decides how wide every row is — and the window cannot be widened past a fixed maximum. The one that was too long has moved into an ordinary description paragraph, which does wrap. Two new checks fail the build if any help text or setting label grows long enough to do it again. No setting or behaviour changed. |
-| 1.8.0 | 06-Sep-2026 | **The summer shut-off says its piece once.** The line reporting that the heating is off for summer and the radiators sit at 8 degrees was repeating about 21 times a day. It is a state, not an event, so it now speaks once when summer shut-off begins and once when it ends - and that ending line did not exist at all before, so the log showed the shut-off starting and never finishing. Every actual switch thrown in the house still appears: force-on start and end, the en suite floor heating, the morning schedule. 55 -> 57 tests. |
-| 1.7.4 | 08-Aug-2026 | **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed. |
-| 1.7.3 | 21-07-2026 | Housekeeping. Named log levels now map to the real logging levels — warnings and errors raised through the shared helper had been appearing as plain info lines, so amber and red entries people relied on for diagnosis never showed. Shared-utility refresh: calling the log timestamp filter twice no longer double-stamps every line, and the module imports cleanly outside Indigo. |
-| 1.7.2 | 04-07-2026 | Final tidy-up pass from the review. Changing the OpenWeatherMap key or your location in the settings now takes effect straight away rather than only after a restart. The morning En Suite floor heating is no longer switched back on while the summer shut-off is holding everything off. The overheat monitor is a bit sturdier — its status readouts no longer trip over a reading arriving at the same moment, and it starts each heating season with a clean slate. Alerts now quote the actual amount a radiator was turned down by. Setpoints keep their half-degree precision instead of being rounded to the nearest whole degree. A couple of developer-specific device references were removed so the plugin behaves the same on anyone's system. Co-authored with Claude Opus 4.8. |
-| 1.7.1 | 03-07-2026 | Second robustness pass from the same review. The saved state files (boost and force-on timers, the setpoint cache, the overheat history and the weather cache) are now written safely so a crash or power cut part-way through a save can no longer leave a corrupt file, and a corrupt or old state file is now shrugged off at startup rather than stopping the plugin from loading. The overheat alert no longer trips over a missing outdoor temperature. If a radiator briefly stops reporting its temperature the plugin now leaves that room on its current setting for the cycle rather than treating it as freezing cold. Door sensors are now read the same reliable way as window sensors. The weather error log no longer echoes the OpenWeatherMap key. Co-authored with Claude Opus 4.8. |
-| 1.7.0 | 03-07-2026 | Robustness pass from a full multi-agent code review. The 24/7 control loop now shrugs off a one-off error instead of quietly dying — a single bad reading, a deleted variable or a blank setting used to stop all heating with the plugin still showing as running, and each five-minute tick and each of the twelve zones is now isolated so the rest carry on. Every numeric setting is read defensively, so a cleared or non-numeric config field can no longer halt the plugin or make it misbehave. Warning and error log lines now show up correctly as warnings and errors rather than being quietly filed as ordinary info. The **Start Timed Boost**, **Cancel Timed Boost**, **Run Heating Cycle Now** and **Set Away Mode** actions are now selectable from the action list and usable in scripts (they were previously hidden behind a device that this setup does not create). Co-authored with Claude Opus 4.8. |
-| 1.6.2 | 10-06-2026 | Housekeeping — lint tidy-up and a continuous-integration check added as part of a fleet-wide audit. No behaviour change. |
-| 1.6.1 | 07-06-2026 | Added a **Show Summer Shut-off Status** action so the heating dashboard can report the summer state on demand. |
-| 1.6.0 | 06-06-2026 | Whole-house summer shut-off (default 1 Jun–30 Sep, configurable): all radiators held at 8 °C and the En Suite floor heating off for the window, with the normal cycle and En Suite morning boost skipped. New 24-hour **Force Heating On** / **Cancel Forced Heating** actions and menu items (override persists across restarts), two custom events, and a `summerStatus` device state. Co-authored with Claude Opus 4.8. |
-| 1.5.7 | 05-06-2026 | Estate bug-sweep. Every numeric setting is now read defensively — the Ecowitt device ID, the latitude and longitude, and the weather bypass temperature were all converted straight from their text fields, so anything non-numeric left in one of them stopped the plugin loading. The Pushover alert priority is now passed as text, which is what the Pushover plugin expects. |
-| 1.5.6 | 04-06-2026 | The heating-cycle log lines moved from second to millisecond timestamps, matching the rest of the plugin and the other CliveS plugins. |
-| 1.5.5 | 03-06-2026 | The outdoor-temperature record variables are now looked up by name rather than by a hard-coded ID. Recreating those variables used to break the lookup and spam an error every cycle. Records only — no effect on heating. |
-| 1.5.4 | 29-05-2026 | The hourly radiator report now fires on the first cycle of each new clock hour instead of waiting for minute zero. The heating cycle drifts a few seconds an hour, so once its firing time crept past the hour boundary the report silently stopped for days at a stretch. |
-| 1.5.3 | 25-05-2026 | Housekeeping — the plugin no longer cycles a device's communication every time it writes that device's own properties. No change in behaviour. |
-| 1.5.2 | 23-05-2026 | Millisecond timestamp `[HH:MM:SS.mmm]` prefix on every `self.logger` line via `plugin_utils.install_timestamp_filter()`; new "Toggle Timestamps in Log" menu item. |
-| 1.5.1 | 23-05-2026 | Secrets-policy housekeeping — `weather.py` `OWMWeather` constructor default lat/lon switched from CliveS coords (54.882, -1.818) to `0.0, 0.0`. The plugin startup path always passes real values resolved from `IndigoSecrets` / PluginConfig; the defensive default just stops the developer location leaking if anyone ever instantiates the class directly. No user-visible behaviour change. |
-| 1.5 | 23-05-2026 | En Suite warm-morning skip — if outdoor ≥ 10 °C at 06:00 the morning slot is not activated (radiator stays off, floor heat off, floor thermostat untouched). New `cancelled_reason` value `"warm_outdoor"` and new event-log message code 24. Co-authored with Claude Opus 4.7. |
-| 1.4 | 13-05-2026 | Overheat alert email moved to `IndigoSecrets.OVERHEAT_ALERT_EMAIL`. Location (lat/lon) moved to `IndigoSecrets.LATITUDE/LONGITUDE`. Removed hardcoded Ecowitt device IDs from PluginConfig. Cleaned legacy 2025.1 migration paths. |
-| 1.0 | 15-04-2026 | Initial release — full port from EvoHome_Radiator_Update.py v8.14 with timed boost and En Suite morning schedule |
+Every version is listed in the [version history](https://highsteads.github.io/EvoHomeControl/changelog.html).
 
 ## Authors & licence
 
