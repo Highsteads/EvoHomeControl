@@ -965,12 +965,16 @@ def process_room_temperature(
         new_temp = RADIATORS_OFF_TEMP
         message  = 7
 
-    # Boost / timed boost
+    # Boost / timed boost. Not while a window or outside door is open (CliveS,
+    # 27-09-2026): boosting a room with the garden door open only heats the garden,
+    # and until 1.11.0 the Dining Room went to 18 degC that way.
     effective_boost = (
         is_boost
         or (timed_boost_active and room_name in (timed_boost_rooms or set()))
     )
-    if effective_boost and room_name in schedules.BOOST_AMOUNTS and message not in (17, 23, 5):
+    if (effective_boost and room_name in schedules.BOOST_AMOUNTS
+            and not (windows_open or doors_open)
+            and message not in (17, 23, 5)):
         new_temp += schedules.BOOST_AMOUNTS[room_name]
         message   = 12
 

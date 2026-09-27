@@ -41,6 +41,8 @@ Set the **Boost** variable to `yes` and the living areas get extra heat until yo
 
 The bedrooms, Bathroom, En Suite, Hall Bedroom and Utility Room are not boosted.
 
+A room with a window or outside door open is not boosted either. It keeps its open-window setting, so the Dining Room stays at 16 degrees with the garden door open, and goes back to its boosted temperature once everything is shut.
+
 ## Timed boost
 
 A timed boost adds two degrees to the **Dining Room**, **Hall Kitchen**, **Living Room Door** and **Living Room Front** for one hour or two, then ends by itself. Start it from **Plugins → EvoHome Heating Controller → Start Timed Boost (1 hour)** or **(2 hours)**, or from the actions of the same names, which you can put on a control page button.
@@ -50,7 +52,7 @@ A timed boost adds two degrees to the **Dining Room**, **Hall Kitchen**, **Livin
 - A timed boost carries on after the plugin or Indigo restarts, as long as its time has not run out.
 - It does not start during the summer shut-off. Use **Force Heating On (24 hours)** first if you need the heat.
 
-A room that is overheating is not boosted, and the boost does not stack on top of the Boost variable.
+A room that is overheating, or has a window or outside door open, is not boosted, and the boost does not stack on top of the Boost variable.
 
 ## Snow boost
 

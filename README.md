@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.10.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.11.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -48,11 +48,11 @@ The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each
 
 ## What's new
 
+**v1.11.0** — A boost no longer heats a room with a window or outside door open. The room keeps its open-window setting, so the Dining Room stays at 16 degrees with the garden door open instead of going to 18, and picks the boost up again once everything is shut.
+
 **v1.10.0** — The Dining Room now really does stay at 16 degrees with a garden window or door open, instead of dropping to 8. Overheating alerts go to the Pushover user key you set, away mode stops the En Suite drying run, and the drying run no longer starts on a morning it cannot tell is cold.
 
 **v1.9.2** — The En Suite drying run only starts when it is colder outside than a limit you choose, 12 degrees to start with, or **No limit**. A morning that only turns cold at 7am still gets a run, and **Show En Suite Drying Run Status** shows the limit against the temperature now.
-
-**v1.9.1** — The drying run stands down once normal heating returns for the winter, when the 6am morning schedule looks after the En Suite, and picks up again at the next summer shut-off.
 
 Every version is listed in the [version history](https://highsteads.github.io/EvoHomeControl/changelog.html).
 

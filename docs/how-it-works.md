@@ -28,7 +28,7 @@ For each room, the plugin starts from the room's plan and works down this list. 
 5. **The room's own rule.** The Conservatory is held at 12 degrees while its sliding door is shut, whatever its garden windows are doing. The Dining Room is held at 16 degrees while a garden window or the garden door is open, rather than going down to 8. The En Suite has its [morning schedule and drying run](en-suite.md).
 6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. Otherwise, an open window or door takes the radiator down to 8 degrees, and in the En Suite switches the underfloor heating off too. The Dining Room keeps the 16 degrees its own rule gave it.
 7. **Mild weather.** Above 14 degrees outside, the radiator goes down to 8 degrees.
-8. **Boost.** The boost, or the timed boost, adds its two or three degrees.
+8. **Boost.** The boost, or the timed boost, adds its two or three degrees, but not to a room with a window or outside door open, which keeps its open-window setting.
 9. **Both out.** Takes four degrees off.
 
 The answer is rounded to the nearest half degree, which is as fine as Evohome goes, and kept between 8 and 30 degrees.

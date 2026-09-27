@@ -5,9 +5,10 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
 # Date:        27-09-2026
-# Version:     1.10.0
+# Version:     1.11.0
 #
 # v1.10.0 (27-09-2026): the faults found while writing the plain-English guide.
+# v1.11.0 (27-09-2026): no boost for a room with a window or outside door open.
 # Dining Room holds 16 degC with a garden window/door open (the general open-window
 # step no longer overwrites messages 20/21 with 8 degC); the Pushover user key is
 # sent as msgUser; the drying run's cold gate reads a MEASURED outdoor temperature
@@ -347,7 +348,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.10.0"
+PLUGIN_VERSION  = "1.11.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

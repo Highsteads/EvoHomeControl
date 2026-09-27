@@ -11,6 +11,7 @@
 import sys
 import types
 import unittest
+from unittest import mock
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +466,44 @@ class TestDiningRoomOpenGardenHoldsSixteen(unittest.TestCase):
         msgs = self._run()
         self.assertEqual(self.written, [16.0])
         self.assertEqual(msgs["Dining Room"], 21)
+
+    @mock.patch.dict(hl.schedules.BOOST_AMOUNTS, {"Dining Room": 2})
+    def test_boost_is_ignored_while_the_garden_door_is_open(self):
+        """1.11.0: a boost with a window or outside door open only heats the
+        garden, so the room keeps its open-window setting (it gave 18 before)."""
+        self._open(hl.DEV_GARDEN_DOOR_ID)
+        msgs = {}
+        hl.process_room_temperature(
+            room_name      = "Dining Room",
+            room_schedule  = [20] * 24,
+            window_devices = [hl.DEV_GARDEN_WINDOW_L_ID, hl.DEV_GARDEN_WINDOW_R_ID],
+            door_devices   = [hl.DEV_GARDEN_DOOR_ID],
+            special_rules  = hl.dining_room_special_rules,
+            ha_device_id   = hl.DEV_DINING_ROOM_ID,
+            current_hour   = 12, current_minute = 0,
+            current_outdoor_temp = 5.0, is_boost = True,
+            last_setpoints = {}, last_messages = msgs,
+            log_buffer = [], changes_buffer = [], overheat_monitor = None,
+        )
+        self.assertEqual(self.written, [16.0])
+        self.assertEqual(msgs["Dining Room"], 21)
+
+    @mock.patch.dict(hl.schedules.BOOST_AMOUNTS, {"Dining Room": 2})
+    def test_boost_still_applies_when_everything_is_shut(self):
+        msgs = {}
+        hl.process_room_temperature(
+            room_name      = "Dining Room",
+            room_schedule  = [20] * 24,
+            window_devices = [hl.DEV_GARDEN_WINDOW_L_ID, hl.DEV_GARDEN_WINDOW_R_ID],
+            door_devices   = [hl.DEV_GARDEN_DOOR_ID],
+            special_rules  = hl.dining_room_special_rules,
+            ha_device_id   = hl.DEV_DINING_ROOM_ID,
+            current_hour   = 12, current_minute = 0,
+            current_outdoor_temp = 5.0, is_boost = True,
+            last_setpoints = {}, last_messages = msgs,
+            log_buffer = [], changes_buffer = [], overheat_monitor = None,
+        )
+        self.assertEqual(self.written[-1], 22.0)
 
     def test_at_sixteen_already_it_still_says_the_window_is_open(self):
         """The message refinement must not relabel 20 as 'closed' (19) just

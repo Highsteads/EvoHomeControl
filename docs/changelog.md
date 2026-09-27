@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.11.0 — 27 September 2026
+
+A boost, or a timed boost, no longer heats a room with a window or outside door open. Boosting a room with the garden door open only heated the garden. The room keeps its open-window setting instead, so the Dining Room stays at 16 degrees with the garden door open rather than going to 18, and it picks the boost up again as soon as everything is shut.
+
 ## 1.10.0 — 27 September 2026
 
 These are the things I found wrong while writing this guide.
