@@ -4,7 +4,7 @@
 # Description: WeatherData class — Ecowitt primary / OWM fallback outdoor temperature
 # Author:      CliveS & Claude Sonnet 4.6
 # Date:        30-04-2026
-# Version:     1.3
+# Version:     1.4
 
 import os
 import json
@@ -37,6 +37,15 @@ def _slog(message, level="INFO"):
 # OWM weather condition codes that indicate snow or freezing precipitation
 # 600-622: all snow variants  |  511: freezing rain
 _SNOW_CODES = frozenset(range(600, 623)) | {511}
+
+
+# A reading older than these is not used. MEASURED 28-09-2026: the Ecowitt outdoor
+# sensor's lastUpdate state moves about every 15 seconds, and its longest gap in 30
+# days was 4 minutes. The Ecowitt plugin never sets deviceOnline to False, so the
+# age is the only sign that the station has stopped. OWM is fetched every 15
+# minutes while heating; three hours old means the fetches are failing.
+ECOWITT_MAX_AGE_SECS = 1800
+OWM_MAX_AGE_SECS     = 3 * 3600
 
 
 class WeatherData:
@@ -217,8 +226,9 @@ class WeatherData:
         if ecowitt is not None:
             return ecowitt
 
-        # --- Secondary: OWM ---
-        owm_temp = self.get_current('temp')
+        # --- Secondary: OWM, if it is recent. self.current is never cleared, so a
+        # run of failed fetches would otherwise hand back the last reading for ever.
+        owm_temp = self.get_current('temp') if self._owm_age_secs() <= OWM_MAX_AGE_SECS else None
         if owm_temp is not None:
             try:
                 return float(owm_temp)
@@ -227,6 +237,12 @@ class WeatherData:
 
         # --- Last resort ---
         return self.bypass_temp
+
+    def _owm_age_secs(self):
+        """Seconds since the OWM data in memory was loaded, or infinity if never."""
+        if self.last_update is None:
+            return float("inf")
+        return (datetime.datetime.now() - self.last_update).total_seconds()
 
     def get_measured_outdoor_temp(self, max_owm_age_secs=3600):
         """
@@ -262,6 +278,14 @@ class WeatherData:
             dev = indigo.devices[self.ecowitt_dev_id]
             online = dev.states.get("deviceOnline", True)
             temp   = dev.states.get("temperature")
+            age    = self._ecowitt_age_secs(dev)
+            if online and temp is not None and age is not None and age > ECOWITT_MAX_AGE_SECS:
+                self._warn_ecowitt(
+                    "stale",
+                    f"Ecowitt outdoor reading has not changed for {age / 60:.0f} minutes"
+                    f" — falling back to OWM"
+                )
+                return None
             if online and temp is not None:
                 return float(temp)
             # Distinguish the two failure modes so the log is meaningful
@@ -280,6 +304,23 @@ class WeatherData:
                 "read_error",
                 f"Ecowitt read error ({e}) — falling back to OWM"
             )
+        return None
+
+    @staticmethod
+    def _ecowitt_age_secs(dev):
+        """Seconds since the Ecowitt plugin last wrote this sensor: its lastUpdate
+        state, else the device's lastChanged. None when neither can be read."""
+        now = datetime.datetime.now()
+        raw = dev.states.get("lastUpdate")
+        if raw:
+            try:
+                seen = datetime.datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
+                return (now - seen).total_seconds()
+            except (ValueError, TypeError):
+                pass
+        changed = getattr(dev, "lastChanged", None)
+        if isinstance(changed, datetime.datetime):
+            return (now - changed).total_seconds()
         return None
 
     def get_precipitation_forecast(self, minutes=60):

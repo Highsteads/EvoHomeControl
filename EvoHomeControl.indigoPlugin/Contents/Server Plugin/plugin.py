@@ -4,9 +4,14 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        27-09-2026
-# Version:     1.11.0
+# Date:        28-09-2026 15:40
+# Version:     1.12.0
 #
+# v1.12.0 (28-09-2026): before the heating returns - overheat history cleared and saved at
+#   the shut-off and ignored when over an hour old; Ecowitt readings over 30 min old and OWM
+#   over 3 h old not used; a zone RAMSES has not heard for 45 min is skipped; the En Suite
+#   floor heating is switched off after a missed 10am, stopped by away mode, and switched
+#   off by an open window whatever the mode. (Claude Opus 5.5)
 # v1.10.0 (27-09-2026): the faults found while writing the plain-English guide.
 # v1.11.0 (27-09-2026): no boost for a room with a window or outside door open.
 # Dining Room holds 16 degC with a garden window/door open (the general open-window
@@ -348,7 +353,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.11.0"
+PLUGIN_VERSION  = "1.12.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1822,9 +1827,22 @@ class Plugin(indigo.PluginBase):
 
         today = datetime.now().strftime("%Y-%m-%d")
 
+        # Away mode: an empty house needs no warm floor. Stop a running morning and
+        # do not start one. Not a cancel-for-today, so a return home before 10:00
+        # still gets the rest of the morning.
+        away = self._away_mode_on()
+        if away and self.store["en_suite_morning_active"]:
+            self.store["en_suite_morning_active"]           = False
+            self.store["en_suite_morning_cancelled_reason"] = "away"
+            _log("[EnSuiteMorning] Away mode is on - morning schedule stopped")
+            self._en_suite_floor_off()
+            self._save_state()
+            self._fire_event("enSuiteMorningCancelled")
+
         # Auto-start: 06:00-09:59, not already active, not cancelled by window today
         cancelled_today = self.store.get("en_suite_morning_cancelled_date") == today
         if (6 <= hour < 10
+                and not away
                 and not self.store["en_suite_morning_active"]
                 and not cancelled_today):
 
@@ -1874,12 +1892,7 @@ class Plugin(indigo.PluginBase):
             self.store["en_suite_morning_active"]           = False
             self.store["en_suite_morning_cancelled_reason"] = "10am_expired"
             _log("[EnSuiteMorning] 10am — reverting to normal schedule")
-            # Turn off floor heating immediately
-            try:
-                indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
-                _log("[EnSuiteMorning] Floor heating switch turned OFF")
-            except Exception as e:
-                _log(f"[EnSuiteMorning] Floor heat off error: {e}", level="ERROR")
+            self._en_suite_floor_off()
             self._save_state()
             self._fire_event("enSuiteMorningCancelled")
 
@@ -1890,6 +1903,35 @@ class Plugin(indigo.PluginBase):
         if hour == 0 and self.store.get("en_suite_morning_cancelled_date") not in (None, today):
             self.store["en_suite_morning_cancelled_date"] = None
             self._save_state()
+
+    def _en_suite_floor_off(self):
+        """Switch the En Suite floor heating off, the one way every path does it."""
+        try:
+            indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
+            _log("[EnSuiteMorning] Floor heating switch turned OFF")
+        except Exception as e:
+            _log(f"[EnSuiteMorning] Floor heat off error: {e}", level="ERROR")
+
+    def _restore_en_suite_morning(self, saved_active):
+        """Bring back a morning schedule saved as running.
+
+        Still inside 06:00-09:59 (and no summer shut-off): carry on, and put the
+        floor heating back on. Otherwise the morning ended while the plugin was
+        stopped, so nothing was there at 10:00 to switch the floor heating off -
+        before 1.12.0 it then stayed on until 10:00 the next day. Switch it off now.
+        """
+        if not saved_active:
+            return
+        if 6 <= datetime.now().hour < 10 and not self._summer_lockout_active():
+            self.store["en_suite_morning_active"] = True
+            _log("[EnSuiteMorning] Restored from state — still within morning window")
+            try:
+                indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)
+            except Exception as e:
+                _log(f"[EnSuiteMorning] Could not re-assert floor heat: {e}", level="WARNING")
+            return
+        _log("[EnSuiteMorning] The morning schedule ended while the plugin was stopped")
+        self._en_suite_floor_off()
 
     def _note_en_suite_morning_cancelled(self, was_active):
         """Fire En Suite Morning Cancelled when the room's own rule ended the
@@ -1905,6 +1947,11 @@ class Plugin(indigo.PluginBase):
             reason = self.store.get("en_suite_morning_cancelled_reason")
             if reason == "window_open":
                 _log("[EnSuiteMorning] Window opened - morning schedule cancelled for today")
+            elif reason == "10am_expired":
+                # The cycle crossed 10:00 before the 30-second check did, and the
+                # check only switches the floor off for a morning still marked active.
+                _log("[EnSuiteMorning] 10am — reverting to normal schedule")
+                self._en_suite_floor_off()
             self._save_state()
             self._fire_event("enSuiteMorningCancelled")
 
@@ -2428,18 +2475,9 @@ class Plugin(indigo.PluginBase):
                 except (ValueError, TypeError):
                     pass
 
-            # Restore En Suite morning only if still within 06:00-09:59 AND the
-            # summer shut-off is not active. Re-assert floor heat ON to match the
-            # restored mode — but never during summer lockout, which holds the floor
-            # heating OFF (re-asserting it on here would fight the lockout).
-            if (st.get("en_suite_morning_active") and 6 <= datetime.now().hour < 10
-                    and not self._summer_lockout_active()):
-                self.store["en_suite_morning_active"] = True
-                _log("[EnSuiteMorning] Restored from state — still within morning window")
-                try:
-                    indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)
-                except Exception as e:
-                    _log(f"[EnSuiteMorning] Could not re-assert floor heat: {e}", level="WARNING")
+            # En Suite morning: carried on if still within 06:00-09:59, otherwise
+            # the floor heating it switched on is switched off.
+            self._restore_en_suite_morning(st.get("en_suite_morning_active"))
 
             self.store["en_suite_morning_cancelled_date"] = st.get("en_suite_morning_cancelled_date")
 

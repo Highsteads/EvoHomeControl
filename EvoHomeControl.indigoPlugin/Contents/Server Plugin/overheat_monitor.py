@@ -4,10 +4,11 @@
 # Description: OverheatMonitor — tracks per-room overheat history, sends Pushover + email alerts
 # Author:      CliveS & Claude Sonnet 4.6
 # Date:        30-04-2026
-# Version:     1.3
+# Version:     1.4
 
 import os
 import json
+import time
 import logging
 from datetime import datetime as dt
 
@@ -38,6 +39,11 @@ def _slog(message, level="INFO"):
 # ---------------------------------------------------------------------------
 ALERT_CRITICAL_TEMP    = 6.0   # Alert if overheat exceeds this many °C above target
 ALERT_PERSISTENT_TEMP  = 4.0   # Alert if persistent overheat exceeds this
+
+# The heating cycle saves the history every few minutes whenever it runs, so a file
+# older than this belongs to an earlier spell of heating - most often last spring,
+# reloaded by a restart after the summer shut-off. Tracking starts fresh instead.
+HISTORY_MAX_AGE_SECS   = 3600
 
 
 class OverheatMonitor:
@@ -94,9 +100,24 @@ class OverheatMonitor:
     # Persistence
     # ------------------------------------------------------------------
 
-    def load_history(self):
-        """Load overheat history from JSON file or return empty dict."""
+    def load_history(self, max_age_secs=HISTORY_MAX_AGE_SECS):
+        """Load overheat history from JSON file or return empty dict.
+
+        A file older than max_age_secs is ignored. On 28-09-2026 the file on disk
+        was from 7 June, with three rooms still flagged CRITICAL and counters in the
+        thousands, so a restart after the summer shut-off would have started every
+        room in an overheat hold and sent all-clear alerts for rooms that were fine."""
         if os.path.exists(self.history_file):
+            try:
+                age = time.time() - os.path.getmtime(self.history_file)
+            except OSError:
+                age = 0
+            if age > max_age_secs:
+                saved = dt.fromtimestamp(time.time() - age)
+                _slog(f"[OverheatMonitor] The saved overheat history is from "
+                      f"{saved.strftime('%d %b %H:%M').lstrip('0')}, too old to use, "
+                      f"so every room starts fresh.")
+                return {}
             try:
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
@@ -464,12 +485,11 @@ class OverheatMonitor:
         cycle stops calling update_room, so any room left mid-alert would keep a stale
         alert_sent=True for the whole season and could suppress a genuine alert when
         heating resumes. Resetting here means tracking starts clean at lockout end.
+
+        Every room is dropped outright, temperature history and peak included, and
+        the empty history is SAVED. Before 1.12.0 only the counters were reset and
+        only in memory, so the file kept last spring's alerts and a restart brought
+        them back; the rate of rise was also worked out against June readings.
         """
-        for data in self.history.values():
-            data["consecutive_cycles"] = 0
-            data["stable_cycles"]      = 0
-            data["alert_sent"]         = False
-            data["all_clear_sent"]     = True
-            data["alert_type"]         = None
-            data["off_since_cycle"]    = 0
-            data["is_coasting"]        = False
+        self.history.clear()
+        self.save_history()

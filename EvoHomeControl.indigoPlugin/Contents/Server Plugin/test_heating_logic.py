@@ -374,6 +374,10 @@ class TestOverheatResetAllTracking(unittest.TestCase):
             "off_since_cycle": 4, "is_coasting": True,
         }
         m.reset_all_tracking()
+        # 1.12.0: the room is dropped outright (temperature history and peak
+        # included) and the empty history is saved - see test_fixes_1_12.
+        self.assertNotIn("Bathroom", m.history)
+        m.initialize_room("Bathroom")
         b = m.history["Bathroom"]
         self.assertEqual(b["consecutive_cycles"], 0)
         self.assertFalse(b["alert_sent"])

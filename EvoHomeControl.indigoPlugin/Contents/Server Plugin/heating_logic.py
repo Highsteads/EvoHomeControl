@@ -5,7 +5,7 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6
 # Date:        30-04-2026
-# Version:     1.3
+# Version:     1.4
 
 import logging
 from datetime import datetime as dt
@@ -106,6 +106,15 @@ AWAY_TEMP                   = 14.0
 BOTH_OUT_OFFSET             = -4
 MAX_ROOM_TEMP               = 30.0
 TEMP_CHANGE_TOLERANCE       =  0.1
+
+# A zone RAMSES has not heard from for this long is not trusted. MEASURED 28-09-2026
+# over 14 days: the zone's lastSeen state updated at least every 6 minutes 99% of
+# the time, and the longest gap was 72 minutes, once, on all 12 zones together (a
+# gateway blip). When the gateway wedged from 26 to 31 May 2026 every zone kept its
+# last temperature for five days and the plugin went on acting on them.
+# trvLastSeen is NOT used: an idle valve can go 8 hours without a message of its
+# own while the controller keeps reporting the zone.
+ZONE_STALE_MINUTES          = 45
 
 # ---------------------------------------------------------------------------
 # OVERHEAT PREVENTION CONSTANTS
@@ -292,6 +301,29 @@ def is_within_summer_off(today, start_month, start_day, end_month, end_day):
         return start <= cur < end
     # Wrapped window (start later than end): off if at/after start OR before end
     return cur >= start or cur < end
+
+
+# Rooms whose reading is currently too old, so the warning is logged once when a
+# zone goes quiet and once when it comes back, not every five minutes. A mutable
+# dict, never rebound, so the plugin host's copy of this module keeps it.
+_ZONE_STALE_LATCH = {}
+
+
+def zone_reading_age_minutes(dev, now=None):
+    """Minutes since RAMSES last heard this zone (its lastSeen state, local time),
+    or None when the state is missing or cannot be read. None means "cannot tell",
+    and the caller carries on rather than stopping the heating on a missing state."""
+    try:
+        raw = dev.states.get("lastSeen")
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        seen = dt.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+    return ((now or dt.now()) - seen).total_seconds() / 60.0
 
 
 def calculate_temp_offset(outdoor_temp):
@@ -806,6 +838,21 @@ def process_room_temperature(
         setpoint_str = dev_radiator.states.get("setpointHeat", "0")
         dev_setpoint = 0.0 if setpoint_str in (None, "null", "None", "", "unavailable", "unknown") else float(setpoint_str)
 
+        # An old reading is as bad as a missing one: skip the zone and leave the
+        # valve where it is. Warn once when the zone goes quiet, once when it returns.
+        age = zone_reading_age_minutes(dev_radiator)
+        if age is not None and age > ZONE_STALE_MINUTES:
+            if not _ZONE_STALE_LATCH.get(room_name):
+                _ZONE_STALE_LATCH[room_name] = True
+                _log(f"{room_name}: nothing heard from this zone for {age:.0f} minutes, so its "
+                     f"reading of {dev_temp:.1f} degC may be out of date. The radiator stays at "
+                     f"its last setting until the zone reports again.",
+                     level="WARNING", log_buffer=log_buffer)
+            return
+        if _ZONE_STALE_LATCH.pop(room_name, None):
+            _log(f"{room_name}: the zone is reporting again, so the heating is back in control of it.",
+                 log_buffer=log_buffer)
+
     except KeyError:
         _log(f"ERROR: RAMSES device {ha_device_id} not found for {room_name}", level="ERROR", log_buffer=log_buffer)
         return
@@ -907,6 +954,20 @@ def process_room_temperature(
         if special_msg is not None and special_msg != message:
             message = special_msg
 
+    # An open window switches the floor heating off whatever mode the house is in.
+    # This used to sit in the windows branch below, which is an elif of Away, so
+    # with Away on an open En Suite window left the floor heating running.
+    if windows_open and floor_heat_device:
+        try:
+            floor_dev = indigo.devices[floor_heat_device]
+            if floor_dev.states.get("onOffState", False):
+                indigo.device.turnOff(floor_dev)
+                _log(f"{room_name}: floor heating turned off (window open)",
+                     log_buffer=log_buffer)
+        except Exception as e:
+            _log(f"Error turning off floor heating in {room_name}: {e}",
+                 level="ERROR", log_buffer=log_buffer)
+
     # --- Standard priority overrides ---
 
     # Away mode
@@ -925,18 +986,6 @@ def process_room_temperature(
     elif windows_open and message not in (5, 20, 21):
         new_temp = RADIATORS_OFF_TEMP
         message  = 2 if window_count >= 2 else 1
-
-        # Turn off floor heating when window is open
-        if floor_heat_device:
-            try:
-                floor_dev = indigo.devices[floor_heat_device]
-                if floor_dev.states.get("onOffState", False):
-                    indigo.device.turnOff(floor_dev)
-                    _log(f"{room_name}: floor heating turned off (window open)",
-                         log_buffer=log_buffer)
-            except Exception as e:
-                _log(f"Error turning off floor heating in {room_name}: {e}",
-                     level="ERROR", log_buffer=log_buffer)
 
     # Doors open (20/21 exempt for the same reason as windows above)
     elif doors_open and message not in (5, 20, 21):

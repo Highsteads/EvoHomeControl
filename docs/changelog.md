@@ -7,6 +7,15 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.12.0 — 28 September 2026
+
+Four fixes made before the heating came back on after the summer.
+
+- **Overheating starts fresh after the summer.** The plugin kept last spring's overheating record on disk, with three rooms still marked as having a stuck valve, and a restart would have loaded it back. Every room would have started the season with its radiator turned down, and the plugin would have sent all-clear messages for rooms that were fine. It now clears the record when the shut-off begins, and ignores one more than an hour old.
+- **A stopped Ecowitt station is noticed.** The Ecowitt plugin never marks its sensor offline, so a station that had stopped kept its last temperature for ever. On a mild day that would have held every radiator at 8 degrees. A reading that has not changed for 30 minutes is no longer used, and OpenWeatherMap weather more than three hours old is not used either.
+- **A room that has gone quiet is left alone.** When the RAMSES ESP gateway stopped from 26 to 31 May, every room kept its last temperature for five days, and the plugin went on acting on them. A room the gateway has not heard from for 45 minutes now keeps its radiator where it is, and the Event Log says so once.
+- **The En Suite underfloor heating is not left on.** Three things could leave it running until 10am the next day: the plugin not running at 10am, away mode (the morning schedule still switched it on at 6am), and opening the window while away mode was on. Away mode now stops the morning schedule, and the other two switch it off.
+
 ## 1.11.0 — 27 September 2026
 
 A boost, or a timed boost, no longer heats a room with a window or outside door open. Boosting a room with the garden door open only heated the garden. The room keeps its open-window setting instead, so the Dining Room stays at 16 degrees with the garden door open rather than going to 18, and it picks the boost up again as soon as everything is shut.

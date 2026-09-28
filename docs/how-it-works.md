@@ -15,7 +15,7 @@ It sets each radiator to a fixed target that stays until the plugin changes it �
 
 Between heating checks, the plugin looks every 30 seconds at the things that need a quicker answer: a boost or a 24-hour override running out, the En Suite's 6am start and 10am finish, and the En Suite window during a drying run.
 
-If one room fails — a radiator missing from Indigo, say — the other rooms are still done. If a radiator has no temperature reading, that room is left at its last target for that check, rather than being treated as freezing.
+If one room fails — a radiator missing from Indigo, say — the other rooms are still done. If a radiator has no temperature reading, that room is left at its last target for that check, rather than being treated as freezing. The same goes for a room the RAMSES ESP plugin has not heard from for 45 minutes, because its reading may be out of date: the plugin says so once in the Event Log, and again once the room is reporting.
 
 ## How each room's temperature is decided
 
@@ -26,7 +26,7 @@ For each room, the plugin starts from the room's plan and works down this list. 
 3. **Bedroom limits.** Bedroom 1, Bedroom 2 and the Utility Room go no higher than 16 degrees, or 18 for Bedroom 2 when it has a guest. Bedroom 3, which holds my computers, goes no higher than 14.
 4. **Overheating.** If the room is too warm, its radiator is turned down, and nothing below this in the list changes that, except an open window or door, which takes it lower still. The section below explains it.
 5. **The room's own rule.** The Conservatory is held at 12 degrees while its sliding door is shut, whatever its garden windows are doing. The Dining Room is held at 16 degrees while a garden window or the garden door is open, rather than going down to 8. The En Suite has its [morning schedule and drying run](en-suite.md).
-6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. Otherwise, an open window or door takes the radiator down to 8 degrees, and in the En Suite switches the underfloor heating off too. The Dining Room keeps the 16 degrees its own rule gave it.
+6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. Otherwise, an open window or door takes the radiator down to 8 degrees. The Dining Room keeps the 16 degrees its own rule gave it. An open En Suite window switches the underfloor heating off whether away mode is on or not.
 7. **Mild weather.** Above 14 degrees outside, the radiator goes down to 8 degrees.
 8. **Boost.** The boost, or the timed boost, adds its two or three degrees, but not to a room with a window or outside door open, which keeps its open-window setting.
 9. **Both out.** Takes four degrees off.
@@ -68,8 +68,8 @@ Bedroom 3 is left out of the alerts, because its computers keep it warm whatever
 
 The plugin takes the outdoor temperature from the first of these it can read:
 
-1. Your **Ecowitt outdoor sensor**, if you have set one, unless **Force OWM temperature** is ticked.
-2. **OpenWeatherMap**, which the plugin asks for the weather at most once every 15 minutes.
+1. Your **Ecowitt outdoor sensor**, if you have set one, unless **Force OWM temperature** is ticked. A reading that has not changed for 30 minutes is not used, because the station has probably stopped.
+2. **OpenWeatherMap**, which the plugin asks for the weather at most once every 15 minutes. Weather more than three hours old is not used.
 3. The **Fallback temperature** in the settings, 6 degrees to start with.
 
 OpenWeatherMap also supplies the forecast the snow boost looks at, and the wind, cloud and sunrise details in the hourly report.

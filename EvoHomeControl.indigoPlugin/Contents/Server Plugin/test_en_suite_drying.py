@@ -1107,8 +1107,10 @@ class TestMeasuredOutdoorReading(unittest.TestCase):
     def test_stale_openweathermap_data_does_not(self):
         w = self._weather()
         w.current     = {"temp": 9.5}
-        w.last_update = datetime.now() - timedelta(hours=3)
+        w.last_update = datetime.now() - timedelta(hours=2)
         self.assertIsNone(w.get_measured_outdoor_temp())
+        # 1.12.0: the heating cycle keeps OWM data up to three hours old (see
+        # test_fixes_1_12 for what happens beyond that).
         self.assertEqual(w.get_outdoor_temp(), 9.5, "the heating cycle is unchanged")
 
     def test_ecowitt_comes_first(self):

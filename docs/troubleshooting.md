@@ -26,6 +26,14 @@ The plugin has no OpenWeatherMap key. The heating still runs on your Ecowitt sen
 
 The plugin cannot read your Ecowitt outdoor sensor, so it is using OpenWeatherMap's temperature for your area instead. It says so at most once every 30 minutes. Check the Ecowitt plugin and the station. If the station will be out of action for a while, tick **Force OWM temperature** in the settings.
 
+## The log says the Ecowitt outdoor reading has not changed for so many minutes
+
+Your Ecowitt outdoor sensor has stopped updating, so the plugin is using OpenWeatherMap's temperature for your area instead. The Ecowitt plugin still shows the device as online, which is why the plugin goes by how old the reading is. Check the Ecowitt station and its plugin.
+
+## The log says nothing has been heard from a zone for so many minutes
+
+The RAMSES ESP plugin has had no news of that room for more than 45 minutes, so its temperature may be out of date and the plugin leaves its radiator where it is. When every room says so at once, the RAMSES ESP gateway has stopped: check that plugin and its gateway. When one room says so, check that radiator's valve and its batteries. The plugin says once in the Event Log when the room is reporting again.
+
 ## Every radiator is at 8 degrees
 
 Check whether the summer shut-off is on — choose **Plugins → EvoHome Heating Controller → Show Summer Shut-off Status**. If it is and you want heat, choose **Force Heating On (24 hours)**, or change the dates in the settings.
