@@ -4,9 +4,15 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        28-09-2026 19:50
-# Version:     1.13.0
+# Date:        28-09-2026 20:20
+# Version:     1.14.0
 #
+# v1.14.0 (28-09-2026): boost/force-on expiries are offset-aware (_now_aware/_as_aware/
+#   _local_clock) so 25-Oct does not stretch them an hour; Away no longer stacks with Boost or
+#   Both Out and no longer beats an open window (windows is an `if`, not an `elif` of Away);
+#   Both Out leaves open-window/mild-weather settings alone; global Boost raises the overheat
+#   baseline (boost_applies); Bathroom_Guest[0] 10 -> 16; no-email line INFO; 81 orphan prefs
+#   (incl. a plain-text OWM key) removed once at startup. (Claude Opus 5.5)
 # v1.13.0 (28-09-2026): TIMED OVERRIDES - setpoints go through RAMSES ESP's setTemporarySetpoint
 #   (pref overrideMinutes, default 120; 0 = permanent) and are renewed when under 60 min is
 #   left (heating_logic.needs_override_refresh / send_setpoint), so a stopped Indigo lapses
@@ -359,7 +365,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.13.0"
+PLUGIN_VERSION  = "1.14.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -465,6 +471,54 @@ def _to_level(level):
     if isinstance(level, str):
         return _LOG_LEVELS.get(level.upper(), logging.INFO)
     return level
+
+
+def _now_aware():
+    """Now, with the local UTC offset attached. Timer expiries are kept this way so
+    adding 1 or 24 hours is real elapsed time: a naive local time crossing the
+    25 October clock change made a 1-hour boost run 2 hours and a 24-hour force-on 25."""
+    return datetime.now().astimezone()
+
+
+def _as_aware(value):
+    """A datetime with an offset; a naive one (older state files) is taken as local."""
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.astimezone()
+
+
+def _local_clock(value, fmt="%H:%M"):
+    """Format an expiry in the CURRENT local time, whichever side of a clock change
+    it was set on."""
+    return _as_aware(value).astimezone().strftime(fmt)
+
+
+# Settings from earlier versions of the Configure dialog that nothing reads any more.
+# Removed once at startup (1.14.0) - among them an old OpenWeatherMap key in plain
+# text ("apiKey"). An explicit list, never "anything not in the dialog", so a setting
+# a later version adds can never be swept away by this.
+_ORPHAN_PREF_KEYS = (
+    "alertsLabel", "apiKey", "awayTemp", "bothOutOffset", "debugLabel", "debugLogging",
+    "devBathroom", "devBathroomWindow", "devBedroom1", "devBedroom2", "devBedroom3",
+    "devConservatory", "devConservatoryDoor", "devConservatoryWindowL",
+    "devConservatoryWindowR", "devDiningRoom", "devDiningRoomSlideDoor", "devEnSuite",
+    "devEnSuiteWindow", "devHallBedroom", "devHallKitchen", "devLivingRoomDoor",
+    "devLivingRoomFront", "devLivingRoomFrontWindow", "devLocalFeelsLike",
+    "devLocalHumidity", "devLocalSolarLux", "devLocalTemp", "devLocalWindDirection",
+    "devLocalWindGust", "devLocalWindSpeed", "devUtilityRoom", "devUtilityRoomWindow",
+    "emailAlertsEnabled", "infoLabel", "latitude", "longitude", "maxRoomTemp",
+    "outdoorTempTrigger", "overheatLabel", "overheatMinOffCycles",
+    "overheatRateThreshold", "overheatRecoveryThreshold", "overheatTriggerThreshold",
+    "overheatUseRadiatorOff", "pushoverEnabled", "radiatorsLabel", "radiatorsOffTemp",
+    "recordsLabel", "scheduleFileLabel", "scheduleFilePath", "sensorsLabel",
+    "separator1", "separator10", "separator11", "separator2", "separator3",
+    "separator4", "separator4b", "separator5", "separator6", "separator7",
+    "separator8", "separator9", "tempChangeTolerance", "thresholdsLabel",
+    "updateInterval", "updateLabel", "varAvOutTempHi", "varAvOutTempHiTime",
+    "varAvOutTempLo", "varAvOutTempLoTime", "varBoost", "varBothOut", "varGuest2",
+    "varGuest3", "varHomeAway", "varTempOffset", "variablesLabel", "weatherLabel",
+    "windowsLabel",
+)
 
 
 def _log(message, level="INFO"):
@@ -632,6 +686,7 @@ class Plugin(indigo.PluginBase):
 
         run_interval = self._run_interval_mins()
         heating_logic.set_override_minutes(self._override_minutes(self.pluginPrefs))
+        self._remove_orphan_prefs()
 
         # OWM API key: IndigoSecrets.py wins over PluginConfig
         owm_key = _SECRETS_OWM_KEY or self.pluginPrefs.get("owmApiKey", "")
@@ -668,9 +723,9 @@ class Plugin(indigo.PluginBase):
         )
         if not self.overheat.email_address:
             _log(
-                "No overheat-alert email configured. Set OVERHEAT_ALERT_EMAIL in "
-                "IndigoSecrets.py OR fill the Alert Email field in Plugin Preferences.",
-                level="ERROR",
+                "No overheat-alert email configured, so alerts go by Pushover only. Set "
+                "OVERHEAT_ALERT_EMAIL in IndigoSecrets.py or fill the Alert Email field "
+                "in Plugin Preferences to have them emailed as well.",
             )
         # Wire up Indigo plugin events for overheat alert / all-clear
         self.overheat.event_callback    = self._fire_event
@@ -721,6 +776,24 @@ class Plugin(indigo.PluginBase):
         replacePluginPropsOnServer write.
         """
         return False
+
+    def _remove_orphan_prefs(self):
+        """Drop settings left by earlier versions that nothing reads (names only are
+        logged, never values - one of them held an API key)."""
+        gone = [k for k in _ORPHAN_PREF_KEYS if k in self.pluginPrefs]
+        if not gone:
+            return
+        for key in gone:
+            try:
+                del self.pluginPrefs[key]
+            except Exception:
+                pass
+        try:
+            self.savePluginPrefs()
+        except Exception:
+            pass   # outside Indigo (tests) there is no savePluginPrefs
+        _log(f"Removed {len(gone)} old settings from earlier versions that nothing uses "
+             f"any more, among them an old OpenWeatherMap key stored in plain text.")
 
     @staticmethod
     def _override_minutes(prefs):
@@ -1108,13 +1181,13 @@ class Plugin(indigo.PluginBase):
                  "Use 'Force Heating On (24h)' first if you need heat now.",
                  level="WARNING")
             return
-        expiry = datetime.now() + timedelta(hours=hours)
+        expiry = _now_aware() + timedelta(hours=hours)
         self.store["timed_boost_active"] = True
         self.store["timed_boost_expiry"] = expiry
         self.store["timed_boost_hours"]  = hours
         rooms  = ", ".join(sorted(schedules.TIMED_BOOST_ROOMS))
         _log(f"[TimedBoost] {hours}h boost started — "
-             f"expires at {expiry.strftime('%H:%M')} — rooms: {rooms}")
+             f"expires at {_local_clock(expiry)} — rooms: {rooms}")
         self._save_state()
         self._fire_event("timedBoostStarted")
 
@@ -1135,7 +1208,7 @@ class Plugin(indigo.PluginBase):
         if not self.store["timed_boost_active"]:
             return
         expiry = self.store.get("timed_boost_expiry")
-        if expiry and datetime.now() >= expiry:
+        if expiry and _now_aware() >= _as_aware(expiry):
             self._cancel_timed_boost("timer expired")
 
     def _log_boost_revert_summary(self):
@@ -1219,11 +1292,11 @@ class Plugin(indigo.PluginBase):
         if self.store.get("summer_force_active"):
             exp = self.store.get("summer_force_expiry")
             if exp:
-                secs = max(0, (exp - datetime.now()).total_seconds())
+                secs = max(0, (_as_aware(exp) - _now_aware()).total_seconds())
                 hrs  = int(secs // 3600)
                 mins = int((secs % 3600) // 60)
                 return (f"FORCED ON — full heating for {hrs}h {mins}m more "
-                        f"(reverts to summer shut-off {exp.strftime('%a %d %b %H:%M')})")
+                        f"(reverts to summer shut-off {_local_clock(exp, '%a %d %b %H:%M')})")
             return "FORCED ON — full heating (24h override)"
         if self._summer_lockout_active():
             return (f"Summer shut-off ACTIVE — all radiators off, "
@@ -1331,11 +1404,11 @@ class Plugin(indigo.PluginBase):
             _log("[Summer] Force-on requested but the summer shut-off feature is "
                  "disabled — nothing to override.", level="WARNING")
             return
-        expiry = datetime.now() + timedelta(hours=hours)
+        expiry = _now_aware() + timedelta(hours=hours)
         self.store["summer_force_active"] = True
         self.store["summer_force_expiry"] = expiry
         _log(f"[Summer] Force-on START — full heating restored for {hours}h, "
-             f"reverts to summer shut-off at {expiry.strftime('%a %d %b %H:%M')}")
+             f"reverts to summer shut-off at {_local_clock(expiry, '%a %d %b %H:%M')}")
         self._save_state()
         self._fire_event("summerForceStarted")
         # Apply normal heating immediately rather than waiting for the next cycle
@@ -1357,7 +1430,7 @@ class Plugin(indigo.PluginBase):
         if not self.store.get("summer_force_active"):
             return
         exp = self.store.get("summer_force_expiry")
-        if exp and datetime.now() >= exp:
+        if exp and _now_aware() >= _as_aware(exp):
             self._cancel_summer_force("24h timer expired")
 
     def _log_summer_status(self):
@@ -2010,7 +2083,7 @@ class Plugin(indigo.PluginBase):
 
         expiry_str = ""
         if self.store["timed_boost_active"] and self.store.get("timed_boost_expiry"):
-            expiry_str = self.store["timed_boost_expiry"].strftime("%H:%M")
+            expiry_str = _local_clock(self.store["timed_boost_expiry"])
 
         now_str = datetime.now().strftime("%d %b %Y %H:%M:%S")
 
@@ -2467,12 +2540,12 @@ class Plugin(indigo.PluginBase):
             expiry_str = st.get("timed_boost_expiry")
             if expiry_str:
                 try:
-                    expiry = datetime.fromisoformat(expiry_str)
-                    if expiry > datetime.now():
+                    expiry = _as_aware(datetime.fromisoformat(expiry_str))
+                    if expiry > _now_aware():
                         self.store["timed_boost_active"] = True
                         self.store["timed_boost_expiry"] = expiry
                         self.store["timed_boost_hours"]  = st.get("timed_boost_hours", 1)
-                        _log(f"[TimedBoost] Restored from state — expires {expiry.strftime('%H:%M')}")
+                        _log(f"[TimedBoost] Restored from state — expires {_local_clock(expiry)}")
                 except (ValueError, TypeError):
                     # Malformed/legacy value, or a tz-aware string compared to a
                     # naive now() — ignore the stale boost rather than crash startup.
@@ -2482,12 +2555,12 @@ class Plugin(indigo.PluginBase):
             force_expiry_str = st.get("summer_force_expiry")
             if force_expiry_str:
                 try:
-                    fexp = datetime.fromisoformat(force_expiry_str)
-                    if fexp > datetime.now():
+                    fexp = _as_aware(datetime.fromisoformat(force_expiry_str))
+                    if fexp > _now_aware():
                         self.store["summer_force_active"] = True
                         self.store["summer_force_expiry"] = fexp
                         _log(f"[Summer] Force-on restored from state — "
-                             f"reverts {fexp.strftime('%a %d %b %H:%M')}")
+                             f"reverts {_local_clock(fexp, '%a %d %b %H:%M')}")
                 except (ValueError, TypeError):
                     pass
 
@@ -2714,7 +2787,7 @@ class Plugin(indigo.PluginBase):
         _log(f"  Timed boost active:  {self.store['timed_boost_active']}")
         if self.store["timed_boost_active"]:
             expiry = self.store.get("timed_boost_expiry")
-            _log(f"  Timed boost expiry:  {expiry.strftime('%H:%M') if expiry else 'N/A'}")
+            _log(f"  Timed boost expiry:  {_local_clock(expiry) if expiry else 'N/A'}")
         _log(f"  En Suite morning:    {self.store['en_suite_morning_active']}")
         _log(f"  Summer shut-off:     {self._summer_status_str()}")
         if self.overheat:
@@ -2748,7 +2821,7 @@ class Plugin(indigo.PluginBase):
             hrs    = self.store.get("timed_boost_hours", 0)
             rooms  = ", ".join(sorted(schedules.TIMED_BOOST_ROOMS))
             _log(f"[TimedBoost] ACTIVE — {hrs}h boost, "
-                 f"expires {expiry.strftime('%H:%M') if expiry else 'N/A'}")
+                 f"expires {_local_clock(expiry) if expiry else 'N/A'}")
             _log(f"[TimedBoost] Rooms: {rooms}")
         else:
             _log("[TimedBoost] Not active")

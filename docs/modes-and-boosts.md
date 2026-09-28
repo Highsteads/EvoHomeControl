@@ -11,7 +11,7 @@ Most of the modes are Indigo variables, so anything in Indigo can switch them â€
 
 For when the house is empty for days at a time.
 
-Set the **Away** variable to `true`, or use the **Set Away Mode** action, and every room is held at 14 degrees, or 16 degrees when it is below 3 degrees outside, to keep the house safe from frost. A room that is overheating is still turned down. Set it back to `false`, or run **Set Away Mode** with **Inactive (resume schedule)**, and the rooms go back to their plans.
+Set the **Away** variable to `true`, or use the **Set Away Mode** action, and every room is held at 14 degrees, or 16 degrees when it is below 3 degrees outside, to keep the house safe from frost. A room that is overheating is still turned down, and an open window or door still takes its radiator down to 8 degrees. Boost and Both out make no difference while away mode is on. Set it back to `false`, or run **Set Away Mode** with **Inactive (resume schedule)**, and the rooms go back to their plans.
 
 The **Set Away Mode** action runs a heating check straight away, so the change happens within 30 seconds rather than at the next check.
 
@@ -19,7 +19,7 @@ The **Set Away Mode** action runs a heating check straight away, so the change h
 
 For a few hours out, when the house will need to be warm again soon.
 
-Set the **Both out** variable to `yes` and every room's target drops by four degrees. Set it to `no` to go back to normal.
+Set the **Both out** variable to `yes` and every room's target drops by four degrees. Set it to `no` to go back to normal. It does not change a room with a window or door open, a room turned down for mild weather, or anything while away mode is on.
 
 ## Guests
 
@@ -40,6 +40,8 @@ Set the **Boost** variable to `yes` and the living areas get extra heat until yo
 | Living Room Front | 2 degrees |
 
 The bedrooms, Bathroom, En Suite, Hall Bedroom and Utility Room are not boosted.
+
+A room is judged against its boosted temperature when the plugin checks whether it is overheating, so a boost is not cancelled just because the room is warming towards it. A room is not boosted while away mode is on.
 
 A room with a window or outside door open is not boosted either. It keeps its open-window setting, so the Dining Room stays at 16 degrees with the garden door open, and goes back to its boosted temperature once everything is shut.
 

@@ -5,7 +5,7 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6
 # Date:        30-04-2026
-# Version:     1.5
+# Version:     1.6
 
 import logging
 from datetime import datetime as dt
@@ -986,15 +986,26 @@ def process_room_temperature(
     else:
         message = 11
 
+    # Whether a boost will actually be added below. Worked out here so overheat
+    # detection can judge the room against its boosted target. Until 1.14.0 only a
+    # TIMED boost raised that baseline, so a room on the global Boost variable that
+    # was still warming within a degree of its normal target was "coasting" and had
+    # its valve shut - the Conservatory's +3 could never happen.
+    effective_boost = (
+        is_boost
+        or (timed_boost_active and room_name in (timed_boost_rooms or set()))
+    )
+    boost_applies = (effective_boost and room_name in schedules.BOOST_AMOUNTS
+                     and not (windows_open or doors_open) and not is_away)
+
     # --- Overheat detection ---
     if dev_temp is not None and dev_temp > RADIATORS_OFF_TEMP:
         # Use override target if provided (e.g. En Suite morning schedule sets 22°C —
         # use that as the baseline so 21.9°C is not falsely flagged as overheating)
         overheat_target = overheat_target_override if overheat_target_override is not None else new_temp
-        # If timed boost is active for this room, raise the overheat baseline by the boost amount
-        # so a room at 20.9°C with a 20°C schedule and +2°C boost is not falsely suppressed.
-        if (timed_boost_active and room_name in (timed_boost_rooms or set())
-                and room_name in schedules.BOOST_AMOUNTS):
+        # A boosted room is judged against its boosted target, so a room at 20.9 degC
+        # with a 20 degC schedule and a +2 degC boost is not falsely suppressed.
+        if boost_applies:
             overheat_target = overheat_target + schedules.BOOST_AMOUNTS[room_name]
         is_overheating, adjusted_temp, overheat_amt = check_overheating(
             dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins
@@ -1058,7 +1069,10 @@ def process_room_temperature(
     # Windows open. 20/21 are a special rule that has already decided what an open
     # window means for this room (the Dining Room holds 16 degC rather than closing
     # its valve), so the general rule must not overwrite that decision with 8 degC.
-    elif windows_open and message not in (5, 20, 21):
+    # An `if`, not an `elif` of Away (1.14.0): with Away on, an open window used to
+    # leave the radiator at 14 or 16 degC heating the garden. Away's own setting is a
+    # message 8/15, which is not exempt here, so the window wins.
+    if windows_open and message not in (5, 20, 21):
         new_temp = RADIATORS_OFF_TEMP
         message  = 2 if window_count >= 2 else 1
 
@@ -1068,7 +1082,7 @@ def process_room_temperature(
         message  = 4 if (windows_open and doors_open) else 3
 
     # Restore floor heating when window closes (En Suite only, morning schedule active)
-    elif floor_heat_device and not windows_open and floor_heat_restore_enabled:
+    elif floor_heat_device and not windows_open and floor_heat_restore_enabled and not is_away:
         try:
             floor_dev = indigo.devices[floor_heat_device]
             if not floor_dev.states.get("onOffState", True):
@@ -1092,19 +1106,19 @@ def process_room_temperature(
     # Boost / timed boost. Not while a window or outside door is open (CliveS,
     # 27-09-2026): boosting a room with the garden door open only heats the garden,
     # and until 1.11.0 the Dining Room went to 18 degC that way.
-    effective_boost = (
-        is_boost
-        or (timed_boost_active and room_name in (timed_boost_rooms or set()))
-    )
-    if (effective_boost and room_name in schedules.BOOST_AMOUNTS
-            and not (windows_open or doors_open)
-            and message not in (17, 23, 5)):
+    # Nor on top of Away (8/15) or the mild-weather cut-off (7) (1.14.0): Away plus a
+    # boost gave 16 degC in an empty house.
+    if boost_applies and message not in (17, 23, 5, 7, 8, 15):
         new_temp += schedules.BOOST_AMOUNTS[room_name]
         message   = 12
 
     # Both-out. 25 is exempt so the drying run holds one predictable temperature
-    # whoever happens to be in the house at 5am.
-    if is_both_out and message not in (17, 23, 5, 25):
+    # whoever happens to be in the house at 5am. Away (8/15) is exempt because Away
+    # already is the empty-house setting - taking four more off gave 10 degC, and
+    # 12 instead of 16 in a frost. An open window's setting (1-4, 20, 21) and the
+    # mild-weather cut-off (7) are decisions of their own, and relabelling them 13
+    # also made the next cycle log "window closed" for a window still open.
+    if is_both_out and message not in (17, 23, 5, 25, 7, 8, 15, 1, 2, 3, 4, 20, 21):
         new_temp += BOTH_OUT_OFFSET
         message   = 13
 

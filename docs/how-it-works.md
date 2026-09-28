@@ -26,10 +26,10 @@ For each room, the plugin starts from the room's plan and works down this list. 
 3. **Bedroom limits.** Bedroom 1, Bedroom 2 and the Utility Room go no higher than 16 degrees, or 18 for Bedroom 2 when it has a guest. Bedroom 3, which holds my computers, goes no higher than 14.
 4. **Overheating.** If the room is too warm, its radiator is turned down, and nothing below this in the list changes that, except an open window or door, which takes it lower still. The section below explains it.
 5. **The room's own rule.** The Conservatory is held at 12 degrees while its sliding door is shut, whatever its garden windows are doing. The Dining Room is held at 16 degrees while a garden window or the garden door is open, rather than going down to 8. The En Suite has its [morning schedule and drying run](en-suite.md).
-6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. Otherwise, an open window or door takes the radiator down to 8 degrees. The Dining Room keeps the 16 degrees its own rule gave it. An open En Suite window switches the underfloor heating off whether away mode is on or not.
+6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. An open window or door then takes the radiator down to 8 degrees, whether away mode is on or not. The Dining Room keeps the 16 degrees its own rule gave it. An open En Suite window switches the underfloor heating off whether away mode is on or not.
 7. **Mild weather.** Above 14 degrees outside, the radiator goes down to 8 degrees.
-8. **Boost.** The boost, or the timed boost, adds its two or three degrees, but not to a room with a window or outside door open, which keeps its open-window setting.
-9. **Both out.** Takes four degrees off.
+8. **Boost.** The boost, or the timed boost, adds its two or three degrees, but not to a room with a window or outside door open, which keeps its open-window setting, and not while away mode is on or it is mild outside.
+9. **Both out.** Takes four degrees off, except while away mode is on, when it is mild outside, or for a room with a window or door open.
 
 The answer is rounded to the nearest half degree, which is as fine as Evohome goes, and kept between 8 and 30 degrees.
 

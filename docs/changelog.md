@@ -7,6 +7,17 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.14.0 — 28 September 2026
+
+- **Timed boosts and the 24-hour Force Heating On last the right time across a clock change.** When the clocks went back, a 1-hour boost would have run for 2 hours and a force-on for 25.
+- **Away mode no longer adds up with other modes.** Away with Both out gave 10 degrees (12 instead of 16 in a frost), and Away with Boost gave 16. Both are now ignored while away mode is on.
+- **An open window closes the radiator even while away mode is on.** It used to stay at 14 or 16 degrees.
+- **Both out leaves an open window's setting alone.** It also no longer made the next check report a window as closed while it was still open.
+- **The Boost variable is no longer cancelled by overheat checking.** A room was judged against its normal target, so one warming towards its boosted temperature had its radiator turned down. The Conservatory's extra three degrees could never happen.
+- The Bathroom's guest plan at midnight is 16 degrees, like the rest of the night, instead of 10.
+- "No overheat-alert email configured" is no longer logged as an error. It only means the alerts go by Pushover alone.
+- Old settings from earlier versions that nothing reads are removed once, among them an old weather key stored in plain text.
+
 ## 1.13.0 — 28 September 2026
 
 **If Indigo stops, the house goes back to the Evohome timetable.** Each radiator's temperature is now sent for two hours at a time and renewed about once an hour, instead of being held indefinitely. If Indigo, this plugin or RAMSES ESP stops, each radiator goes back to the timetable on the Evohome controller when its time runs out, rather than staying at whatever it was last told - which could have been 8 degrees in January. Tested on the real controller first.
