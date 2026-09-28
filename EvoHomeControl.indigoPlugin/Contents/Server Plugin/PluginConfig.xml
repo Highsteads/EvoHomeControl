@@ -64,6 +64,18 @@
             <Option value="15">15 minutes</Option>
         </List>
     </Field>
+    <Field id="overrideMinutes" type="menu" defaultValue="120">
+        <Label>If Indigo stops, radiators go back to the Evohome timetable after:</Label>
+        <List>
+            <Option value="60">1 hour</Option>
+            <Option value="120">2 hours (recommended)</Option>
+            <Option value="240">4 hours</Option>
+            <Option value="0">Never - hold the last setting (permanent)</Option>
+        </List>
+    </Field>
+    <Field id="lbl_override" type="label" fontSize="small" alignWithControl="true">
+        <Label>Each setting is sent to Evohome for this long and renewed about once an hour, so if Indigo or the plugin stops the house goes back to the timetable on the Evohome controller. Needs RAMSES ESP 1.12.0 or later. The summer 8 degree hold is always permanent.</Label>
+    </Field>
 
     <Field id="sep_snow" type="separator"/>
     <Field id="lbl_snow" type="label">

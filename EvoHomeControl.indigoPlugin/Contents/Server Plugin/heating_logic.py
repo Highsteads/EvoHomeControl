@@ -5,7 +5,7 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6
 # Date:        30-04-2026
-# Version:     1.4
+# Version:     1.5
 
 import logging
 from datetime import datetime as dt
@@ -204,6 +204,82 @@ EN_SUITE_DRYING_TEMP       = 22.0
 EN_SUITE_DRYING_MAX_OUTDOOR = 12.0
 EN_SUITE_DRYING_START_HOUR = 5
 EN_SUITE_DRYING_END_HOUR   = 10
+
+# ---------------------------------------------------------------------------
+# HOW LONG A SETPOINT HOLDS (timed overrides, 1.13.0)
+# ---------------------------------------------------------------------------
+# A setpoint is sent as a TEMPORARY override that Evohome ends by itself, so if
+# Indigo, this plugin or RAMSES ESP stops, each room goes back to the Evohome
+# timetable instead of holding its last setting indefinitely (CliveS, 28-09-2026).
+# The cycle renews it once less than OVERRIDE_RENEW_MINUTES is left, so each room
+# is sent about once an hour rather than every five minutes. PROVEN LIVE 28-09-2026:
+# RAMSES ESP 1.12.0's mode 04 was honoured by the controller and, when it ran out,
+# the zone went back to its timetable (Bedroom 3: 16 degC at 19:21).
+#
+# The summer 8 degC hold stays PERMANENT: a stopped Indigo in summer must not hand
+# the house back to a timetable that heats. The module default is 0 (permanent),
+# the old behaviour; the plugin sets the length from its settings at startup.
+RAMSES_PLUGIN_ID       = "uk.co.clives.ramses.esp"
+OVERRIDE_RENEW_MINUTES = 60
+_OVERRIDE = {"minutes": 0, "broken": False}
+_OVERRIDE_WARNED = {}
+
+
+def set_override_minutes(minutes):
+    """Set how long each setpoint holds; 0 means permanent. Also clears a fallback
+    left by an earlier failed send, so a fixed RAMSES ESP is tried again."""
+    try:
+        minutes = int(minutes)
+    except (ValueError, TypeError):
+        minutes = 0
+    _OVERRIDE["minutes"] = max(0, minutes)
+    _OVERRIDE["broken"]  = False
+
+
+def _timed_overrides_on(permanent=False):
+    return (not permanent) and _OVERRIDE["minutes"] > 0 and not _OVERRIDE["broken"]
+
+
+def needs_override_refresh(dev, permanent=False, now=None):
+    """True when the zone is not in the kind of override wanted, or a timed one ends
+    within OVERRIDE_RENEW_MINUTES. An end time that cannot be read counts as ending."""
+    mode = dev.states.get("zoneMode", "")
+    if not _timed_overrides_on(permanent):
+        return mode != "permanent override"
+    if mode != "temporary override":
+        return True
+    try:
+        end = dt.strptime(str(dev.states.get("zoneOverrideUntil", ""))[:16], "%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return True
+    return (end - (now or dt.now())).total_seconds() < OVERRIDE_RENEW_MINUTES * 60
+
+
+def send_setpoint(dev, value, permanent=False):
+    """Send a setpoint: timed through RAMSES ESP's Set Temperature for a While action,
+    or permanent through Indigo's own thermostat command. If the timed kind cannot be
+    sent, fall back to permanent, say so once, and stay permanent until the settings
+    are saved again - otherwise every cycle would resend every room."""
+    if _timed_overrides_on(permanent):
+        try:
+            ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
+            if ramses is not None and ramses.isEnabled():
+                ramses.executeAction("setTemporarySetpoint", deviceId=dev.id, props={
+                    "setpoint": f"{float(value):.2f}",
+                    "minutes":  str(_OVERRIDE["minutes"]),
+                })
+                return
+            reason = "the RAMSES ESP plugin is not enabled"
+        except Exception as e:
+            reason = f"RAMSES ESP refused it ({e})"
+        _OVERRIDE["broken"] = True
+        if not _OVERRIDE_WARNED.get(reason):
+            _OVERRIDE_WARNED[reason] = True
+            _log(f"Could not send a timed setpoint - {reason}. Sending permanent ones "
+                 f"instead; timed ones need RAMSES ESP 1.12.0 or later. Save the settings "
+                 f"to try again.", level="WARNING")
+    indigo.thermostat.setHeatSetpoint(dev, value=value)
+
 
 # ---------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -600,15 +676,14 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
 
         new_temp = float(new_temp)
 
-        # Send W 2349 (permanent override) when setpoint changed OR zoneMode drifted
-        # If RAMSES setpoint state is unavailable we still issue the command on
-        # first run to ensure the TRV reflects our calculated target.
+        # Send when the setpoint changed, the zone is not in the override kind we
+        # want, or a timed override is close to running out. If the RAMSES setpoint
+        # state is unavailable we still send, so the TRV reflects our target.
         # (RAMSES_ESP v1.2.8 renamed zone_mode -> zoneMode.)
-        zone_mode     = dev_radiator.states.get("zoneMode", "")
-        not_permanent = (zone_mode != "permanent override")
-        changed       = abs(setpoint_before - new_temp) > TEMP_CHANGE_TOLERANCE
-        if changed or not_permanent or not setpoint_available:
-            indigo.thermostat.setHeatSetpoint(dev_radiator, value=new_temp)
+        refresh = needs_override_refresh(dev_radiator)
+        changed = abs(setpoint_before - new_temp) > TEMP_CHANGE_TOLERANCE
+        if changed or refresh or not setpoint_available:
+            send_setpoint(dev_radiator, new_temp)
 
         # Change detection uses our own cache (not RAMSES device state)
         last_calc      = last_setpoints.get(room_name)

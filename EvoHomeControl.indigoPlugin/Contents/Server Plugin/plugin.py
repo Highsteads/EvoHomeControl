@@ -4,9 +4,14 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        28-09-2026 15:40
-# Version:     1.12.0
+# Date:        28-09-2026 19:50
+# Version:     1.13.0
 #
+# v1.13.0 (28-09-2026): TIMED OVERRIDES - setpoints go through RAMSES ESP's setTemporarySetpoint
+#   (pref overrideMinutes, default 120; 0 = permanent) and are renewed when under 60 min is
+#   left (heating_logic.needs_override_refresh / send_setpoint), so a stopped Indigo lapses
+#   the house to the Evohome timetable. The summer 8 degC hold stays permanent; the drying
+#   target is timed. A refused timed send falls back to permanent, once. (Claude Opus 5.5)
 # v1.12.0 (28-09-2026): before the heating returns - overheat history cleared and saved at
 #   the shut-off and ignored when over an hour old; Ecowitt readings over 30 min old and OWM
 #   over 3 h old not used; a zone RAMSES has not heard for 45 min is skipped; the En Suite
@@ -344,6 +349,7 @@ from heating_logic    import (
     is_within_summer_off,
 )
 import schedules
+import heating_logic
 
 # Short month labels for summer-window status strings (index 1-12)
 _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -353,7 +359,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.12.0"
+PLUGIN_VERSION  = "1.13.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -625,6 +631,7 @@ class Plugin(indigo.PluginBase):
         _log(f"{PLUGIN_NAME} v{PLUGIN_VERSION} starting")
 
         run_interval = self._run_interval_mins()
+        heating_logic.set_override_minutes(self._override_minutes(self.pluginPrefs))
 
         # OWM API key: IndigoSecrets.py wins over PluginConfig
         owm_key = _SECRETS_OWM_KEY or self.pluginPrefs.get("owmApiKey", "")
@@ -715,6 +722,12 @@ class Plugin(indigo.PluginBase):
         """
         return False
 
+    @staticmethod
+    def _override_minutes(prefs):
+        """How long each setpoint holds, in minutes; 0 = permanent. 120 when unset."""
+        minutes = _safe_int(prefs.get("overrideMinutes", 120), 120)
+        return minutes if minutes in (0, 60, 120, 240) else 120
+
     def closedPrefsConfigUi(self, values_dict, user_cancelled):
         if not user_cancelled:
             self.debug = str(values_dict.get("showDebugInfo", "false")).lower() == "true"
@@ -741,6 +754,7 @@ class Plugin(indigo.PluginBase):
                 self.overheat.run_interval_mins        = run_interval
                 self.overheat.critical_duration_cycles = (6 * 60) // run_interval
                 self.overheat.all_clear_cycles         = max(2, 30 // run_interval)
+            heating_logic.set_override_minutes(self._override_minutes(values_dict))
             # Force an immediate cycle so any change (interval, sources, alerts)
             # takes effect now rather than at the next scheduled cycle.
             self.store["last_heating_cycle"] = 0.0
@@ -1284,12 +1298,14 @@ class Plugin(indigo.PluginBase):
                 before = float(setpoint_str) if available else None
             except (ValueError, TypeError):
                 before = None
-            zone_mode     = dev.states.get("zoneMode", "")
-            not_permanent = (zone_mode != "permanent override")
-            changed       = (before is None) or (abs(before - target) > TEMP_CHANGE_TOLERANCE)
-            if changed or not_permanent:
+            # The 8 degC hold is permanent: a stopped Indigo in summer must not hand
+            # the house to a timetable that heats. The drying target is timed, so a
+            # stopped Indigo cannot hold the En Suite warm for the rest of the summer.
+            permanent = not (drying and dev_id == DEV_EN_SUITE_ID)
+            changed   = (before is None) or (abs(before - target) > TEMP_CHANGE_TOLERANCE)
+            if changed or heating_logic.needs_override_refresh(dev, permanent=permanent):
                 try:
-                    indigo.thermostat.setHeatSetpoint(dev, value=target)
+                    heating_logic.send_setpoint(dev, target, permanent=permanent)
                 except Exception as e:
                     _log(f"[Summer] Could not set radiator {dev.name} to "
                          f"{target:.0f}degC: {e}", level="WARNING")

@@ -126,6 +126,18 @@ class TestOverheatStateAcrossTheSummer(unittest.TestCase):
         self._write(self.SPRING, age_secs=113 * 86400)
         self.assertEqual(om.OverheatMonitor(self.path).history, {})
 
+    def test_an_old_empty_file_is_dropped_without_a_word(self):
+        self._write({}, age_secs=40 * 86400)
+        with mock.patch.object(om, "_slog") as slog:
+            self.assertEqual(om.OverheatMonitor(self.path).history, {})
+        slog.assert_not_called()
+
+    def test_an_old_file_with_rooms_in_it_is_mentioned(self):
+        self._write(self.SPRING, age_secs=40 * 86400)
+        with mock.patch.object(om, "_slog") as slog:
+            om.OverheatMonitor(self.path)
+        slog.assert_called_once()
+
     def test_a_file_saved_by_the_last_cycle_is_loaded(self):
         self._write(self.SPRING, age_secs=600)
         self.assertIn("Bedroom 1", om.OverheatMonitor(self.path).history)

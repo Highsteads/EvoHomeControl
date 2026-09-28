@@ -113,10 +113,19 @@ class OverheatMonitor:
             except OSError:
                 age = 0
             if age > max_age_secs:
-                saved = dt.fromtimestamp(time.time() - age)
-                _slog(f"[OverheatMonitor] The saved overheat history is from "
-                      f"{saved.strftime('%d %b %H:%M').lstrip('0')}, too old to use, "
-                      f"so every room starts fresh.")
+                # Said only when there was something to throw away: during the summer
+                # shut-off the file is an empty record saved at the start of it, and a
+                # line on every restart about discarding nothing would be noise.
+                try:
+                    with open(self.history_file, 'r', encoding='utf-8') as f:
+                        had_rooms = bool(json.load(f))
+                except Exception:
+                    had_rooms = True
+                if had_rooms:
+                    saved = dt.fromtimestamp(time.time() - age)
+                    _slog(f"[OverheatMonitor] The saved overheat history is from "
+                          f"{saved.strftime('%d %b %H:%M').lstrip('0')}, too old to use, "
+                          f"so every room starts fresh.")
                 return {}
             try:
                 with open(self.history_file, 'r', encoding='utf-8') as f:

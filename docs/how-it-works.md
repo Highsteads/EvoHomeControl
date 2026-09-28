@@ -11,7 +11,7 @@ You do not need to know all of this to use the plugin. It is here so you can tel
 
 Every five minutes, or every 10 or 15 if you choose, the plugin runs a heating check. It reads the outdoor temperature and the mode variables, works out the right temperature for each of the twelve rooms in turn, and sends any change to that room's radiator through the RAMSES ESP plugin.
 
-It sets each radiator to a fixed target that stays until the plugin changes it — Evohome calls this a **permanent override** — so the timetable in your Evohome controller no longer runs those radiators. If a radiator slips back to its own timetable, the plugin puts it back at the next check.
+It sets each radiator to a target for two hours at a time — Evohome calls this a **temporary override** — and renews it about once an hour, so while the plugin runs, the timetable in your Evohome controller does not run those radiators. If Indigo or the plugin stops, each radiator goes back to that timetable within two hours. You can change the two hours, or choose to hold the last setting indefinitely, in the [settings](settings.md). The summer 8 degree hold is always permanent.
 
 Between heating checks, the plugin looks every 30 seconds at the things that need a quicker answer: a boost or a 24-hour override running out, the En Suite's 6am start and 10am finish, and the En Suite window during a drying run.
 

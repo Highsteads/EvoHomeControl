@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.12.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.13.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.13.0** — If Indigo stops, the house goes back to the Evohome timetable: each radiator's temperature is sent for two hours at a time and renewed about hourly, instead of being held indefinitely. The summer hold stays permanent. Needs RAMSES ESP 1.12.0.
 
 **v1.12.0** — Fixes made before the heating came back on. Last spring's overheating record is cleared rather than reloaded, a stopped Ecowitt station or a quiet radiator zone is noticed instead of trusted, and the En Suite underfloor heating is no longer left on by away mode, an open window or the plugin being stopped at 10am.
 

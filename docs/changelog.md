@@ -7,6 +7,15 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.13.0 — 28 September 2026
+
+**If Indigo stops, the house goes back to the Evohome timetable.** Each radiator's temperature is now sent for two hours at a time and renewed about once an hour, instead of being held indefinitely. If Indigo, this plugin or RAMSES ESP stops, each radiator goes back to the timetable on the Evohome controller when its time runs out, rather than staying at whatever it was last told - which could have been 8 degrees in January. Tested on the real controller first.
+
+- A new setting chooses how long: 1, 2 (to start with) or 4 hours, or never.
+- The summer 8 degree hold is still permanent, so a stopped Indigo in summer cannot switch the heating back on. The En Suite drying run is timed, so it cannot outlast Indigo either.
+- Needs RAMSES ESP 1.12.0 or later. With an older one the plugin sends permanent settings as before and says so once.
+- A restart during the summer shut-off no longer logs that an empty overheating record was too old to use.
+
 ## 1.12.0 — 28 September 2026
 
 Four fixes made before the heating came back on after the summer.
