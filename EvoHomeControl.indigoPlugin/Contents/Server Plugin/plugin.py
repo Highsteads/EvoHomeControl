@@ -5,8 +5,16 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
 # Date:        29-09-2026 13:00
-# Version:     1.15.0
+# Version:     1.16.0
 #
+# v1.16.0 (29-09-2026): A ROOM CHANGED BY HAND IS LEFT ALONE, and the summer hold ends by itself.
+#   RAMSES ESP 1.15.0 tags each zone setpointSource indigo/timetable/manual; a "manual" room not
+#   on its timetable is skipped (heating_logic.check_manual_hold) until its plan next changes,
+#   at the latest midnight, or for as long as it stays on a permanent setting - in the heating
+#   check and in the summer hold. One INFO line when a hold starts, one when it ends. The summer
+#   8 degC hold is now a timed override ending at midnight on the heating-back-on date
+#   (_summer_hold_until), so a stopped Indigo cannot leave the house cold into the winter;
+#   with RAMSES ESP older than 1.15.0 it stays permanent as before. (Claude Opus 5.5)
 # v1.15.0 (29-09-2026): daily 04:00 check that the Evohome controller's timetable (RAMSES ESP 1.13.0
 #   timetableData) matches the plans (timetable_check.py, 10-minute slots, wrap from the day
 #   before); WARNING per differing room, one Pushover per change of the differing set (keyed,
@@ -395,7 +403,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.15.0"
+PLUGIN_VERSION  = "1.16.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1311,6 +1319,21 @@ class Plugin(indigo.PluginBase):
             return False
         return self._summer_window_active()
 
+    def _summer_hold_until(self, today=None):
+        """Midnight at the start of the day heating is due back, as "YYYY-MM-DD HH:MM":
+        the end of every summer hold, so the house goes back to its timetable then even
+        if Indigo is not running."""
+        _, _, on_m, on_d = self._summer_window()
+        today = today or datetime.now().date()
+        for year in (today.year, today.year + 1):
+            try:
+                day = datetime(year, on_m, on_d)
+            except ValueError:
+                continue
+            if day.date() > today:
+                return day.strftime("%Y-%m-%d %H:%M")
+        return (datetime.combine(today, datetime.min.time()) + timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+
     def _summer_on_date_str(self):
         _, _, on_m, on_d = self._summer_window()
         abbr = _MONTH_ABBR[on_m] if 1 <= on_m <= 12 else str(on_m)
@@ -1392,11 +1415,19 @@ class Plugin(indigo.PluginBase):
         method would push 8 degC back over the run every five minutes, which is
         exactly why the run could not have been a Python Script."""
         drying = self.store.get("en_suite_drying_active", False)
+        try:
+            plans = {dev_id: (room, hours) for dev_id, room, hours in _room_plans()}
+        except (AttributeError, NameError):
+            plans = {}   # no plan to hand: a hold made by hand then lasts until midnight
+        hold_end = self._summer_hold_until()
         for dev_id in ALL_RADIATOR_IDS:
             try:
                 dev = indigo.devices[dev_id]
             except Exception as e:
                 _log(f"[Summer] Radiator {dev_id} not found: {e}", level="WARNING")
+                continue
+            room, hours = plans.get(dev_id, (dev.name, [0] * 24))
+            if heating_logic.check_manual_hold(room, dev, hours):
                 continue
             target = RADIATORS_OFF_TEMP
             if drying and dev_id == DEV_EN_SUITE_ID:
@@ -1407,14 +1438,15 @@ class Plugin(indigo.PluginBase):
                 before = float(setpoint_str) if available else None
             except (ValueError, TypeError):
                 before = None
-            # The 8 degC hold is permanent: a stopped Indigo in summer must not hand
-            # the house to a timetable that heats. The drying target is timed, so a
-            # stopped Indigo cannot hold the En Suite warm for the rest of the summer.
-            permanent = not (drying and dev_id == DEV_EN_SUITE_ID)
+            # The 8 degC hold ends by itself on the day heating is due back (1.16.0),
+            # so a stopped Indigo can neither heat the house in summer nor leave it
+            # cold into the winter. The drying target is a normal two-hour setting.
+            is_drying = drying and dev_id == DEV_EN_SUITE_ID
+            until     = None if is_drying else hold_end
             changed   = (before is None) or (abs(before - target) > TEMP_CHANGE_TOLERANCE)
-            if changed or heating_logic.needs_override_refresh(dev, permanent=permanent):
+            if changed or heating_logic.needs_override_refresh(dev, until=until):
                 try:
-                    heating_logic.send_setpoint(dev, target, permanent=permanent)
+                    heating_logic.send_setpoint(dev, target, until=until)
                 except Exception as e:
                     _log(f"[Summer] Could not set radiator {dev.name} to "
                          f"{target:.0f}degC: {e}", level="WARNING")

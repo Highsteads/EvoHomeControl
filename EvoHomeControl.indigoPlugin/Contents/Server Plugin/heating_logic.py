@@ -5,10 +5,10 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6
 # Date:        30-04-2026
-# Version:     1.6
+# Version:     1.7
 
 import logging
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 
 import indigo  # noqa — available in plugin context
 
@@ -240,10 +240,32 @@ def _timed_overrides_on(permanent=False):
     return (not permanent) and _OVERRIDE["minutes"] > 0 and not _OVERRIDE["broken"]
 
 
-def needs_override_refresh(dev, permanent=False, now=None):
+# RAMSES ESP versions that accept an explicit end time ("until") on its timed action.
+RAMSES_UNTIL_VERSION = (1, 15, 0)
+
+
+def _ramses_takes_until():
+    """True when the installed RAMSES ESP accepts an end time. An older one would ignore
+    it and send its two-hour default, which the next cycle would see as wrong and send
+    again - every five minutes, for every room."""
+    try:
+        ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
+        version = tuple(int(p) for p in str(ramses.pluginVersion).split(".")[:3])
+        return version >= RAMSES_UNTIL_VERSION
+    except Exception:
+        return False
+
+
+def needs_override_refresh(dev, permanent=False, now=None, until=None):
     """True when the zone is not in the kind of override wanted, or a timed one ends
-    within OVERRIDE_RENEW_MINUTES. An end time that cannot be read counts as ending."""
+    within OVERRIDE_RENEW_MINUTES. An end time that cannot be read counts as ending.
+    With `until` ("YYYY-MM-DD HH:MM") the zone should hold exactly that end time."""
     mode = dev.states.get("zoneMode", "")
+    if until is not None and _timed_overrides_on() and _ramses_takes_until():
+        return not (mode == "temporary override"
+                    and str(dev.states.get("zoneOverrideUntil", ""))[:16] == until)
+    if until is not None:
+        permanent = True
     if not _timed_overrides_on(permanent):
         return mode != "permanent override"
     if mode != "temporary override":
@@ -255,11 +277,27 @@ def needs_override_refresh(dev, permanent=False, now=None):
     return (end - (now or dt.now())).total_seconds() < OVERRIDE_RENEW_MINUTES * 60
 
 
-def send_setpoint(dev, value, permanent=False):
+def send_setpoint(dev, value, permanent=False, until=None):
     """Send a setpoint: timed through RAMSES ESP's Set Temperature for a While action,
     or permanent through Indigo's own thermostat command. If the timed kind cannot be
     sent, fall back to permanent, say so once, and stay permanent until the settings
-    are saved again - otherwise every cycle would resend every room."""
+    are saved again - otherwise every cycle would resend every room.
+
+    With `until` ("YYYY-MM-DD HH:MM") the setting ends at that time instead (1.16.0:
+    the summer hold ends on the day heating is due back, so a stopped Indigo cannot
+    keep the house cold into the winter). Needs RAMSES ESP 1.15.0; permanent before."""
+    if until is not None:
+        if _timed_overrides_on() and _ramses_takes_until():
+            try:
+                indigo.server.getPlugin(RAMSES_PLUGIN_ID).executeAction(
+                    "setTemporarySetpoint", deviceId=dev.id,
+                    props={"setpoint": f"{float(value):.2f}", "until": until})
+                return
+            except Exception as e:
+                _log(f"Could not send a setting ending {until} to {dev.name}: {e}. "
+                     f"Sending a permanent one instead.", level="WARNING")
+        indigo.thermostat.setHeatSetpoint(dev, value=value)
+        return
     if _timed_overrides_on(permanent):
         try:
             ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
@@ -279,6 +317,79 @@ def send_setpoint(dev, value, permanent=False):
                  f"instead; timed ones need RAMSES ESP 1.12.0 or later. Save the settings "
                  f"to try again.", level="WARNING")
     indigo.thermostat.setHeatSetpoint(dev, value=value)
+
+
+# ---------------------------------------------------------------------------
+# CHANGES MADE BY HAND (1.16.0)
+# ---------------------------------------------------------------------------
+# RAMSES ESP 1.15.0 marks each zone with who last changed it: "indigo", "timetable" or
+# "manual" (the Evohome controller's screen, a valve's wheel or the app). A room changed
+# by hand is left alone until its plan next changes (at the latest midnight), or for as
+# long as it stays on a permanent setting. So anyone can run the heating the ordinary
+# Evohome way while Indigo is still running, without Indigo undoing it minutes later.
+_MANUAL_ANNOUNCED = {}
+
+
+def manual_hold_until(dev, hours, now=None):
+    """None when the room is not held; otherwise when the hold ends (a datetime), or
+    the string "permanent" while it stays on a permanent setting made by hand."""
+    states = dev.states
+    if states.get("setpointSource") != "manual":
+        return None
+    mode = states.get("zoneMode", "")
+    if mode == "schedule":
+        return None
+    try:
+        changed = dt.strptime(str(states.get("setpointChangedAt", ""))[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    if mode == "permanent override":
+        return "permanent"
+    hour_start = changed.replace(minute=0, second=0, microsecond=0)
+    end = None
+    for step in range(1, 25):
+        candidate = hour_start + timedelta(hours=step)
+        if candidate.hour == 0 or hours[candidate.hour] != hours[(candidate.hour - 1) % 24]:
+            end = candidate
+            break
+    if end is None or (now or dt.now()) >= end:
+        return None
+    return end
+
+
+def check_manual_hold(room, dev, hours, now=None, log_buffer=None):
+    """True when the room should be left alone because it was changed by hand. Says so
+    once when a hold starts and once when the room comes back under the plugin."""
+    held = manual_hold_until(dev, hours, now)
+    key = str(dev.states.get("setpointChangedAt", ""))
+    if held is None:
+        if room in _MANUAL_ANNOUNCED:
+            del _MANUAL_ANNOUNCED[room]
+            _log(f"{room} is back under the heating plugin's control.", log_buffer=log_buffer)
+        return False
+    if _MANUAL_ANNOUNCED.get(room) != key:
+        _MANUAL_ANNOUNCED[room] = key
+        try:
+            value = f"{float(dev.states.get('setpointHeat')):g} degrees"
+        except (TypeError, ValueError):
+            value = "a new temperature"
+        if held == "permanent":
+            how = "while it stays on that permanent setting"
+        else:
+            how = f"until {_clock_words(held)}"
+        _log(f"{room} was set to {value} by hand, so the heating plugin leaves it alone {how}.",
+             log_buffer=log_buffer)
+    return True
+
+
+def _clock_words(when):
+    h, m = when.hour, when.minute
+    if (h, m) == (0, 0):
+        return "midnight"
+    if (h, m) == (12, 0):
+        return "noon"
+    suffix = "am" if h < 12 else "pm"
+    return f"{h % 12 or 12}{suffix}" if m == 0 else f"{h % 12 or 12}:{m:02d}{suffix}"
 
 
 # ---------------------------------------------------------------------------
@@ -912,6 +1023,11 @@ def process_room_temperature(
 
         setpoint_str = dev_radiator.states.get("setpointHeat", "0")
         dev_setpoint = 0.0 if setpoint_str in (None, "null", "None", "", "unavailable", "unknown") else float(setpoint_str)
+
+        # Changed by hand on the controller, a valve or the app: leave it alone.
+        plan_hours = guest_schedule if (is_guest and guest_schedule) else room_schedule
+        if check_manual_hold(room_name, dev_radiator, plan_hours, log_buffer=log_buffer):
+            return
 
         # An old reading is as bad as a missing one: skip the zone and leave the
         # valve where it is. Warn once when the zone goes quiet, once when it returns.

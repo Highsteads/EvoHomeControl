@@ -11,7 +11,11 @@ You do not need to know all of this to use the plugin. It is here so you can tel
 
 Every five minutes, or every 10 or 15 if you choose, the plugin runs a heating check. It reads the outdoor temperature and the mode variables, works out the right temperature for each of the twelve rooms in turn, and sends any change to that room's radiator through the RAMSES ESP plugin.
 
-It sets each radiator to a target for two hours at a time — Evohome calls this a **temporary override** — and renews it about once an hour, so while the plugin runs, the timetable in your Evohome controller does not run those radiators. If Indigo or the plugin stops, each radiator goes back to that timetable within two hours. You can change the two hours, or choose to hold the last setting indefinitely, in the [settings](settings.md). The summer 8 degree hold is always permanent.
+It sets each radiator to a target for two hours at a time — Evohome calls this a **temporary override** — and renews it about once an hour, so while the plugin runs, the timetable in your Evohome controller does not run those radiators. If Indigo or the plugin stops, each radiator goes back to that timetable within two hours. You can change the two hours, or choose to hold the last setting indefinitely, in the [settings](settings.md). The summer 8 degree hold runs until the day heating returns, so it ends by itself even if Indigo has stopped.
+
+## Changing a room by hand
+
+You can still change a room the ordinary Evohome way, at the controller, on a radiator valve's wheel or in the app, and the plugin will not undo it. RAMSES ESP tells the plugin who made each change, and a room changed by hand is left alone until its plan next changes, or midnight if that is sooner. After that the plugin sets it as usual. A room set permanently by hand is left alone until somebody puts it back on its timetable, for example by pressing **Auto** on the controller. The Event Log says when a room is being left alone and when it comes back.
 
 Because that timetable is the fallback, the plugin checks it every morning at 4am against its own plans, room by room, using the copy RAMSES ESP reads from the controller each night. If a room differs, the Event Log says where and you get one Pushover message.
 

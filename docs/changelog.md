@@ -7,6 +7,12 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.16.0 — 29 September 2026
+
+- **A room changed by hand is left alone.** Change a room's temperature at the Evohome controller, on a valve's wheel or in the app, and the plugin no longer puts it back at its next check. It leaves the room until the room's plan next changes, or midnight if that comes first, and then carries on as normal. A room set permanently by hand is left alone for as long as it stays that way; pressing **Auto** on the controller, which puts the room back on its timetable, hands it back to the plugin. The Event Log says when a room is being left alone, such as *Bedroom 3 was set to 21 degrees by hand, so the heating plugin leaves it alone until 10pm*, and again when it comes back. This works during the summer shut-off too.
+- **The summer hold ends by itself.** The 8 degree hold is now sent to run until midnight at the start of the day heating returns, instead of for ever. If Indigo is not running when that day comes, the house goes back to its Evohome timetable on time instead of staying cold into the winter. Tested on a real controller, which took an end date eight months away.
+- Both need RAMSES ESP 1.15.0. With an older RAMSES ESP the summer hold stays permanent, as before, and hand changes are put back as before.
+
 ## 1.15.0 — 29 September 2026
 
 - **Every morning at 4am the plugin checks the timetable stored on the Evohome controller against its own plans.** That timetable is what each room goes back to if Indigo stops. If a room differs, the Event Log says where, such as *Dining Room: at 6am on Monday the controller has 16 degrees where the plan has 18*, and you get one Pushover message whenever the list of rooms that differ changes. Nothing is logged when everything matches.

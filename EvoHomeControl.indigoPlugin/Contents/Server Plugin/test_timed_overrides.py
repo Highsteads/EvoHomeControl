@@ -79,8 +79,9 @@ class FakeZone:
 
 
 class FakeRamses:
-    def __init__(self, enabled=True, raises=None):
+    def __init__(self, enabled=True, raises=None, version="1.14.0"):
         self.enabled, self.raises, self.calls = enabled, raises, []
+        self.pluginVersion = version
 
     def isEnabled(self):
         return self.enabled
@@ -221,7 +222,9 @@ class TestSummerHold(_Base):
         floor = types.SimpleNamespace(onState=False)
         _indigo.devices[hl.DEV_EN_SUITE_FLOOR_HEAT_ID] = floor
 
-    def test_the_summer_hold_is_permanent_eight_degrees(self):
+    def test_with_an_older_ramses_the_summer_hold_stays_permanent(self):
+        # RAMSES ESP before 1.15.0 cannot take an end date, so 1.16.0 falls back to the
+        # permanent hold rather than sending two-hour ones every cycle.
         self._all_zones(setpoint="20.0", mode="temporary override")
         self._plugin()._apply_summer_off()
         self.assertEqual(len(self.permanent), len(hl.ALL_RADIATOR_IDS))
