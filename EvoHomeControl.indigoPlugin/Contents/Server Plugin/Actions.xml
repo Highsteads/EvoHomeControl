@@ -40,6 +40,11 @@
     </Action>
 
     <!-- Force an immediate heating cycle (useful for testing) -->
+    <Action id="checkTimetable" uiPath="DeviceActions">
+        <Name>Check Evohome Timetable Against the Plans</Name>
+        <CallbackMethod>actionCheckTimetable</CallbackMethod>
+    </Action>
+
     <Action id="runCycleNow" uiPath="DeviceActions">
         <Name>Run Heating Cycle Now</Name>
         <CallbackMethod>actionRunCycleNow</CallbackMethod>

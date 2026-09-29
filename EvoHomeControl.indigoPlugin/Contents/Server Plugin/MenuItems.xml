@@ -67,6 +67,10 @@
         <CallbackMethod>menuForceFullLog</CallbackMethod>
     </MenuItem>
 
+    <MenuItem id="menuCheckTimetable">
+        <Name>Check Evohome Timetable Against the Plans</Name>
+        <CallbackMethod>menuCheckTimetable</CallbackMethod>
+    </MenuItem>
     <MenuItem id="menuShowOverheatStatus">
         <Name>Show Overheat Monitor Status</Name>
         <CallbackMethod>menuShowOverheatStatus</CallbackMethod>

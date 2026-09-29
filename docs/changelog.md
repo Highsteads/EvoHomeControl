@@ -7,6 +7,12 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.15.0 — 29 September 2026
+
+- **Every morning at 4am the plugin checks the timetable stored on the Evohome controller against its own plans.** That timetable is what each room goes back to if Indigo stops. If a room differs, the Event Log says where, such as *Dining Room: at 6am on Monday the controller has 16 degrees where the plan has 18*, and you get one Pushover message whenever the list of rooms that differ changes. Nothing is logged when everything matches.
+- It uses the timetable RAMSES ESP 1.13.0 reads from the controller each night, and says so when a reading is more than 30 hours old.
+- New action and menu item: **Check Evohome Timetable Against the Plans**.
+
 ## 1.14.0 — 28 September 2026
 
 - **Timed boosts and the 24-hour Force Heating On last the right time across a clock change.** When the clocks went back, a 1-hour boost would have run for 2 hours and a force-on for 25.

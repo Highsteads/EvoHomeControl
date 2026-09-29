@@ -34,6 +34,14 @@ Your Ecowitt outdoor sensor has stopped updating, so the plugin is using OpenWea
 
 The RAMSES ESP plugin has had no news of that room for more than 45 minutes, so its temperature may be out of date and the plugin leaves its radiator where it is. When every room says so at once, the RAMSES ESP gateway has stopped: check that plugin and its gateway. When one room says so, check that radiator's valve and its batteries. The plugin says once in the Event Log when the room is reporting again.
 
+## The log says a room's controller timetable does not match its plan
+
+Every morning at 4am the plugin compares the timetable stored on the Evohome controller with its own plan for each room. That timetable is what a room goes back to if Indigo stops, so the two should agree. The line says the first time of day where they differ, such as *Dining Room: at 6am on Monday the controller has 16 degrees where the plan has 18.* Somebody may have changed the timetable on the controller or in the Evohome app. Write the plans to the controller again, or change the plan to match. You also get one Pushover message when the list of rooms that differ changes.
+
+## The log says RAMSES ESP has not read the Evohome timetable
+
+The rooms named have no timetable reading from the last 30 hours, so they could not be checked. RAMSES ESP reads them at 3:15am. Check that RAMSES ESP is running and its gateway is online, or use its **Read Evohome Timetables Now** menu item.
+
 ## Every radiator is at 8 degrees
 
 Check whether the summer shut-off is on — choose **Plugins → EvoHome Heating Controller → Show Summer Shut-off Status**. If it is and you want heat, choose **Force Heating On (24 hours)**, or change the dates in the settings.

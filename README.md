@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.14.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.15.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.15.0** — Every morning the plugin checks the timetable on the Evohome controller against its own plans, and tells you if a room differs. Needs RAMSES ESP 1.13.0.
 
 **v1.14.0** — Timed boosts and Force Heating On last the right time across a clock change. Away mode no longer adds up with Boost or Both out, and an open window closes the radiator while away. The Boost variable is no longer cancelled by overheat checking. Also a guest-plan fix, and old settings removed.
 

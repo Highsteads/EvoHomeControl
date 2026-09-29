@@ -4,9 +4,13 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        28-09-2026 20:20
-# Version:     1.14.0
+# Date:        29-09-2026 13:00
+# Version:     1.15.0
 #
+# v1.15.0 (29-09-2026): daily 04:00 check that the Evohome controller's timetable (RAMSES ESP 1.13.0
+#   timetableData) matches the plans (timetable_check.py, 10-minute slots, wrap from the day
+#   before); WARNING per differing room, one Pushover per change of the differing set (keyed,
+#   persisted), stale readings > 30 h reported; action/menu checkTimetable. (Claude Opus 5.5)
 # v1.14.0 (28-09-2026): boost/force-on expiries are offset-aware (_now_aware/_as_aware/
 #   _local_clock) so 25-Oct does not stretch them an hour; Away no longer stacks with Boost or
 #   Both Out and no longer beats an open window (windows is an `if`, not an `elif` of Away);
@@ -356,6 +360,32 @@ from heating_logic    import (
 )
 import schedules
 import heating_logic
+import timetable_check
+
+# Each radiator and the plan it should carry. The same pairs as _process_all_rooms; the
+# timetable check (1.15.0) compares the Evohome controller's own timetable against these.
+# Built when asked, not at import, so the plans are read from schedules as it stands.
+def _room_plans():
+    return (
+        (DEV_BATHROOM_ID,          "Bathroom",          schedules.Bathroom),
+        (DEV_BEDROOM_1_ID,         "Bedroom 1",         schedules.Bedroom_1),
+        (DEV_BEDROOM_2_ID,         "Bedroom 2",         schedules.Bedroom_2),
+        (DEV_BEDROOM_3_ID,         "Bedroom 3",         schedules.Bedroom_3),
+        (DEV_EN_SUITE_ID,          "En Suite",          schedules.En_Suite),
+        (DEV_CONSERVATORY_ID,      "Conservatory",      schedules.Conservatory),
+        (DEV_DINING_ROOM_ID,       "Dining Room",       schedules.Dining_Room),
+        (DEV_HALL_BEDROOM_ID,      "Hall Bedroom",      schedules.Hall_Bedroom),
+        (DEV_HALL_KITCHEN_ID,      "Hall Kitchen",      schedules.Hall_Kitchen),
+        (DEV_LIVING_ROOM_FRONT_ID, "Living Room Front", schedules.Living_Room_Front),
+        (DEV_LIVING_ROOM_DOOR_ID,  "Living Room Door",  schedules.Living_Room_Door),
+        (DEV_UTILITY_ROOM_ID,      "Utility Room",      schedules.Utility_Room),
+    )
+
+
+# RAMSES ESP reads the controller's timetables at 03:15; the check runs after that.
+TIMETABLE_CHECK_MINUTE = 4 * 60
+# A reading older than this means RAMSES ESP has stopped reading them.
+TIMETABLE_STALE_HOURS  = 30
 
 # Short month labels for summer-window status strings (index 1-12)
 _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -365,7 +395,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.14.0"
+PLUGIN_VERSION  = "1.15.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -865,6 +895,12 @@ class Plugin(indigo.PluginBase):
         # En Suite drying run — every tick, so an opened window ends it within 30 s
         # rather than at the next 5-minute cycle.
         self._check_en_suite_drying()
+
+        # Daily check that the Evohome controller's own timetable still matches the plans
+        try:
+            self._maybe_check_timetable(datetime.now())
+        except Exception as e:
+            _log(f"[Timetable] Check failed: {e}", level="WARNING")
 
         # Timed boost expiry check (every tick)
         self._check_timed_boost_expiry()
@@ -2569,6 +2605,7 @@ class Plugin(indigo.PluginBase):
             self._restore_en_suite_morning(st.get("en_suite_morning_active"))
 
             self.store["en_suite_morning_cancelled_date"] = st.get("en_suite_morning_cancelled_date")
+            self.store["timetable_alert_key"] = st.get("timetable_alert_key", "") or ""
 
             # Restore the drying run only if it is still legitimately live. A run
             # restored outside its hours would hold the radiator warm with nothing
@@ -2616,6 +2653,7 @@ class Plugin(indigo.PluginBase):
             "summer_force_expiry":          force_exp.isoformat() if force_exp else None,
             "en_suite_morning_active":      self.store["en_suite_morning_active"],
             "en_suite_morning_cancelled_date": self.store.get("en_suite_morning_cancelled_date"),
+            "timetable_alert_key":          self.store.get("timetable_alert_key", ""),
             "en_suite_drying_active":          self.store.get("en_suite_drying_active", False),
             "en_suite_drying_cancelled_date":  self.store.get("en_suite_drying_cancelled_date"),
             "en_suite_drying_started":         self.store.get("en_suite_drying_started"),
@@ -2703,6 +2741,99 @@ class Plugin(indigo.PluginBase):
     def actionShowSummerStatus(self, action):
         """Action: Log the whole-house summer shut-off status (dashboard-invocable)."""
         self._log_summer_status()
+
+    # -----------------------------------------------------------------------
+    # Evohome controller timetable check (1.15.0)
+    # -----------------------------------------------------------------------
+
+    def _maybe_check_timetable(self, now):
+        """Once a day after 04:00, after RAMSES ESP has read the timetables at 03:15."""
+        today = now.strftime("%Y-%m-%d")
+        if self.store.get("timetable_check_date") == today:
+            return
+        if now.hour * 60 + now.minute < TIMETABLE_CHECK_MINUTE:
+            return
+        self.store["timetable_check_date"] = today
+        self._check_timetable(now, manual=False)
+
+    def _check_timetable(self, now, manual=False):
+        """Compare each room's timetable on the Evohome controller with its plan.
+
+        That timetable is what a room falls back to within two hours if Indigo stops, so a
+        difference is worth knowing about. Silent when everything matches (DEBUG), one
+        WARNING per room that differs, and one Pushover when the set of differing rooms
+        changes - keyed on the rooms and the differences, never on the message text."""
+        plans = _room_plans()
+        missing, stale, differ = [], [], []
+        for dev_id, room, hours in plans:
+            try:
+                dev = indigo.devices[dev_id]
+            except Exception:
+                missing.append(room)
+                continue
+            if "timetableData" not in dev.states:
+                missing.append(room)
+                continue
+            read_at = str(dev.states.get("timetableRead", "") or "")
+            week = timetable_check.parse(dev.states.get("timetableData", ""))
+            try:
+                age_h = (now - datetime.strptime(read_at[:16], "%Y-%m-%d %H:%M")).total_seconds() / 3600
+            except ValueError:
+                age_h = None
+            if week is None or age_h is None or age_h > TIMETABLE_STALE_HOURS:
+                stale.append(room)
+                continue
+            diff = timetable_check.first_difference(hours, week)
+            if diff is not None:
+                differ.append((room, diff))
+
+        if len(missing) == len(plans):
+            if manual:
+                _log("[Timetable] The radiators carry no timetable yet. This needs RAMSES ESP "
+                     "1.13.0 or later, which reads the Evohome controller's timetable each night.")
+            return
+        for room, diff in differ:
+            _log(f"[Timetable] {timetable_check.describe_difference(room, diff)} If Indigo "
+                 f"stopped, this room would fall back to the controller's version.",
+                 level="WARNING")
+        if stale:
+            _log(f"[Timetable] RAMSES ESP has not read the Evohome timetable in the last "
+                 f"{TIMETABLE_STALE_HOURS} hours for {timetable_check.join_names(stale)}, so "
+                 f"they could not be checked.", level="WARNING")
+        checked = len(plans) - len(missing) - len(stale)
+        if not differ:
+            line = (f"[Timetable] The Evohome controller's timetable matches the plan in all "
+                    f"{checked} rooms checked.")
+            if manual:
+                _log(line)
+            else:
+                self.logger.debug(line)
+
+        key = "|".join(f"{room}:{d[0]}:{d[1]}:{d[2]}:{d[3]}" for room, d in differ)
+        if key != self.store.get("timetable_alert_key", ""):
+            self.store["timetable_alert_key"] = key
+            self._save_state()
+            if differ:
+                self._send_timetable_alert(differ)
+
+    def _send_timetable_alert(self, differ):
+        rooms = [room for room, _d in differ]
+        title = (f"Evohome timetable differs in the {rooms[0]}" if len(rooms) == 1
+                 else f"Evohome timetable differs in {len(rooms)} rooms")
+        body = (f"The timetable stored on the Evohome controller no longer matches the plan "
+                f"for the {timetable_check.join_names(rooms)}. That timetable is what the "
+                f"house falls back to if Indigo stops. "
+                + " ".join(timetable_check.describe_difference(room, d) for room, d in differ)
+                + " Write the plans to the controller again, or change the plan to match.")
+        if self.overheat:
+            self.overheat._send_pushover(title, body[:1024], priority=0)
+
+    def actionCheckTimetable(self, action):
+        self._check_timetable(datetime.now(), manual=True)
+
+    def menuCheckTimetable(self, values_dict=None, type_id=None):
+        self._check_timetable(datetime.now(), manual=True)
+        return True
 
     def actionRunCycleNow(self, action):
         """Action: Force an immediate heating cycle."""

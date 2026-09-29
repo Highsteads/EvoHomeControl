@@ -21,6 +21,7 @@ These are under **Plugins → EvoHome Heating Controller**, in this order.
 | **Run Heating Cycle Now** | Runs a heating check within 30 seconds rather than waiting for the next one. |
 | **Show Heating Status** | Writes to the Event Log which modes are on — away, both out, boost, timed boost and the En Suite morning — the summer shut-off, and each room that is overheating with its temperature and target. |
 | **Show Full Weather Log** | Writes the full weather report to the Event Log now: the outdoor temperature and where it came from, OpenWeatherMap's conditions, wind and sunrise, any snow forecast, the weather adjustment, the outdoor temperature records, and which modes are on. |
+| **Check Evohome Timetable Against the Plans** | Compares the timetable stored on the Evohome controller with this plugin's plans for every room, and writes the result to the Event Log. The plugin also does this every morning at 4am. Needs RAMSES ESP 1.13.0 or later. |
 | **Show Overheat Monitor Status** | Lists each room that is above its target, for how long, whether the warmth is from the radiator or the sun, and whether an alert was sent. |
 | **Show Timed Boost Status** | Says whether a timed boost is running, and if so when it ends and which rooms it covers. |
 | **Toggle Debug Logging** | Turns on or off the extra line the plugin writes to the Event Log at the end of every heating check. It is the same as the **Enable debug logging** setting. |

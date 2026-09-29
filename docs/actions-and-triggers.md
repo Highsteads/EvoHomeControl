@@ -17,6 +17,7 @@ These can go in an action group, a schedule, a trigger or a control page button.
 | **Force Heating On (24 hours)** | Brings back normal heating for 24 hours during the summer shut-off. |
 | **Cancel Forced Heating** | Ends the 24 hours early and puts the summer shut-off back. |
 | **Show Summer Shut-off Status** | Writes the state of the summer shut-off to the Event Log. |
+| **Check Evohome Timetable Against the Plans** | Compares the timetable stored on the Evohome controller with the plans and writes the result to the Event Log. |
 | **Run Heating Cycle Now** | Runs a heating check within 30 seconds rather than waiting for the next one. |
 | **Set Away Mode** | Sets the Away variable. Choose **Active (14°C all rooms)** or **Inactive (resume schedule)**. It runs a heating check straight away. |
 | **Start En Suite Drying Run (30 minute test)** | Starts a half-hour drying run now, whatever the time. |
