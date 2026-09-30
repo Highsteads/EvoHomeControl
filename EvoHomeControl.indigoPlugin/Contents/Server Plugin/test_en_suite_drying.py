@@ -875,6 +875,51 @@ class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
         self._run_at_0600(p)
         self.assertEqual(self.started, [], "a bad pref must not disable the gate")
 
+    # -- a mild morning says why, once ------------------------------------------
+    def test_a_mild_morning_is_announced_once_a_day_not_every_tick(self):
+        p = self._plugin(outdoor=17.1)
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run_at_0600(p)
+            self._run_at_0600(p)
+            self._run_at_0600(p)
+        lines = [c for c in log.call_args_list if "No drying run so far today" in c.args[0]]
+        self.assertEqual(len(lines), 1, "once a day, not once a tick")
+        self.assertIn("it is 17.1degC outside and a run only starts below 12degC", lines[0].args[0])
+        self.assertIn("before 10:00", lines[0].args[0])
+        self.assertNotIn("level", lines[0].kwargs, "a skip by design is not a warning")
+        self.assertEqual(self.started, [])
+
+    def test_a_new_mild_day_gets_its_own_line(self):
+        p = self._plugin(outdoor=17.1, store={"en_suite_drying_warm_date": "2026-07-03"})
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run_at_0600(p)
+        self.assertEqual(
+            len([c for c in log.call_args_list if "No drying run so far today" in c.args[0]]), 1)
+
+    def test_a_cold_morning_says_nothing_about_warmth(self):
+        p = self._plugin(outdoor=8.4)
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run_at_0600(p)
+        self.assertEqual(
+            [c for c in log.call_args_list if "No drying run so far today" in c.args[0]], [])
+
+    def test_both_once_a_day_notices_survive_a_restart(self):
+        """A latch kept only in memory repeats its line after every restart."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            first = _bare_plugin(store={
+                "timed_boost_active": False, "en_suite_morning_active": False,
+                "en_suite_drying_warm_date": "2026-07-04",
+                "en_suite_drying_no_outdoor_date": "2026-07-03"})
+            first.data_dir = tmp
+            first._save_state()
+            second = _bare_plugin(store={})
+            second.data_dir = tmp
+            second._summer_lockout_active = lambda: True
+            second._load_state()
+        self.assertEqual(second.store.get("en_suite_drying_warm_date"), "2026-07-04")
+        self.assertEqual(second.store.get("en_suite_drying_no_outdoor_date"), "2026-07-03")
+
     # -- no reading is not permission -------------------------------------------
     def test_no_outdoor_reading_holds_the_run(self):
         """The opposite of the warm-morning skip, and on purpose: that one cancels

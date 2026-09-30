@@ -38,7 +38,7 @@ Within that, a run starts when all of these are true:
 - **Away mode** is off.
 - The **En Suite window is shut**, and has not already been opened during a run that day.
 
-The plugin asks again every 30 seconds, so a morning that only turns cold at 7am still gets a run.
+The plugin asks again every 30 seconds, so a morning that only turns cold at 7am still gets a run. When it is too warm outside, the Event Log says so once that day, with the outdoor temperature.
 
 ### What it does
 

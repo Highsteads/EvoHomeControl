@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.16.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.16.1 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.16.1** — On a morning too warm for the En Suite drying run, the Event Log now says so once, with the outdoor temperature.
 
 **v1.16.0** — A room somebody changes by hand, at the Evohome controller, on a valve or in the app, is left alone until its plan next changes. The summer hold now ends by itself on the day heating is due back, even if Indigo is not running. Needs RAMSES ESP 1.15.0.
 

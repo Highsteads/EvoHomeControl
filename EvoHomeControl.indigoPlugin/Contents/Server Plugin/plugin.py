@@ -5,8 +5,10 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
 # Date:        29-09-2026 13:00
-# Version:     1.16.0
+# Version:     1.16.1
 #
+# v1.16.1 (30-09-2026): the En Suite drying run says once a day (INFO) when it is held off
+#   because it is too warm outside; that skip used to write nothing. (Claude Opus 5.5)
 # v1.16.0 (29-09-2026): A ROOM CHANGED BY HAND IS LEFT ALONE, and the summer hold ends by itself.
 #   RAMSES ESP 1.15.0 tags each zone setpointSource indigo/timetable/manual; a "manual" room not
 #   on its timetable is skipped (heating_logic.check_manual_hold) until its plan next changes,
@@ -403,7 +405,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.16.0"
+PLUGIN_VERSION  = "1.16.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1601,6 +1603,15 @@ class Plugin(indigo.PluginBase):
             return False
 
         if outdoor >= limit:
+            # Said once a day (1.16.1): a skip for mild weather used to write nothing,
+            # so a morning with no run had no line anywhere to explain it.
+            if self.store.get("en_suite_drying_warm_date") != today:
+                self.store["en_suite_drying_warm_date"] = today
+                self._save_state()
+                _, end = self._en_suite_drying_window()
+                _log(f"[EnSuiteDrying] No drying run so far today: it is {outdoor:.1f}degC "
+                     f"outside and a run only starts below {limit:.0f}degC. One will "
+                     f"still start if it gets colder before {end}:00.")
             return False
         return True
 
@@ -2644,6 +2655,9 @@ class Plugin(indigo.PluginBase):
             # left to end it until the next midnight. A stored MANUAL test run is
             # judged on its own expiry, never on the clock window it ignores.
             self.store["en_suite_drying_cancelled_date"] = st.get("en_suite_drying_cancelled_date")
+            # The two once-a-day notices: without these a restart repeats the line.
+            self.store["en_suite_drying_warm_date"]       = st.get("en_suite_drying_warm_date")
+            self.store["en_suite_drying_no_outdoor_date"] = st.get("en_suite_drying_no_outdoor_date")
             if st.get("en_suite_drying_active"):
                 manual_raw = st.get("en_suite_drying_manual_expiry")
                 manual_exp = None
@@ -2688,6 +2702,8 @@ class Plugin(indigo.PluginBase):
             "timetable_alert_key":          self.store.get("timetable_alert_key", ""),
             "en_suite_drying_active":          self.store.get("en_suite_drying_active", False),
             "en_suite_drying_cancelled_date":  self.store.get("en_suite_drying_cancelled_date"),
+            "en_suite_drying_warm_date":       self.store.get("en_suite_drying_warm_date"),
+            "en_suite_drying_no_outdoor_date": self.store.get("en_suite_drying_no_outdoor_date"),
             "en_suite_drying_started":         self.store.get("en_suite_drying_started"),
             "en_suite_drying_start_humidity":  self.store.get("en_suite_drying_start_humidity"),
             "en_suite_drying_manual_expiry":   (

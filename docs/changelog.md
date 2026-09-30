@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.16.1 — 30 September 2026
+
+- **A morning too warm for the En Suite drying run now says so.** The first time each day the run is held off because it is not cold enough outside, the Event Log has one line, such as *No drying run so far today: it is 17.1degC outside and a run only starts below 12degC. One will still start if it gets colder before 10:00.* Before, a mild morning wrote nothing, so there was no way to tell why the room had not warmed.
+
 ## 1.16.0 — 29 September 2026
 
 - **A room changed by hand is left alone.** Change a room's temperature at the Evohome controller, on a valve's wheel or in the app, and the plugin no longer puts it back at its next check. It leaves the room until the room's plan next changes, or midnight if that comes first, and then carries on as normal. A room set permanently by hand is left alone for as long as it stays that way; pressing **Auto** on the controller, which puts the room back on its timetable, hands it back to the plugin. The Event Log says when a room is being left alone, such as *Bedroom 3 was set to 21 degrees by hand, so the heating plugin leaves it alone until 10pm*, and again when it comes back. This works during the summer shut-off too.
