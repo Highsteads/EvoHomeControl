@@ -194,7 +194,7 @@
         <Label>EN SUITE DRYING RUN</Label>
     </Field>
     <Field id="lbl_drying_help" type="label">
-        <Label>Holds the En Suite radiator warm each morning to dry the room out, and stops the moment the window is opened. It runs through the summer shut-off and ignores both the warm-morning skip and the mild-weather cut-off, because a warm damp morning still leaves wet towels, though it only starts when it is colder outside than the limit below. It does NOT run once normal heating returns: from that day the 06:00 morning schedule heats this room anyway, and the drying run would otherwise sit on top of it and hold the room at the temperature set below. It picks itself up again when the next summer shut-off begins. Radiator only - the floor heating is never touched. Away mode still wins, and an open window always closes the valve.</Label>
+        <Label>Holds the En Suite radiator warm each morning to dry the room out, and stops the moment the window is opened. It runs through the summer shut-off and ignores both the warm-morning skip and the mild-weather cut-off, because a warm damp morning still leaves wet towels, though it only starts when the room or the weather is colder than the limits below, and never when the room is already at the temperature it would hold. It does NOT run once normal heating returns: from that day the 06:00 morning schedule heats this room anyway, and the drying run would otherwise sit on top of it and hold the room at the temperature set below. It picks itself up again when the next summer shut-off begins. Radiator only - the floor heating is never touched. Away mode still wins, and an open window always closes the valve.</Label>
     </Field>
     <Field id="enSuiteDryingEnabled" type="checkbox" defaultValue="true">
         <Label>Dry the En Suite out every morning:</Label>
@@ -274,9 +274,26 @@
             <Option value="26.0">26 degrees</Option>
         </List>
     </Field>
+    <Field id="enSuiteDryingRoomBelow" type="menu" defaultValue="19.0"
+           visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
+        <Label>Run when the room is colder than:</Label>
+        <List>
+            <Option value="0">Ignore the room temperature</Option>
+            <Option value="16.0">16 degrees</Option>
+            <Option value="17.0">17 degrees</Option>
+            <Option value="18.0">18 degrees</Option>
+            <Option value="19.0">19 degrees</Option>
+            <Option value="20.0">20 degrees</Option>
+            <Option value="21.0">21 degrees</Option>
+        </List>
+    </Field>
+    <Field id="lbl_drying_room_info" type="label"
+           visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
+        <Label>A cold room gets a run whatever the weather. The reading comes from the En Suite sensor named below, or from the radiator valve when that sensor has said nothing for three hours. A room already at the temperature the run would hold never gets one.</Label>
+    </Field>
     <Field id="enSuiteDryingMaxOutdoor" type="menu" defaultValue="12.0"
            visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
-        <Label>Only run when it is colder than:</Label>
+        <Label>Or when it is colder outside than:</Label>
         <List>
             <Option value="0">No limit - run whatever the weather</Option>
             <Option value="8.0">8 degrees</Option>
@@ -289,16 +306,16 @@
     </Field>
     <Field id="lbl_drying_outdoor_info" type="label"
            visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
-        <Label>Checked against the outdoor temperature each time the run could start, so a morning that only turns cold at 7am still gets one. A run already going is left to finish. It needs a real reading, from the Ecowitt sensor or OpenWeatherMap weather under an hour old - the fallback temperature above does not count. With no reading at all the run is held rather than started, and that is logged once a day - the setting only makes sense as evidence that it is cold.</Label>
+        <Label>Used when the room is not cold. Checked against the outdoor temperature each time the run could start, so a morning that only turns cold at 7am still gets one. A run already going is left to finish. It needs a real reading, from the Ecowitt sensor or OpenWeatherMap weather under an hour old - the fallback temperature above does not count. With no outdoor reading a run starts only on a cold room, and that is logged once a day - the setting only makes sense as evidence that it is cold.</Label>
     </Field>
 
     <Field id="enSuiteHumidityDeviceId" type="textfield" defaultValue=""
            visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
-        <Label>En Suite humidity sensor device ID:</Label>
+        <Label>En Suite room sensor device ID:</Label>
     </Field>
     <Field id="lbl_drying_humidity_info" type="label"
            visibleBindingId="enSuiteDryingEnabled" visibleBindingValue="true">
-        <Label>Optional. It is used only to record how damp the room was at the start and the end of each run, so that a "skip it when the room is already dry" rule can be set later from real mornings rather than a guessed number. Leave it blank if there is no sensor.</Label>
+        <Label>Optional. Its temperature decides whether the room is cold, and its humidity is recorded at the start and the end of each run. Leave it blank if there is no sensor - the radiator valve's own temperature is used instead.</Label>
     </Field>
 
     <Field id="sep_logging" type="separator"/>

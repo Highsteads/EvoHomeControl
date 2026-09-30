@@ -7,6 +7,14 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.17.0 — 30 September 2026
+
+- **The En Suite drying run now looks at the room as well as the weather.** It used to start only when it was colder than 12 degrees outside, so a cold room on a mild morning got no heat. Now a run starts when the room is colder than **19 degrees**, whatever the weather, or when it is cold outside as before. It never starts when the room is already at the temperature the run would hold.
+- The new setting is **Run when the room is colder than**, from 16 to 21 degrees, or **Ignore the room temperature** for the old rule.
+- The room reading comes from the En Suite sensor, or from the radiator valve when the sensor has said nothing for three hours.
+- The once-a-day line for a morning with no run now gives both readings and both limits, and the start line says which of the two started it.
+- Nothing changes in the heating season: the drying run still only runs during the summer shut-off.
+
 ## 1.16.1 — 30 September 2026
 
 - **A morning too warm for the En Suite drying run now says so.** The first time each day the run is held off because it is not cold enough outside, the Event Log has one line, such as *No drying run so far today: it is 17.1degC outside and a run only starts below 12degC. One will still start if it gets colder before 10:00.* Before, a mild morning wrote nothing, so there was no way to tell why the room had not warmed.

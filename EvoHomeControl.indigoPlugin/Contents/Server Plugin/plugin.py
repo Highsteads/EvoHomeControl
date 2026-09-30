@@ -5,8 +5,15 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
 # Date:        29-09-2026 13:00
-# Version:     1.16.1
+# Version:     1.17.0
 #
+# v1.17.0 (30-09-2026): THE EN SUITE RUN LOOKS AT THE ROOM AS WELL AS THE WEATHER. New pref
+#   enSuiteDryingRoomBelow (19, 0 = ignore): a run starts when the room is below it, whatever
+#   it is doing outside; never when the room is already at the run's temperature; otherwise the
+#   outdoor rule decides as before (_en_suite_drying_start_reason). Room reading = the room
+#   sensor when fresh, else the radiator valve if heard within 45 min. Measured: 30-09 room
+#   17.8 / outside 17.1, no run, room cold; 15-09 room 21.2 / outside 16.9, run not wanted.
+#   Summer shut-off only, as before. (Claude Opus 5.5)
 # v1.16.1 (30-09-2026): the En Suite drying run says once a day (INFO) when it is held off
 #   because it is too warm outside; that skip used to write nothing. (Claude Opus 5.5)
 # v1.16.0 (29-09-2026): A ROOM CHANGED BY HAND IS LEFT ALONE, and the summer hold ends by itself.
@@ -361,6 +368,7 @@ from heating_logic    import (
     EN_SUITE_WARM_MORNING_THRESHOLD,
     EN_SUITE_DRYING_TEMP,
     EN_SUITE_DRYING_MAX_OUTDOOR,
+    EN_SUITE_DRYING_ROOM_BELOW,
     EN_SUITE_DRYING_START_HOUR,
     EN_SUITE_DRYING_END_HOUR,
     ALL_RADIATOR_IDS,
@@ -405,7 +413,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.16.1"
+PLUGIN_VERSION  = "1.17.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -419,6 +427,8 @@ EN_SUITE_HUMIDITY_MAX_AGE_MINS = 180
 # cannot be in air of 0% relative humidity, so anything outside this band is not a
 # reading.
 EN_SUITE_HUMIDITY_VALID_RANGE  = (1.0, 100.0)
+# Same trap for the room temperature: a state never written reads 0.0.
+EN_SUITE_ROOM_TEMP_VALID_RANGE = (1.0, 40.0)
 
 
 def _safe_float(value, default=0.0):
@@ -1569,7 +1579,56 @@ class Plugin(indigo.PluginBase):
             return None
         return min(raw, 30.0)
 
-    def _en_suite_drying_cold_enough(self, today):
+    def _en_suite_drying_room_limit(self):
+        """Start a run when the room is colder than this. None means leave the room
+        temperature out of it, which is the rule as it was before 1.17.0."""
+        raw = _safe_float(self.pluginPrefs.get("enSuiteDryingRoomBelow"),
+                          EN_SUITE_DRYING_ROOM_BELOW)
+        if raw is None or raw <= 0:
+            return None
+        return min(raw, 26.0)
+
+    def _say_no_run_once(self, today, text):
+        """One line a day saying why no run has started. Saved, so a restart does not
+        repeat it."""
+        if self.store.get("en_suite_drying_warm_date") == today:
+            return
+        self.store["en_suite_drying_warm_date"] = today
+        self._save_state()
+        _log(f"[EnSuiteDrying] No drying run so far today: {text}")
+
+    def _en_suite_drying_start_reason(self, today):
+        """Why a run may start now, in words for the log, or None when it may not.
+
+        CliveS, 30-09-2026, after a 17 degC morning left the room at 17.8 with no run:
+        use the temperature inside as well as outside, so it comes on when the room is
+        cold and stays off when it is warm. In order:
+
+          1. The room is already at the temperature the run would hold: no run. The
+             radiator would not open anyway, and a "started" line would be untrue.
+          2. The room is colder than its limit: run, whatever the weather. A cold room
+             is its own evidence, so this needs no outdoor reading.
+          3. Otherwise the outdoor rule decides, as before.
+
+        With no room reading worth trusting, only step 3 applies.
+        """
+        target     = self._en_suite_drying_temp()
+        room_limit = self._en_suite_drying_room_limit()
+        room       = self._en_suite_room_temp()[0] if room_limit is not None else None
+        if room is not None and room >= target:
+            self._say_no_run_once(
+                today, f"the En Suite is already at {room:.1f}degC, and a run would "
+                       f"only hold it at {target:.0f}degC.")
+            return None
+        if room is not None and room < room_limit:
+            return "the room is cold"
+        if self._en_suite_drying_max_outdoor() is None:
+            return "the morning schedule"
+        if self._en_suite_drying_cold_enough(today, room, room_limit):
+            return "it is cold outside"
+        return None
+
+    def _en_suite_drying_cold_enough(self, today, room=None, room_limit=None):
         """Is it cold enough outside to be worth heating the room dry?
 
         CliveS, 15-09-2026, after watching a run heat the room for three and a half
@@ -1605,13 +1664,18 @@ class Plugin(indigo.PluginBase):
         if outdoor >= limit:
             # Said once a day (1.16.1): a skip for mild weather used to write nothing,
             # so a morning with no run had no line anywhere to explain it.
-            if self.store.get("en_suite_drying_warm_date") != today:
-                self.store["en_suite_drying_warm_date"] = today
-                self._save_state()
-                _, end = self._en_suite_drying_window()
-                _log(f"[EnSuiteDrying] No drying run so far today: it is {outdoor:.1f}degC "
-                     f"outside and a run only starts below {limit:.0f}degC. One will "
-                     f"still start if it gets colder before {end}:00.")
+            _, end = self._en_suite_drying_window()
+            if room is None or room_limit is None:
+                self._say_no_run_once(
+                    today, f"it is {outdoor:.1f}degC outside and a run only starts below "
+                           f"{limit:.0f}degC. One will still start if it gets colder "
+                           f"before {end}:00.")
+            else:
+                self._say_no_run_once(
+                    today, f"the En Suite is at {room:.1f}degC and it is {outdoor:.1f}degC "
+                           f"outside. A run starts when the room is below "
+                           f"{room_limit:.0f}degC or it is below {limit:.0f}degC outside, "
+                           f"and one will still start if either happens before {end}:00.")
             return False
         return True
 
@@ -1652,14 +1716,45 @@ class Plugin(indigo.PluginBase):
         return str(get_variable_value(VAR_HOME_AWAY_ID, "false")).strip().lower() == "true"
 
     def _en_suite_humidity(self):
-        """The En Suite humidity as a float, or None when no reading is worth trusting.
+        """The En Suite humidity, or None when no reading is worth trusting."""
+        return self._en_suite_sensor_reading("humidity", EN_SUITE_HUMIDITY_VALID_RANGE)
 
-        Used only to describe what a run achieved. Nothing decides whether to run on
-        it, so returning None costs a sentence in the log and nothing else. None is
+    def _en_suite_room_temp(self):
+        """(temperature, where it came from), or (None, None) when there is no reading
+        worth trusting.
+
+        The room sensor first, because it reads the air in the room. When it has
+        nothing fresh to say, the radiator valve's own reading, which sits about half
+        a degree lower at rest (measured 13 to 30-09-2026) and so leans towards
+        starting a run. A valve RAMSES ESP has not heard for ZONE_STALE_MINUTES, or
+        whose last contact cannot be read, does not count: an old reading is not
+        evidence that the room is cold now.
+        """
+        value = self._en_suite_sensor_reading("temperature", EN_SUITE_ROOM_TEMP_VALID_RANGE)
+        if value is not None:
+            return value, "sensor"
+        try:
+            dev = indigo.devices[DEV_EN_SUITE_ID]
+            if not dev.enabled:
+                return None, None
+            age = heating_logic.zone_reading_age_minutes(dev)
+            if age is None or age > heating_logic.ZONE_STALE_MINUTES:
+                return None, None
+            value = float(dev.states.get("temperatureInput1"))
+        except Exception:
+            return None, None
+        low, high = EN_SUITE_ROOM_TEMP_VALID_RANGE
+        return (value, "valve") if low <= value <= high else (None, None)
+
+    def _en_suite_sensor_reading(self, state, valid_range):
+        """One state of the En Suite room sensor as a float, or None.
+
+        Humidity only describes what a run achieved; the temperature helps decide
+        whether one starts (1.17.0), and a missing one falls back to the valve. None is
         returned - never a number - when the device is missing, disabled, its owning
         plugin is stopped, zigbee2mqtt reports it offline, its last contact is older
         than EN_SUITE_HUMIDITY_MAX_AGE_MINS, or the value sits outside
-        EN_SUITE_HUMIDITY_VALID_RANGE. A zigbee sensor holds its last value for ever
+        valid_range. A zigbee sensor holds its last value for ever
         once it drops off the mesh, and a state that has never been written reads
         0.0 - this device logged exactly that four seconds before its first real
         report on 12-09-2026 - so neither an absent nor a stale reading may pass
@@ -1693,10 +1788,10 @@ class Plugin(indigo.PluginBase):
         if age_mins > EN_SUITE_HUMIDITY_MAX_AGE_MINS:
             return None
         try:
-            value = float(dev.states.get("humidity"))
+            value = float(dev.states.get(state))
         except (TypeError, ValueError):
             return None
-        low, high = EN_SUITE_HUMIDITY_VALID_RANGE
+        low, high = valid_range
         return value if low <= value <= high else None
 
     def _warn_window_once(self, message):
@@ -1799,6 +1894,9 @@ class Plugin(indigo.PluginBase):
         outdoor = self.weather.get_measured_outdoor_temp() if self.weather else None
         if outdoor is not None:
             damp += f" It is {outdoor:.1f}degC outside."
+        room = self._en_suite_room_temp()[0]
+        if room is not None:
+            damp += f" The room itself is at {room:.1f}degC."
         _log(f"[EnSuiteDrying] Started ({reason}) - holding the En Suite radiator at "
              f"{target:.0f}degC {until}, or until the window is opened. {damp}")
         self._save_state()
@@ -1902,10 +2000,11 @@ class Plugin(indigo.PluginBase):
         # valve on a warming morning, and the room still needs drying. The flip side
         # is that a morning which only drops below the limit at 07:00 starts then —
         # this is re-asked every tick, not once at 05:00.
-        if not self._en_suite_drying_cold_enough(today):
+        reason = self._en_suite_drying_start_reason(today)
+        if reason is None:
             return
         if self._en_suite_window_is_shut():
-            self._start_en_suite_drying()
+            self._start_en_suite_drying(reason)
 
     def _en_suite_overheat_target(self):
         """The temperature the En Suite's overheat check should judge the room against.
@@ -1953,6 +2052,19 @@ class Plugin(indigo.PluginBase):
                        else "unknown, so a run is held")
             _log(f"  Outdoor:      starts below {limit:.0f}degC, now {now_out} "
                  f"({verdict})")
+        room_limit   = self._en_suite_drying_room_limit()
+        room, source = self._en_suite_room_temp()
+        now_room     = (f"{room:.1f}degC on the {'room sensor' if source == 'sensor' else 'radiator valve'}"
+                        if room is not None else "no reading worth trusting")
+        if room_limit is None:
+            _log(f"  Room:         left out of the decision (it is {now_room} now)")
+        else:
+            target  = self._en_suite_drying_temp()
+            verdict = ("no reading, so only the outdoor rule applies" if room is None
+                       else "already warm, so no run starts" if room >= target
+                       else "cold, so a run may start" if room < room_limit
+                       else "not cold, so the outdoor rule decides")
+            _log(f"  Room:         starts below {room_limit:.0f}degC, now {now_room} ({verdict})")
         _log(f"  Running now:  {self.store.get('en_suite_drying_active', False)}")
         if self.store.get("en_suite_drying_started"):
             _log(f"  Started at:   {self.store['en_suite_drying_started']}")

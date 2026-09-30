@@ -689,7 +689,7 @@ class TestTheHeatingSeasonOwnsTheRoom(unittest.TestCase):
         p._stop_en_suite_drying = lambda reason, cancel_for_today=False: \
             self.stopped.append(reason)
         self.started = []
-        p._start_en_suite_drying = lambda: self.started.append(True)
+        p._start_en_suite_drying = lambda *a, **k: self.started.append(True)
         p._en_suite_window_is_shut = lambda: True
         p._save_state = lambda: None
         return p
@@ -820,14 +820,17 @@ class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
     """
 
     def _plugin(self, outdoor, limit="12.0", store=None):
-        p = _bare_plugin(prefs={"enSuiteDryingMaxOutdoor": limit},
+        # The room temperature is switched off here ("0"), so these stay tests of the
+        # outdoor rule alone. TestTheRoomDecidesToo covers the two together.
+        p = _bare_plugin(prefs={"enSuiteDryingMaxOutdoor": limit,
+                                "enSuiteDryingRoomBelow": "0"},
                          store=store if store is not None else {})
         p._summer_lockout_active   = lambda: True      # summer, so the season allows it
         p._en_suite_window_is_shut = lambda: True
         p._save_state              = lambda: None
         p.weather = _FakeWeather(outdoor)
         self.started = []
-        p._start_en_suite_drying = lambda: self.started.append(True)
+        p._start_en_suite_drying = lambda *a, **k: self.started.append(True)
         self.stopped = []
         p._stop_en_suite_drying = lambda reason, cancel_for_today=False: \
             self.stopped.append(reason)
@@ -1032,6 +1035,170 @@ class TestOnlyRunsWhenItIsColdOutside(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+class TestTheRoomDecidesToo(unittest.TestCase):
+    """CliveS, 30-09-2026: the room was 17.8 degC on a 17.1 degC morning, no run
+    started and the room was cold. On 15-09 it was 21.2 with 16.9 outside and a run
+    was not wanted. The weather is the same; the room is what tells them apart."""
+
+    def _plugin(self, room, outdoor, room_limit=None, limit="12.0", target="20.0", store=None):
+        prefs = {"enSuiteDryingMaxOutdoor": limit, "enSuiteDryingTemp": target}
+        if room_limit is not None:
+            prefs["enSuiteDryingRoomBelow"] = room_limit
+        p = _bare_plugin(prefs=prefs, store=store if store is not None else {})
+        p._summer_lockout_active   = lambda: True
+        p._en_suite_window_is_shut = lambda: True
+        p._save_state              = lambda: None
+        p._en_suite_room_temp      = lambda: (room, "sensor" if room is not None else None)
+        p.weather = _FakeWeather(outdoor)
+        self.reasons = []
+        p._start_en_suite_drying = lambda reason="the morning schedule", **k: self.reasons.append(reason)
+        p._stop_en_suite_drying  = lambda reason, cancel_for_today=False: None
+        return p
+
+    def _run(self, p):
+        with mock.patch(_PLUGIN + ".datetime") as dt:
+            dt.now.return_value = datetime(2026, 7, 4, 6, 0)
+            dt.strptime = datetime.strptime
+            p._check_en_suite_drying()
+
+    def test_a_cold_room_on_a_mild_morning_gets_a_run(self):
+        """30-09-2026 exactly."""
+        p = self._plugin(room=17.8, outdoor=17.1)
+        self._run(p)
+        self.assertEqual(self.reasons, ["the room is cold"])
+
+    def test_a_warm_room_on_a_mild_morning_does_not(self):
+        """15-09-2026 exactly (the run then held 22)."""
+        p = self._plugin(room=21.2, outdoor=16.9, target="22.0")
+        self._run(p)
+        self.assertEqual(self.reasons, [])
+
+    def test_the_default_limit_is_nineteen_and_nineteen_is_not_cold(self):
+        p = self._plugin(room=19.0, outdoor=17.0)
+        self._run(p)
+        self.assertEqual(self.reasons, [])
+        p = self._plugin(room=18.9, outdoor=17.0)
+        self._run(p)
+        self.assertEqual(self.reasons, ["the room is cold"])
+
+    def test_the_limit_is_a_setting(self):
+        p = self._plugin(room=17.8, outdoor=17.1, room_limit="17.0")
+        self._run(p)
+        self.assertEqual(self.reasons, [])
+
+    def test_a_cold_morning_still_starts_one_in_a_room_that_is_not_cold(self):
+        p = self._plugin(room=19.4, outdoor=8.0)
+        self._run(p)
+        self.assertEqual(self.reasons, ["it is cold outside"])
+
+    def test_a_room_already_at_the_run_temperature_gets_none_however_cold_it_is_outside(self):
+        p = self._plugin(room=20.0, outdoor=2.0)
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run(p)
+            self._run(p)
+        self.assertEqual(self.reasons, [])
+        lines = [c.args[0] for c in log.call_args_list]
+        self.assertEqual(lines, ["[EnSuiteDrying] No drying run so far today: the En Suite is "
+                                 "already at 20.0degC, and a run would only hold it at 20degC."])
+
+    def test_a_cold_room_needs_no_outdoor_reading(self):
+        p = self._plugin(room=17.0, outdoor=None)
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run(p)
+        self.assertEqual(self.reasons, ["the room is cold"])
+        self.assertEqual(log.call_args_list, [], "no warning about the weather either")
+
+    def test_no_room_reading_leaves_the_outdoor_rule_in_charge(self):
+        p = self._plugin(room=None, outdoor=17.1)
+        self._run(p)
+        self.assertEqual(self.reasons, [])
+        p = self._plugin(room=None, outdoor=8.0)
+        self._run(p)
+        self.assertEqual(self.reasons, ["it is cold outside"])
+
+    def test_switched_off_it_is_the_outdoor_rule_alone(self):
+        p = self._plugin(room=15.0, outdoor=17.1, room_limit="0")
+        self._run(p)
+        self.assertEqual(self.reasons, [])
+
+    def test_no_outdoor_limit_still_does_not_heat_a_warm_room(self):
+        p = self._plugin(room=21.0, outdoor=25.0, limit="0")
+        self._run(p)
+        self.assertEqual(self.reasons, [])
+        p = self._plugin(room=19.5, outdoor=25.0, limit="0")
+        self._run(p)
+        self.assertEqual(self.reasons, ["the morning schedule"])
+
+    def test_the_daily_line_gives_both_readings_and_both_limits(self):
+        p = self._plugin(room=19.6, outdoor=14.2)
+        with mock.patch(_PLUGIN + "._log") as log:
+            self._run(p)
+            self._run(p)
+        self.assertEqual([c.args[0] for c in log.call_args_list], [
+            "[EnSuiteDrying] No drying run so far today: the En Suite is at 19.6degC and "
+            "it is 14.2degC outside. A run starts when the room is below 19degC or it is "
+            "below 12degC outside, and one will still start if either happens before 10:00."])
+
+    def test_it_never_starts_in_the_heating_season(self):
+        """Only for the mornings the main heating is off."""
+        p = self._plugin(room=15.0, outdoor=2.0)
+        p._summer_lockout_active = lambda: False
+        self._run(p)
+        self.assertEqual(self.reasons, [])
+
+
+class _Zone:
+    def __init__(self, temp="17.3", seen_mins_ago=5, enabled=True):
+        self.enabled = enabled
+        self.states = {"temperatureInput1": temp}
+        if seen_mins_ago is not None:
+            self.states["lastSeen"] = (datetime.now() - timedelta(minutes=seen_mins_ago)
+                                       ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+class TestRoomReading(unittest.TestCase):
+    """The room sensor first; the radiator valve when the sensor has nothing fresh."""
+
+    def setUp(self):
+        self._saved = dict(_indigo.devices)
+        _indigo.devices.clear()
+
+    def tearDown(self):
+        _indigo.devices.clear()
+        _indigo.devices.update(self._saved)
+
+    def _plugin(self, sensor):
+        p = _bare_plugin()
+        p._en_suite_sensor_reading = lambda state, valid: sensor
+        return p
+
+    def test_the_room_sensor_wins(self):
+        _indigo.devices[hl.DEV_EN_SUITE_ID] = _Zone("17.3")
+        self.assertEqual(self._plugin(17.8)._en_suite_room_temp(), (17.8, "sensor"))
+
+    def test_the_valve_stands_in_when_the_sensor_has_nothing(self):
+        _indigo.devices[hl.DEV_EN_SUITE_ID] = _Zone("17.3")
+        self.assertEqual(self._plugin(None)._en_suite_room_temp(), (17.3, "valve"))
+
+    def test_a_valve_not_heard_lately_is_not_a_reading(self):
+        _indigo.devices[hl.DEV_EN_SUITE_ID] = _Zone("17.3", seen_mins_ago=90)
+        self.assertEqual(self._plugin(None)._en_suite_room_temp(), (None, None))
+
+    def test_a_valve_with_no_last_heard_time_is_not_a_reading(self):
+        _indigo.devices[hl.DEV_EN_SUITE_ID] = _Zone("17.3", seen_mins_ago=None)
+        self.assertEqual(self._plugin(None)._en_suite_room_temp(), (None, None))
+
+    def test_a_disabled_or_missing_valve_is_not_a_reading(self):
+        self.assertEqual(self._plugin(None)._en_suite_room_temp(), (None, None))
+        _indigo.devices[hl.DEV_EN_SUITE_ID] = _Zone("17.3", enabled=False)
+        self.assertEqual(self._plugin(None)._en_suite_room_temp(), (None, None))
+
+    def test_a_zero_or_blank_valve_reading_is_not_a_cold_room(self):
+        for junk in ("0.0", "", None, "unavailable"):
+            _indigo.devices[hl.DEV_EN_SUITE_ID] = _Zone(junk)
+            self.assertEqual(self._plugin(None)._en_suite_room_temp(), (None, None), junk)
+
+
 class TestAwayModeStopsTheDryingRun(unittest.TestCase):
     """1.10.0: the settings promised "Away mode still wins", but since 1.9.1 the run
     only happens during the summer shut-off, when the heating cycle - the only
@@ -1055,7 +1222,7 @@ class TestAwayModeStopsTheDryingRun(unittest.TestCase):
         p._en_suite_window_is_shut = lambda: True
         p._save_state              = lambda: None
         self.started, self.stopped = [], []
-        p._start_en_suite_drying = lambda: self.started.append(True)
+        p._start_en_suite_drying = lambda *a, **k: self.started.append(True)
 
         def _stop(reason, cancel_for_today=False):
             self.stopped.append((reason, cancel_for_today))

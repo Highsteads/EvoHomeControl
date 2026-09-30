@@ -202,6 +202,12 @@ EN_SUITE_DRYING_TEMP       = 22.0
 # a mild September morning on which the radiator ran for three and a half hours.
 # 12 is CliveS's figure, set that evening. It is a pref; this is only its default.
 EN_SUITE_DRYING_MAX_OUTDOOR = 12.0
+# ...or on a morning when the room itself is cold, whatever it is doing outside.
+# MEASURED 13 to 30-09-2026 on the En Suite sensor at 05:00: on 30-09 the room was
+# 17.8 degC with 17.1 outside, no run started, and the room was cold; on 15-09 it was
+# already 21.2 with 16.9 outside and a run was not wanted. Same weather, opposite
+# answer - the room is what tells them apart. 19 sits between the two. A pref.
+EN_SUITE_DRYING_ROOM_BELOW = 19.0
 EN_SUITE_DRYING_START_HOUR = 5
 EN_SUITE_DRYING_END_HOUR   = 10
 

@@ -34,11 +34,14 @@ Within that, a run starts when all of these are true:
 
 - **Dry the En Suite out every morning** is ticked in the settings.
 - The time is between the start and finish hours, **5am and 10am** to start with.
-- It is **colder outside than the limit** you set, **12 degrees** to start with, unless you chose **No limit**.
+- **The room is cold, or it is cold outside.** A room below **19 degrees** gets a run whatever the weather. A room that is not cold gets one only when it is colder outside than **12 degrees**, unless you chose **No limit**. Both figures are settings.
+- The room is **not already at the temperature the run would hold**.
 - **Away mode** is off.
 - The **En Suite window is shut**, and has not already been opened during a run that day.
 
-The plugin asks again every 30 seconds, so a morning that only turns cold at 7am still gets a run. When it is too warm outside, the Event Log says so once that day, with the outdoor temperature.
+The plugin asks again every 30 seconds, so a morning that only turns cold at 7am still gets a run. On a morning with no run, the Event Log says why once that day, with the room and outdoor temperatures.
+
+The room temperature comes from the En Suite sensor named in the settings. If that sensor has said nothing for three hours, the plugin uses the radiator valve's own reading instead, which sits about half a degree lower and so leans towards starting a run. With neither, only the outdoor rule applies.
 
 ### What it does
 
@@ -64,7 +67,7 @@ This is stricter than the rest of the plugin, which treats a sensor it cannot re
 
 ### Humidity
 
-If you set **En Suite humidity sensor device ID** to a temperature and humidity sensor in the room, each run records how damp the room was when it started and when it finished, and says so when it ends:
+If you set **En Suite room sensor device ID** to a temperature and humidity sensor in the room, its temperature decides whether the room is cold, and each run records how damp the room was when it started and when it finished, and says so when it ends:
 
 ```
 [EnSuiteDrying] Finished (the 10:00 finish was reached). Humidity fell from 78% to 64%, so the room dried out by 14 points.
@@ -74,7 +77,7 @@ Nothing decides whether to run from that reading. I added it so that a rule for 
 
 ### The outdoor temperature in summer
 
-The drying run needs a real outdoor reading: the Ecowitt sensor, or OpenWeatherMap weather fetched within the last hour. The **Fallback temperature** does not count, because it is a number you chose, not the weather. During the summer shut-off the rest of the plugin fetches no weather, so when the drying run has no reading it fetches OpenWeatherMap itself, no more than once every five minutes. With no reading at all, no run starts, and the Event Log says so once a day.
+The drying run needs a real outdoor reading: the Ecowitt sensor, or OpenWeatherMap weather fetched within the last hour. The **Fallback temperature** does not count, because it is a number you chose, not the weather. During the summer shut-off the rest of the plugin fetches no weather, so when the drying run has no reading it fetches OpenWeatherMap itself, no more than once every five minutes. With no outdoor reading, a run starts only when the room itself is cold, and the Event Log says so once a day.
 
 ### Trying it out
 

@@ -66,8 +66,9 @@ The [summer shut-off](summer-shut-off.md) page explains it in full.
 | **Dry the En Suite out every morning** | Ticked to start with. Switches the drying run on or off. The settings below are hidden while it is off. |
 | **Starts at** and **Finishes at** | The hours of the run, 5am and 10am to start with. The hours can cross midnight. |
 | **Hold the radiator at** | The radiator temperature during a run, from 18 to 26 degrees. 22 to start with. |
-| **Only run when it is colder than** | A run only starts when it is colder outside than this, from 8 to 18 degrees. 12 to start with. Choose **No limit - run whatever the weather** to leave the weather out of it. |
-| **En Suite humidity sensor device ID** | Optional. The number of a humidity sensor in the En Suite, used only to record how damp the room was at the start and the end of each run. |
+| **Run when the room is colder than** | A run starts when the En Suite is colder than this, whatever the weather, from 16 to 21 degrees. 19 to start with. Choose **Ignore the room temperature** to decide on the weather alone. |
+| **Or when it is colder outside than** | When the room is not cold, a run starts only when it is colder outside than this, from 8 to 18 degrees. 12 to start with. Choose **No limit - run whatever the weather** to leave the weather out of it. |
+| **En Suite room sensor device ID** | Optional. The number of a temperature and humidity sensor in the En Suite. Its temperature decides whether the room is cold, and its humidity is recorded at the start and the end of each run. Left blank, the radiator valve's own temperature is used. |
 
 The [En Suite](en-suite.md) page explains when a run starts and stops.
 
