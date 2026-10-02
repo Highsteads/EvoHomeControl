@@ -8,6 +8,7 @@
 
 import os
 import json
+import tempfile
 import logging
 import datetime
 import time
@@ -174,11 +175,18 @@ class WeatherData:
                 cache_dir = os.path.dirname(self.cache_path)
                 if cache_dir:
                     os.makedirs(cache_dir, exist_ok=True)
-                tmp = f"{self.cache_path}.tmp"
-                with open(tmp, 'w', encoding='utf-8') as f:
+                # A temporary file of its own, so two writers can never share one.
+                fd, tmp = tempfile.mkstemp(prefix=os.path.basename(self.cache_path) + ".",
+                                           suffix=".tmp", dir=os.path.dirname(self.cache_path) or ".")
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
                     json.dump({'fetched_at': now_ts, 'data': data}, f)
                     f.flush()
                     os.fsync(f.fileno())
+                # mkstemp makes the file private (0600); keep the mode the old file had.
+                try:
+                    os.chmod(tmp, os.stat(self.cache_path).st_mode & 0o777)
+                except OSError:
+                    os.chmod(tmp, 0o644)
                 os.replace(tmp, self.cache_path)
             except OSError as e:
                 _slog(
@@ -343,7 +351,7 @@ class WeatherData:
             _slog(f"[Weather] {message}", level="WARNING")
             self._ecowitt_last_warn[reason] = now_ts
 
-    def get_snow_forecast(self, hours=12):
+    def get_snow_forecast(self, hours=12, now_ts=None):
         """
         Scan hourly forecast for snow or freezing precipitation in next N hours.
 
@@ -354,21 +362,37 @@ class WeatherData:
             description  — e.g. "Light Snow", "Heavy Snow"
 
         Empty list means no snow expected within the window.
+
+        Hours are chosen by their own forecast time, not by position in the list:
+        self.hourly is never cleared, so after failed fetches its first entries are
+        hours that have already passed, and their snow would keep the heating boost
+        on. A forecast older than OWM_MAX_AGE_SECS (the limit the outdoor reading
+        uses) is not trusted at all, and an hour with no time is skipped.
         """
+        if self._owm_age_secs() > OWM_MAX_AGE_SECS:
+            return []
+        now_ts  = time.time() if now_ts is None else now_ts
+        horizon = now_ts + hours * 3600
         results = []
-        for i, entry in enumerate(self.hourly[:hours]):
+        for entry in self.hourly or []:
+            try:
+                hour_ts = int(entry.get("dt", 0))
+            except (TypeError, ValueError):
+                continue
+            # OWM stamps each hour with its START, so the current hour is the one
+            # whose start is less than an hour ago.
+            if hour_ts <= 0 or hour_ts + 3600 <= now_ts or hour_ts >= horizon:
+                continue
             code = ((entry.get("weather") or [{}])[0]).get("id", 0)
             if code in _SNOW_CODES:
                 mm   = float((entry.get("snow") or {}).get("1h", 0.0))
                 desc = ((entry.get("weather") or [{}])[0]).get("description", "snow").title()
                 try:
-                    time_str = datetime.datetime.fromtimestamp(
-                        int(entry.get("dt", 0))
-                    ).strftime("%H:%M")
+                    time_str = datetime.datetime.fromtimestamp(hour_ts).strftime("%H:%M")
                 except Exception:
                     time_str = "??"
                 results.append({
-                    "hour_offset": i,
+                    "hour_offset": max(0, int((hour_ts - now_ts) // 3600)),
                     "time_str":    time_str,
                     "mm":          mm,
                     "description": desc,

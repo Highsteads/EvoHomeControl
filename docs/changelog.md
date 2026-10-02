@@ -7,6 +7,19 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.18.0 — 2 October 2026
+
+Fixes from an independent review of 1.17.0. None of them is known to have happened here.
+
+- **A room whose temperature has stopped updating is left alone.** The plugin judged a room's reading by when the RAMSES ESP plugin last heard anything from it, and the Evohome controller keeps sending setpoints even when a temperature stops arriving, so an old reading could look current and the radiator be turned down or up on it. With RAMSES ESP 1.16.0 the plugin goes by when the temperature itself was last reported. A missing temperature is never treated as 0 degrees.
+- **An overheating alert that does not get through is sent again.** When neither Pushover nor the email took it, the plugin still recorded it as sent and never tried again. Now it logs an error and tries every 30 minutes until one of them takes it. The **Critical Overheat Alert** trigger still fires once. The alert and the all-clear are written in plain sentences.
+- **The En Suite morning ends even if the plugin missed 10am.** If the plugin was not running for the whole of the 10 o'clock hour, and the En Suite room was not reporting, the underfloor heating switch could stay on past the morning.
+- **An old snow forecast no longer adds heat.** When OpenWeatherMap could not be reached, hours of snow that had already passed kept the snow boost on. A forecast is now read by its own times, and one more than three hours old is not used.
+- **With the 1 hour setting, each room is renewed half way through.** It was renewed whenever less than an hour was left, which with a one-hour setting meant every five minutes.
+- **Run Cycle Now, Away and saved settings always get their cycle.** Asked for while a check was already running, the request was lost until the next scheduled check.
+- **The saved state cannot be spoilt by two saves at once.** An action and the heating check saving together could leave the file unreadable, which loses a running force-on or boost at the next restart.
+- **The 30-minute drying test lasts 30 minutes on the night the clocks go back**, not 90.
+
 ## 1.17.0 — 30 September 2026
 
 - **The En Suite drying run now looks at the room as well as the weather.** It used to start only when it was colder than 12 degrees outside, so a cold room on a mild morning got no heat. Now a run starts when the room is colder than **19 degrees**, whatever the weather, or when it is cold outside as before. It never starts when the room is already at the temperature the run would hold.

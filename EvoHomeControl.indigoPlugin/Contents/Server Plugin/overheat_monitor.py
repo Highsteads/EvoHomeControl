@@ -8,6 +8,7 @@
 
 import os
 import json
+import tempfile
 import time
 import logging
 from datetime import datetime as dt
@@ -44,6 +45,24 @@ ALERT_PERSISTENT_TEMP  = 4.0   # Alert if persistent overheat exceeds this
 # older than this belongs to an earlier spell of heating - most often last spring,
 # reloaded by a restart after the summer shut-off. Tracking starts fresh instead.
 HISTORY_MAX_AGE_SECS   = 3600
+
+# A critical alert that no channel accepted is tried again after this long, until one
+# does. Before 1.18.0 a failed send was recorded as sent and never tried again.
+ALERT_RETRY_SECS       = 1800
+
+
+def _duration_text(hours):
+    """'about 40 minutes', 'about an hour', 'about 3 hours' - as a person says it."""
+    minutes = int(round(hours * 60))
+    if minutes < 55:
+        return f"about {max(5, 5 * round(minutes / 5))} minutes"
+    whole = int(round(hours))
+    return "about an hour" if whole <= 1 else f"about {whole} hours"
+
+
+def _deg(value):
+    """12.0 -> '12', 12.5 -> '12.5'."""
+    return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
 class OverheatMonitor:
@@ -142,11 +161,18 @@ class OverheatMonitor:
         must not corrupt the file and silently discard all overheat history)."""
         try:
             os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
-            tmp = f"{self.history_file}.tmp"
-            with open(tmp, 'w', encoding='utf-8') as f:
+            # A temporary file of its own, so two writers can never share one.
+            fd, tmp = tempfile.mkstemp(prefix=os.path.basename(self.history_file) + ".",
+                                       suffix=".tmp", dir=os.path.dirname(self.history_file) or ".")
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump(self.history, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
+            # mkstemp makes the file private (0600); keep the mode the old file had.
+            try:
+                os.chmod(tmp, os.stat(self.history_file).st_mode & 0o777)
+            except OSError:
+                os.chmod(tmp, 0o644)
             os.replace(tmp, self.history_file)
         except Exception as e:
             _slog(
@@ -242,15 +268,27 @@ class OverheatMonitor:
                     room_data["alert_type"]      = "OUTDOOR_SUPPRESSED"
                     room_data["all_clear_sent"]  = False
                 else:
-                    self.send_critical_alert(room_name, alert_type, overheat_amount)
-                    room_data["alert_sent"]      = True
-                    room_data["alert_type"]      = alert_type
-                    room_data["alert_timestamp"] = dt.now().strftime("%d-%m-%Y %H:%M:%S")
-                    room_data["all_clear_sent"]  = False
+                    retry_at = room_data.get("alert_retry_at")
+                    if retry_at is None or time.time() >= retry_at:
+                        # The trigger fires once per overheat, on the first try; a
+                        # retry is about the notification, not a new event.
+                        delivered = self.send_critical_alert(
+                            room_name, alert_type, overheat_amount,
+                            fire_event=retry_at is None)
+                        if delivered:
+                            room_data["alert_sent"]      = True
+                            room_data["alert_type"]      = alert_type
+                            room_data["alert_timestamp"] = dt.now().strftime("%d-%m-%Y %H:%M:%S")
+                            room_data["all_clear_sent"]  = False
+                            room_data["alert_retry_at"]  = None
+                        else:
+                            room_data["alert_retry_at"]  = time.time() + ALERT_RETRY_SECS
 
         else:
             room_data["consecutive_cycles"] = 0
             room_data["stable_cycles"]     += 1
+            # An alert still waiting to be delivered is dropped once the room is fine.
+            room_data["alert_retry_at"]     = None
 
             if (room_data["alert_sent"] and
                     not room_data["all_clear_sent"] and
@@ -273,72 +311,62 @@ class OverheatMonitor:
     # Alert sending
     # ------------------------------------------------------------------
 
-    def send_critical_alert(self, room_name, alert_type, overheat_amount):
-        """Send critical overheat alert via Pushover and email."""
+    def send_critical_alert(self, room_name, alert_type, overheat_amount, fire_event=True):
+        """Send a critical overheat alert by Pushover and email.
+
+        Returns True when at least one channel took it, or when neither is set up
+        (then there is nothing to try again). False means every channel that is set
+        up refused it, and the caller tries again after ALERT_RETRY_SECS.
+        """
         room_data    = self.history[room_name]
         current_temp = room_data["current_temp"]
         target_temp  = room_data["target_temp"]
         outdoor_temp = room_data["outdoor_temp"]
-        # outdoor_temp is None when weather is unavailable — format defensively so a
-        # missing reading cannot crash the alert (which recurs every cycle because
-        # alert_sent is only set True after a successful send).
-        outdoor_str  = f"{outdoor_temp:.1f}degC" if isinstance(outdoor_temp, (int, float)) else "unavailable"
 
-        duration_hours = (room_data["consecutive_cycles"] * self.run_interval_mins) / 60.0
+        # The backoff is clamped to a 12degC floor, so report the real setting.
+        reduced_temp = max(12.0, target_temp - 6.0)
+        hours        = (room_data["consecutive_cycles"] * self.run_interval_mins) / 60.0
 
-        # The backoff is clamped to a 12degC floor, so the actual reduction can be
-        # less than the nominal 6degC — report the real figure, not a hard-coded 6.
-        reduced_temp   = max(12.0, target_temp - 6.0)
-        actual_backoff = target_temp - reduced_temp
-        valve_status   = f"REDUCED (backed off {actual_backoff:.1f}degC to {reduced_temp:.1f}degC)"
-
+        title = f"The {room_name} is {_deg(overheat_amount)} degrees too warm"
         if alert_type == "CRITICAL_IMMEDIATE":
-            title  = f"CRITICAL OVERHEAT - {room_name}"
-            reason = (
-                f"SEVERE OVERHEAT: {overheat_amount:+.1f}degC ABOVE TARGET\n"
-                f"Room is {overheat_amount:.1f}degC above target.\n"
-                f"Possible TRV failure or stuck valve."
-            )
+            opening = (f"The {room_name} is at {_deg(current_temp)} degrees, "
+                       f"{_deg(overheat_amount)} more than the {_deg(target_temp)} it should be.")
         else:
-            title  = f"CRITICAL OVERHEAT - {room_name}"
-            reason = (
-                f"PERSISTENT OVERHEAT FOR {duration_hours:.1f} HOURS\n"
-                f"Room has been overheating for {duration_hours:.1f} hours.\n"
-                f"Check TRV operation and valve position."
-            )
-
+            opening = (f"The {room_name} has been too warm for {_duration_text(hours)}. It is "
+                       f"at {_deg(current_temp)} degrees against the {_deg(target_temp)} it "
+                       f"should be.")
+        if isinstance(outdoor_temp, (int, float)):
+            outside = f" It is {_deg(outdoor_temp)} degrees outside."
+        else:
+            outside = ""
         message = (
-            f"{title}\n"
-            f"{'=' * 35}\n"
-            f"Current Temp:     {current_temp:.1f}degC\n"
-            f"Target Temp:      {target_temp:.1f}degC\n"
-            f"Overheat Amount:  {overheat_amount:+.1f}degC\n"
-            f"Max Overheat:     {room_data['max_overheat']:+.1f}degC\n"
-            f"Duration:         {duration_hours:.2f} hours\n"
-            f"Valve Status:     {valve_status}\n"
-            f"\n"
-            f"Outdoor Temp:     {outdoor_str}\n"
-            f"\n"
-            f"{reason}\n"
-            f"\n"
-            f"Action Required:\n"
-            f"- Check TRV valve operation\n"
-            f"- Verify TRV batteries (if wireless)\n"
-            f"- Ensure valve is not mechanically stuck\n"
+            f"{opening}{outside} The heating has turned its radiator down to "
+            f"{_deg(reduced_temp)} degrees. A room this far over usually means the "
+            f"radiator valve is stuck open or its batteries are flat, so please check it."
         )
 
-        self._send_pushover(title, message, priority=1)
-        self._send_email(title, message)
-        _slog(
-            f"[OverheatMonitor] CRITICAL OVERHEAT ALERT sent for {room_name}: "
-            f"{overheat_amount:+.1f}degC over target",
-            level="WARNING"
-        )
-        if self.event_callback:
+        pushed  = self._send_pushover(title, message, priority=1)
+        emailed = self._send_email(title, message)
+        if fire_event and self.event_callback:
             try:
                 self.event_callback("overheatAlert")
             except Exception:
                 pass
+
+        if pushed or emailed:
+            how = " and ".join(n for n, ok in (("Pushover", pushed), ("email", emailed)) if ok)
+            _slog(f"[OverheatMonitor] {room_name} is {overheat_amount:.1f} degrees over its "
+                  f"target - alert sent by {how}.", level="WARNING")
+            return True
+        if not self._any_channel():
+            _slog(f"[OverheatMonitor] {room_name} is {overheat_amount:.1f} degrees over its "
+                  f"target, but neither Pushover nor email is set up to send the alert.",
+                  level="WARNING")
+            return True
+        _slog(f"[OverheatMonitor] {room_name} is {overheat_amount:.1f} degrees over its "
+              f"target, and the alert could not be sent. Trying again in "
+              f"{ALERT_RETRY_SECS // 60} minutes.", level="ERROR")
+        return False
 
     def send_all_clear(self, room_name):
         """Send all-clear notification when room returns to normal."""
@@ -346,31 +374,20 @@ class OverheatMonitor:
         current_temp = room_data["current_temp"]
         target_temp  = room_data["target_temp"]
 
-        time_text = "Unknown"
+        when = ""
         if room_data["alert_timestamp"]:
             try:
                 alert_time = dt.strptime(room_data["alert_timestamp"], "%d-%m-%Y %H:%M:%S")
                 hours_ago  = (dt.now() - alert_time).total_seconds() / 3600.0
-                time_text  = f"{hours_ago:.2f} hours ago"
+                when       = f" The alert went out {_duration_text(hours_ago)} ago."
             except (ValueError, TypeError):
                 pass
 
-        title = f"ALL CLEAR - {room_name}"
+        title = f"The {room_name} is back to normal"
         message = (
-            f"{title}\n"
-            f"{'=' * 35}\n"
-            f"Room has returned to target temperature.\n"
-            f"\n"
-            f"Current Temp:     {current_temp:.1f}degC\n"
-            f"Target Temp:      {target_temp:.1f}degC\n"
-            f"Temperature Diff: {current_temp - target_temp:+.1f}degC\n"
-            f"\n"
-            f"Previous Alert:   {time_text}\n"
-            f"Peak Overheat:    {room_data['max_overheat']:+.1f}degC\n"
-            f"Alert Type:       {room_data['alert_type']}\n"
-            f"\n"
-            f"[OK] Room is now stable\n"
-            f"[OK] No action needed\n"
+            f"The {room_name} is at {_deg(current_temp)} degrees against the "
+            f"{_deg(target_temp)} it should be, so it has settled.{when} At its worst it was "
+            f"{_deg(room_data['max_overheat'])} degrees too warm. Nothing needs doing."
         )
 
         self._send_pushover(title, message, priority=-1)
@@ -383,6 +400,16 @@ class OverheatMonitor:
                 self.event_callback("overheatAllClear")
             except Exception:
                 pass
+
+    def _any_channel(self):
+        """True when Pushover is enabled or an email address is set."""
+        if self.email_address:
+            return True
+        try:
+            plugin = indigo.server.getPlugin("io.thechad.indigoplugin.pushover")
+            return bool(plugin is not None and plugin.isEnabled())
+        except Exception:
+            return False
 
     # ------------------------------------------------------------------
     # Notification helpers

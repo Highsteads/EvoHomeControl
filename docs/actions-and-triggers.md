@@ -32,7 +32,7 @@ To run something when one of these happens, create a new trigger, set its type t
 
 | Event | When it runs |
 |---|---|
-| **Critical Overheat Alert** | When an overheating alert is sent for a room. |
+| **Critical Overheat Alert** | When a room is first found far enough over its target to need an overheating alert. It fires once, whether or not the Pushover message or email gets through. |
 | **Room All Clear (back to target)** | When a room that had an alert sent has been back to normal for 30 minutes. |
 | **Timed Boost Started** | When a timed boost starts. |
 | **Timed Boost Ended** | When a timed boost runs out or is cancelled. |

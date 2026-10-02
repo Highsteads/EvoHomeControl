@@ -114,6 +114,12 @@ TEMP_CHANGE_TOLERANCE       =  0.1
 # last temperature for five days and the plugin went on acting on them.
 # trvLastSeen is NOT used: an idle valve can go 8 hours without a message of its
 # own while the controller keeps reporting the zone.
+#
+# 1.18.0: the age is of the TEMPERATURE, from RAMSES ESP 1.16.0's temperatureSeen.
+# lastSeen also moves on the controller's setpoint and mode reports, so a zone whose
+# temperature had stopped kept looking fresh while its setpoints still arrived.
+# MEASURED 02-10-2026: the controller sends its 30C9 temperatures for all 12 zones in
+# the same burst as its 2309 setpoints, so the 45 minutes holds for the new state.
 ZONE_STALE_MINUTES          = 45
 
 # ---------------------------------------------------------------------------
@@ -242,6 +248,13 @@ def set_override_minutes(minutes):
     _OVERRIDE["broken"]  = False
 
 
+def override_renew_minutes():
+    """How close to its end a timed setting is renewed: OVERRIDE_RENEW_MINUTES, or
+    half the chosen length when that is shorter. With the 1-hour setting a fixed
+    60 minutes was always "nearly over", so every room was resent every cycle."""
+    return min(OVERRIDE_RENEW_MINUTES, _OVERRIDE["minutes"] / 2.0)
+
+
 def _timed_overrides_on(permanent=False):
     return (not permanent) and _OVERRIDE["minutes"] > 0 and not _OVERRIDE["broken"]
 
@@ -264,7 +277,7 @@ def _ramses_takes_until():
 
 def needs_override_refresh(dev, permanent=False, now=None, until=None):
     """True when the zone is not in the kind of override wanted, or a timed one ends
-    within OVERRIDE_RENEW_MINUTES. An end time that cannot be read counts as ending.
+    within override_renew_minutes(). An end time that cannot be read counts as ending.
     With `until` ("YYYY-MM-DD HH:MM") the zone should hold exactly that end time."""
     mode = dev.states.get("zoneMode", "")
     if until is not None and _timed_overrides_on() and _ramses_takes_until():
@@ -280,7 +293,7 @@ def needs_override_refresh(dev, permanent=False, now=None, until=None):
         end = dt.strptime(str(dev.states.get("zoneOverrideUntil", ""))[:16], "%Y-%m-%d %H:%M")
     except (ValueError, TypeError):
         return True
-    return (end - (now or dt.now())).total_seconds() < OVERRIDE_RENEW_MINUTES * 60
+    return (end - (now or dt.now())).total_seconds() < override_renew_minutes() * 60
 
 
 def send_setpoint(dev, value, permanent=False, until=None):
@@ -503,11 +516,22 @@ _ZONE_STALE_LATCH = {}
 
 
 def zone_reading_age_minutes(dev, now=None):
-    """Minutes since RAMSES last heard this zone (its lastSeen state, local time),
-    or None when the state is missing or cannot be read. None means "cannot tell",
-    and the caller carries on rather than stopping the heating on a missing state."""
+    """Minutes since this zone's temperature was last reported, local time.
+
+    RAMSES ESP 1.16.0 and later keep that in temperatureSeen. A blank one means no
+    temperature has arrived since the device was made, so the reading (RAMSES starts
+    a new zone at 0) is not one: infinity, which every caller treats as too old.
+    Older versions have no temperatureSeen, and then lastSeen - any report from the
+    zone - is the best there is. None when neither can be read: "cannot tell", and
+    the caller carries on rather than stopping the heating on a missing state."""
     try:
-        raw = dev.states.get("lastSeen")
+        states = dev.states
+        if "temperatureSeen" in states:
+            raw = states.get("temperatureSeen")
+            if not raw:
+                return float("inf")
+        else:
+            raw = states.get("lastSeen")
     except Exception:
         return None
     if not raw:
@@ -1016,7 +1040,8 @@ def process_room_temperature(
             return
         dev_radiator = indigo.devices[ha_device_id]
 
-        temp_str = dev_radiator.states.get("temperatureInput1", "0")
+        # No temperature state at all is the same as an unreadable one - never 0degC.
+        temp_str = dev_radiator.states.get("temperatureInput1")
         if temp_str in (None, "null", "None", "", "unavailable", "unknown"):
             # A missing reading must NOT be treated as 0degC — that makes the room
             # look freezing (defeating overheat detection and driving a bogus
@@ -1041,10 +1066,13 @@ def process_room_temperature(
         if age is not None and age > ZONE_STALE_MINUTES:
             if not _ZONE_STALE_LATCH.get(room_name):
                 _ZONE_STALE_LATCH[room_name] = True
-                _log(f"{room_name}: nothing heard from this zone for {age:.0f} minutes, so its "
-                     f"reading of {dev_temp:.1f} degC may be out of date. The radiator stays at "
-                     f"its last setting until the zone reports again.",
-                     level="WARNING", log_buffer=log_buffer)
+                if age == float("inf"):
+                    heard = "no temperature has been reported for this zone yet"
+                else:
+                    heard = f"no temperature has been reported for this zone for {age:.0f} minutes"
+                _log(f"{room_name}: {heard}, so its reading of {dev_temp:.1f} degC may be out "
+                     f"of date. The radiator stays at its last setting until the zone reports "
+                     f"again.", level="WARNING", log_buffer=log_buffer)
             return
         if _ZONE_STALE_LATCH.pop(room_name, None):
             _log(f"{room_name}: the zone is reporting again, so the heating is back in control of it.",

@@ -39,7 +39,7 @@ All three can be kept in the shared settings file instead, as described below.
 | Setting | What it does |
 |---|---|
 | **Heating cycle interval** | How often the plugin works out every room's temperature: every 5 minutes, which is what I recommend, 10 or 15. |
-| **If Indigo stops, radiators go back to the Evohome timetable after** | Each temperature is sent to Evohome for this long, 2 hours to start with, and renewed about once an hour. If Indigo or the plugin stops, each radiator goes back to the timetable on your Evohome controller when its time runs out. **Never** holds the last setting indefinitely, as before 1.13.0. Needs RAMSES ESP 1.12.0 or later; without it the plugin sends permanent settings and says so once. The summer 8 degree hold is sent to run until the day heating returns instead, so a stopped Indigo in summer cannot switch the heating back on early, and cannot keep it off late. With RAMSES ESP older than 1.15.0 it is permanent. |
+| **If Indigo stops, radiators go back to the Evohome timetable after** | Each temperature is sent to Evohome for this long, 2 hours to start with, and renewed once less than an hour is left, or half way through with the 1 hour setting. If Indigo or the plugin stops, each radiator goes back to the timetable on your Evohome controller when its time runs out. **Never** holds the last setting indefinitely, as before 1.13.0. Needs RAMSES ESP 1.12.0 or later; without it the plugin sends permanent settings and says so once. The summer 8 degree hold is sent to run until the day heating returns instead, so a stopped Indigo in summer cannot switch the heating back on early, and cannot keep it off late. With RAMSES ESP older than 1.15.0 it is permanent. |
 
 ## SNOW FORECAST
 

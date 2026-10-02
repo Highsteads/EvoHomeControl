@@ -30,9 +30,9 @@ The plugin cannot read your Ecowitt outdoor sensor, so it is using OpenWeatherMa
 
 Your Ecowitt outdoor sensor has stopped updating, so the plugin is using OpenWeatherMap's temperature for your area instead. The Ecowitt plugin still shows the device as online, which is why the plugin goes by how old the reading is. Check the Ecowitt station and its plugin.
 
-## The log says nothing has been heard from a zone for so many minutes
+## The log says no temperature has been reported for a zone
 
-The RAMSES ESP plugin has had no news of that room for more than 45 minutes, so its temperature may be out of date and the plugin leaves its radiator where it is. When every room says so at once, the RAMSES ESP gateway has stopped: check that plugin and its gateway. When one room says so, check that radiator's valve and its batteries. The plugin says once in the Event Log when the room is reporting again.
+The room's temperature has not been reported for more than 45 minutes, so its temperature may be out of date and the plugin leaves its radiator where it is. When every room says so at once, the RAMSES ESP gateway has stopped: check that plugin and its gateway. When one room says so, check that radiator's valve and its batteries. The plugin says once in the Event Log when the room is reporting again. Just after RAMSES ESP is updated to 1.16.0, each room says it has not reported a temperature yet, until the controller next sends them a few minutes later.
 
 ## The log says a room's controller timetable does not match its plan
 

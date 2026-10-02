@@ -4,8 +4,24 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        29-09-2026 13:00
-# Version:     1.17.0
+# Date:        02-10-2026 10:00
+# Version:     1.18.0
+#
+# v1.18.0 (02-10-2026): THE EIGHT FAULTS FROM AN INDEPENDENT REVIEW OF 1.17.0, each reproduced
+#   and each with a test watched failing first (test_1_18_review.py, 29 tests).
+#   (1) zone_reading_age_minutes reads RAMSES ESP 1.16.0's temperatureSeen (blank = never
+#   reported = too old); lastSeen only when that state is absent. lastSeen moves on setpoint
+#   reports, so a frozen temperature looked current. An absent temperatureInput1 skips the
+#   zone instead of reading as 0. (2) A critical alert no channel took is no longer marked
+#   sent: retried every ALERT_RETRY_SECS (30 min); overheatAlert fires once; both messages in
+#   plain English. (3) _atomic_write_json uses a temp file per write (mkstemp), and
+#   _save_state snapshots and writes under _STATE_WRITE_LOCK; weather cache and overheat
+#   history also get their own temp files. (4) _check_en_suite_morning ends an active morning
+#   at ANY hour outside 06-10, before the fast return. (5) get_snow_forecast picks hours by
+#   their dt and ignores a forecast older than OWM_MAX_AGE_SECS. (6) override_renew_minutes()
+#   = min(60, overrideMinutes / 2). (7) _request_cycle() bumps a counter that _tick reads
+#   before the cycle, so a request made mid-cycle is not wiped. (8) The drying test's expiry
+#   is offset-aware. snowHeatingEnabled read through as_bool. (Claude Opus 5.5)
 #
 # v1.17.0 (30-09-2026): THE EN SUITE RUN LOOKS AT THE ROOM AS WELL AS THE WEATHER. New pref
 #   enSuiteDryingRoomBelow (19, 0 = ignore): a run starts when the room is below it, whatever
@@ -268,6 +284,7 @@ import os
 import sys
 import json
 import shutil
+import tempfile
 import time
 import logging
 import threading
@@ -413,7 +430,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.17.0"
+PLUGIN_VERSION  = "1.18.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -474,13 +491,36 @@ def _atomic_write_json(path, obj, **dump_kwargs):
     24h force-on; a truncated setpoint cache would make every room re-log). os.replace
     is atomic on the same filesystem, so the reader always sees either the old file
     or the fully-written new one.
+
+    Each write gets its OWN temporary file. With one shared "<path>.tmp", two
+    writers opened the same file, and the slower one went on writing into it after
+    the faster one had renamed it into place - leaving invalid JSON behind.
     """
-    tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, **dump_kwargs)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".",
+                               suffix=".tmp", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, **dump_kwargs)
+            f.flush()
+            os.fsync(f.fileno())
+        # mkstemp makes the file private (0600); keep the mode the old file had.
+        try:
+            os.chmod(tmp, os.stat(path).st_mode & 0o777)
+        except OSError:
+            os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+# Saves of plugin_state.json come from the heating thread (timers, morning, drying)
+# and from Indigo's callback thread (actions, menus). One lock around taking the
+# snapshot AND writing it, so an older snapshot can never land after a newer one.
+_STATE_WRITE_LOCK = threading.RLock()
 
 # Ecowitt sensor device IDs come entirely from PluginConfig.xml
 # (ecowittDeviceId = outdoor, ecowittIndoorDeviceId = indoor). A blank field
@@ -624,6 +664,11 @@ class Plugin(indigo.PluginBase):
 
         # Poll timer
         self.store["last_heating_cycle"] = 0.0
+        # Requests for a cycle now (actions, menus, saved settings). A counter rather
+        # than zeroing last_heating_cycle: a cycle already running sets that marker
+        # when it finishes, which wiped a request made while it ran.
+        self.store["cycle_requests"]        = 0
+        self.store["cycle_requests_served"] = 0
 
         # Clock hour of the last hourly event-log dump (header + full room
         # table). Tracked by clock hour rather than gating on minute == 0 so
@@ -880,7 +925,7 @@ class Plugin(indigo.PluginBase):
             heating_logic.set_override_minutes(self._override_minutes(values_dict))
             # Force an immediate cycle so any change (interval, sources, alerts)
             # takes effect now rather than at the next scheduled cycle.
-            self.store["last_heating_cycle"] = 0.0
+            self._request_cycle()
 
     # -----------------------------------------------------------------------
     # Main polling loop
@@ -925,10 +970,19 @@ class Plugin(indigo.PluginBase):
         # Timed boost expiry check (every tick)
         self._check_timed_boost_expiry()
 
-        # Main heating cycle (time-delta dispatch)
-        if now - self.store["last_heating_cycle"] >= run_interval_secs:
+        # Main heating cycle (time-delta dispatch), or sooner when one was asked for.
+        # The request count is read BEFORE the cycle, so a request that arrives while
+        # it runs is still outstanding afterwards and gets its own cycle next tick.
+        requested = self.store.get("cycle_requests", 0)
+        if (now - self.store["last_heating_cycle"] >= run_interval_secs
+                or requested != self.store.get("cycle_requests_served", 0)):
             self._run_heating_cycle()
-            self.store["last_heating_cycle"] = now
+            self.store["last_heating_cycle"]    = now
+            self.store["cycle_requests_served"] = requested
+
+    def _request_cycle(self):
+        """Ask for a heating cycle at the next tick, even if one is running now."""
+        self.store["cycle_requests"] = self.store.get("cycle_requests", 0) + 1
 
     # -----------------------------------------------------------------------
     # Heating cycle
@@ -997,7 +1051,7 @@ class Plugin(indigo.PluginBase):
         snow_forecast = self._get_snow_forecast()
         self.store["snow_forecast"] = snow_forecast
         temp_offset   = calculate_temp_offset(outdoor_temp)
-        if snow_forecast and self.pluginPrefs.get("snowHeatingEnabled", True):
+        if snow_forecast and as_bool(self.pluginPrefs.get("snowHeatingEnabled", True), True):
             snow_boost   = _safe_float(self.pluginPrefs.get("snowHeatingBoost", "1.0"), 1.0)
             temp_offset += snow_boost
             _log(f"[Snow] Forecast detected — applying +{snow_boost:.1f}degC heating boost")
@@ -1492,7 +1546,7 @@ class Plugin(indigo.PluginBase):
         self._save_state()
         self._fire_event("summerForceStarted")
         # Apply normal heating immediately rather than waiting for the next cycle
-        self.store["last_heating_cycle"] = 0.0
+        self._request_cycle()
 
     def _cancel_summer_force(self, reason="expired"):
         """End the 24h force-on and (if still in-window) re-assert the shut-off."""
@@ -1503,7 +1557,7 @@ class Plugin(indigo.PluginBase):
             self._save_state()
             self._fire_event("summerForceEnded")
             # Re-evaluate immediately so the lockout re-applies this cycle
-            self.store["last_heating_cycle"] = 0.0
+            self._request_cycle()
 
     def _check_summer_force_expiry(self):
         """Cancel the 24h force-on once its expiry datetime has passed."""
@@ -1881,7 +1935,7 @@ class Plugin(indigo.PluginBase):
         self.store["en_suite_drying_start_humidity"] = humidity
         self.store["en_suite_drying_temp"]           = target
         self.store["en_suite_drying_manual_expiry"]  = (
-            datetime.now() + timedelta(minutes=manual_minutes) if manual_minutes else None
+            _now_aware() + timedelta(minutes=manual_minutes) if manual_minutes else None
         )
         if manual_minutes:
             until = f"for the next {manual_minutes} minutes"
@@ -1902,7 +1956,7 @@ class Plugin(indigo.PluginBase):
         self._save_state()
         self._fire_event("enSuiteDryingStarted")
         # Send the setpoint now rather than waiting up to a full cycle for it.
-        self.store["last_heating_cycle"] = 0.0
+        self._request_cycle()
 
     def _stop_en_suite_drying(self, reason, cancel_for_today=False):
         """End a drying run and let the radiator return to its normal setpoint."""
@@ -1921,7 +1975,7 @@ class Plugin(indigo.PluginBase):
         self._save_state()
         self._fire_event("enSuiteDryingEnded")
         # Return the radiator to its normal setpoint now, not at the next cycle.
-        self.store["last_heating_cycle"] = 0.0
+        self._request_cycle()
 
     def _check_en_suite_drying(self):
         """The ONE owner of the drying run's start and stop decision."""
@@ -1941,7 +1995,9 @@ class Plugin(indigo.PluginBase):
         # a forgotten one cannot hold the radiator warm all day.
         manual_expiry = self.store.get("en_suite_drying_manual_expiry")
         if active and manual_expiry:
-            if now >= manual_expiry:
+            # Offset-aware, like the boost and force-on timers: a 30-minute test begun
+            # in the repeated hour of 25 October must end 30 real minutes later, not 90.
+            if _now_aware() >= _as_aware(manual_expiry):
                 self._stop_en_suite_drying("the test run reached its time limit")
             elif not self._en_suite_window_is_shut():
                 self._stop_en_suite_drying("the window was opened")
@@ -2097,12 +2153,23 @@ class Plugin(indigo.PluginBase):
 
         hour  = datetime.now().hour
 
+        # A morning still active outside 06:00-09:59 has run past its end, whatever
+        # hour this is. Checked first: the plugin may not have been running during the
+        # 10:00 hour (a restart, a sleeping Mac), and the room cycle's own fallback is
+        # skipped when the En Suite zone is quiet, which left the floor switch on.
+        if self.store["en_suite_morning_active"] and not (6 <= hour < 10):
+            self.store["en_suite_morning_active"]           = False
+            self.store["en_suite_morning_cancelled_reason"] = "10am_expired"
+            _log("[EnSuiteMorning] 10am — reverting to normal schedule")
+            self._en_suite_floor_off()
+            self._save_state()
+            self._fire_event("enSuiteMorningCancelled")
+
         # Outside 06:00-10:00 and 00:00 (midnight reset) the rest of the
         # function is a no-op — return early to avoid pointless work.
         in_morning_window = 6 <= hour < 10
         is_midnight       = hour == 0
-        is_after_window   = hour == 10  # one-shot 10am cancel band
-        if not (in_morning_window or is_midnight or is_after_window):
+        if not (in_morning_window or is_midnight):
             return
 
         today = datetime.now().strftime("%Y-%m-%d")
@@ -2166,15 +2233,6 @@ class Plugin(indigo.PluginBase):
                 _log(f"[EnSuiteMorning] Floor thermostat set error: {e}", level="ERROR")
             self._save_state()
             self._fire_event("enSuiteMorningStarted")
-
-        # Auto-cancel at 10am
-        if self.store["en_suite_morning_active"] and hour >= 10:
-            self.store["en_suite_morning_active"]           = False
-            self.store["en_suite_morning_cancelled_reason"] = "10am_expired"
-            _log("[EnSuiteMorning] 10am — reverting to normal schedule")
-            self._en_suite_floor_off()
-            self._save_state()
-            self._fire_event("enSuiteMorningCancelled")
 
         # Reset cancelled_date at midnight so tomorrow auto-starts again.
         # Must persist to disk — otherwise a plugin restart before the next
@@ -2375,7 +2433,7 @@ class Plugin(indigo.PluginBase):
         snow_forecast = self._get_snow_forecast()
         # Don't pollute the running cycle's snow_forecast cache from a menu click
         temp_offset   = calculate_temp_offset(outdoor_temp)
-        if snow_forecast and self.pluginPrefs.get("snowHeatingEnabled", True):
+        if snow_forecast and as_bool(self.pluginPrefs.get("snowHeatingEnabled", True), True):
             temp_offset += _safe_float(self.pluginPrefs.get("snowHeatingBoost", "1.0"), 1.0)
 
         # Swap the log buffer for a throwaway one for the duration of this call.
@@ -2775,11 +2833,11 @@ class Plugin(indigo.PluginBase):
                 manual_exp = None
                 if manual_raw:
                     try:
-                        manual_exp = datetime.fromisoformat(manual_raw)
+                        manual_exp = _as_aware(datetime.fromisoformat(manual_raw))
                     except (ValueError, TypeError):
                         manual_exp = None
                 if manual_raw:
-                    still_live = manual_exp is not None and manual_exp > datetime.now()
+                    still_live = manual_exp is not None and manual_exp > _now_aware()
                 else:
                     d_start, d_end = self._en_suite_drying_window()
                     still_live = self._hour_in_window(datetime.now().hour, d_start, d_end)
@@ -2800,6 +2858,10 @@ class Plugin(indigo.PluginBase):
 
     def _save_state(self):
         """Persist timed boost and En Suite morning state to plugin_state.json."""
+        with _STATE_WRITE_LOCK:
+            self._save_state_locked()
+
+    def _save_state_locked(self):
         state_path = os.path.join(self.data_dir, "plugin_state.json")
         expiry     = self.store.get("timed_boost_expiry")
         force_exp  = self.store.get("summer_force_expiry")
@@ -2998,7 +3060,7 @@ class Plugin(indigo.PluginBase):
     def actionRunCycleNow(self, action):
         """Action: Force an immediate heating cycle."""
         _log("[Action] Manual heating cycle triggered")
-        self.store["last_heating_cycle"] = 0.0  # force _tick() to run cycle next poll
+        self._request_cycle()
 
     def actionSetAwayMode(self, action):
         """Action: Set or clear away mode via Indigo variable.
@@ -3009,7 +3071,7 @@ class Plugin(indigo.PluginBase):
         active = str(action.props.get("awayActive", "true")).lower() == "true"
         update_variable(VAR_HOME_AWAY_ID, "true" if active else "false")
         _log(f"[Action] Away mode {'activated' if active else 'deactivated'} — forcing immediate cycle")
-        self.store["last_heating_cycle"] = 0.0
+        self._request_cycle()
 
     # -----------------------------------------------------------------------
     # Menu callbacks
@@ -3066,7 +3128,7 @@ class Plugin(indigo.PluginBase):
     def menuRunCycleNow(self, values_dict=None, type_id=None):
         """Menu: Run heating cycle now."""
         _log("[Menu] Manual heating cycle triggered")
-        self.store["last_heating_cycle"] = 0.0
+        self._request_cycle()
         return True
 
     def menuShowStatus(self, values_dict=None, type_id=None):

@@ -11,7 +11,7 @@ You do not need to know all of this to use the plugin. It is here so you can tel
 
 Every five minutes, or every 10 or 15 if you choose, the plugin runs a heating check. It reads the outdoor temperature and the mode variables, works out the right temperature for each of the twelve rooms in turn, and sends any change to that room's radiator through the RAMSES ESP plugin.
 
-It sets each radiator to a target for two hours at a time — Evohome calls this a **temporary override** — and renews it about once an hour, so while the plugin runs, the timetable in your Evohome controller does not run those radiators. If Indigo or the plugin stops, each radiator goes back to that timetable within two hours. You can change the two hours, or choose to hold the last setting indefinitely, in the [settings](settings.md). The summer 8 degree hold runs until the day heating returns, so it ends by itself even if Indigo has stopped.
+It sets each radiator to a target for two hours at a time — Evohome calls this a **temporary override** — and renews it once less than an hour is left (half way through with the one-hour setting), so while the plugin runs, the timetable in your Evohome controller does not run those radiators. If Indigo or the plugin stops, each radiator goes back to that timetable within two hours. You can change the two hours, or choose to hold the last setting indefinitely, in the [settings](settings.md). The summer 8 degree hold runs until the day heating returns, so it ends by itself even if Indigo has stopped.
 
 ## Changing a room by hand
 
@@ -21,7 +21,7 @@ Because that timetable is the fallback, the plugin checks it every morning at 4a
 
 Between heating checks, the plugin looks every 30 seconds at the things that need a quicker answer: a boost or a 24-hour override running out, the En Suite's 6am start and 10am finish, and the En Suite window during a drying run.
 
-If one room fails — a radiator missing from Indigo, say — the other rooms are still done. If a radiator has no temperature reading, that room is left at its last target for that check, rather than being treated as freezing. The same goes for a room the RAMSES ESP plugin has not heard from for 45 minutes, because its reading may be out of date: the plugin says so once in the Event Log, and again once the room is reporting.
+If one room fails — a radiator missing from Indigo, say — the other rooms are still done. If a radiator has no temperature reading, that room is left at its last target for that check, rather than being treated as freezing. The same goes for a room whose temperature has not been reported for 45 minutes, because its reading may be out of date: the plugin says so once in the Event Log, and again once the room is reporting. With RAMSES ESP 1.16.0 or later this goes by the time of the last temperature report. Older versions can only say when anything was last heard from the room, and the controller keeps sending its setpoints even when the temperature has stopped.
 
 ## How each room's temperature is decided
 
@@ -66,7 +66,7 @@ If a room stays warm after its radiator has been turned down for three checks in
 
 ### Overheating alerts
 
-If a room is six degrees or more above its target, or four degrees or more above it for six hours, the plugin sends a Pushover message and an email to warn that a radiator valve may be stuck. It does not send one when it is above 12 degrees outside, or when the warmth is coming from the sun. Once the room has been back to normal for 30 minutes, an all-clear follows.
+If a room is six degrees or more above its target, or four degrees or more above it for six hours, the plugin sends a Pushover message and an email to warn that a radiator valve may be stuck. It does not send one when it is above 12 degrees outside, or when the warmth is coming from the sun. If neither the Pushover message nor the email gets through, the plugin logs an error and tries again every 30 minutes until one does, or until the room settles. Once the room has been back to normal for 30 minutes, an all-clear follows.
 
 Bedroom 3 is left out of the alerts, because its computers keep it warm whatever the radiator does.
 
