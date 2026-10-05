@@ -4,8 +4,19 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        02-10-2026 10:00
-# Version:     1.18.0
+# Date:        05-10-2026 22:54
+# Version:     1.18.1
+#
+# v1.18.1 (05-10-2026): TWO FINDINGS FROM AN EXTERNAL AUDIT, tests watched failing first
+#   (test_1_18_1_fixes.py, 17 tests, 14 red on 1.18.0). HI-03: new _check_en_suite_window_interlock
+#   on every 30-s tick - an open En Suite window ends a running morning (window_open, for the day,
+#   event fired) and switches the floor heating off, independent of the radiator path's early
+#   returns (manual hold, missing or stale temperature), which used to skip it. The radiator is
+#   not touched. The morning no longer starts while the window is open. HI-09:
+#   zone_reading_age_minutes uses RAMSES ESP 1.17.0's temperatureSeenEpoch when it holds a time,
+#   else reads the local text through ZoneInfo("Europe/London"), trying both folds and taking the
+#   newest non-negative age, so 25-10-2026 no longer gives -5 for a 55-minute-old reading.
+#   (Claude Opus 5.5)
 #
 # v1.18.0 (02-10-2026): THE EIGHT FAULTS FROM AN INDEPENDENT REVIEW OF 1.17.0, each reproduced
 #   and each with a test watched failing first (test_1_18_review.py, 29 tests).
@@ -392,6 +403,7 @@ from heating_logic    import (
     RADIATORS_OFF_TEMP,
     TEMP_CHANGE_TOLERANCE,
     is_within_summer_off,
+    _contact_is_open,
 )
 import schedules
 import heating_logic
@@ -430,7 +442,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.18.0"
+PLUGIN_VERSION  = "1.18.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -956,6 +968,13 @@ class Plugin(indigo.PluginBase):
 
         # En Suite morning auto-start / auto-cancel (every tick for responsiveness)
         self._check_en_suite_morning()
+
+        # En Suite open window -> floor heating off, every tick, whatever the radiator
+        # path decided (1.18.1). Its own try: a fault here must not stop the cycle.
+        try:
+            self._check_en_suite_window_interlock()
+        except Exception as e:
+            _log(f"[EnSuiteMorning] Window check failed: {e}", level="WARNING")
 
         # En Suite drying run — every tick, so an opened window ends it within 30 s
         # rather than at the next 5-minute cycle.
@@ -2186,12 +2205,15 @@ class Plugin(indigo.PluginBase):
             self._save_state()
             self._fire_event("enSuiteMorningCancelled")
 
-        # Auto-start: 06:00-09:59, not already active, not cancelled by window today
+        # Auto-start: 06:00-09:59, not already active, not cancelled by window today.
+        # Not while the window is open (1.18.1): the window interlock would switch the
+        # floor straight back off. It starts on the first tick after the window shuts.
         cancelled_today = self.store.get("en_suite_morning_cancelled_date") == today
         if (6 <= hour < 10
                 and not away
                 and not self.store["en_suite_morning_active"]
-                and not cancelled_today):
+                and not cancelled_today
+                and not _contact_is_open(DEV_EN_SUITE_WINDOW_ID)):
 
             # Warm-morning skip: if outdoor temperature is at/above the warm
             # threshold at activation time, the en suite room is already
@@ -2241,6 +2263,36 @@ class Plugin(indigo.PluginBase):
         if hour == 0 and self.store.get("en_suite_morning_cancelled_date") not in (None, today):
             self.store["en_suite_morning_cancelled_date"] = None
             self._save_state()
+
+    def _check_en_suite_window_interlock(self):
+        """An open En Suite window switches the floor heating off and ends a running
+        morning schedule for the day. Runs on every 30-second tick (1.18.1).
+
+        It used to happen only inside the radiator's heating cycle, after that cycle's
+        early returns - a radiator held by hand, a missing temperature or a stale one -
+        so on any of those the floor heated an open window until 10:00. The radiator is
+        left alone here: a hand-set radiator stays as it was set."""
+        if not _contact_is_open(DEV_EN_SUITE_WINDOW_ID):
+            return
+        if self.store.get("en_suite_morning_active"):
+            self.store["en_suite_morning_active"]           = False
+            self.store["en_suite_morning_cancelled_date"]   = datetime.now().strftime("%Y-%m-%d")
+            self.store["en_suite_morning_cancelled_reason"] = "window_open"
+            _log("[EnSuiteMorning] Window opened - morning schedule cancelled for today")
+            self._save_state()
+            self._fire_event("enSuiteMorningCancelled")
+        try:
+            floor = indigo.devices[DEV_EN_SUITE_FLOOR_HEAT_ID]
+        except Exception:
+            if not getattr(self, "_floor_missing_warned", False):
+                self._floor_missing_warned = True
+                _log("[EnSuiteMorning] The En Suite floor heating switch is missing from "
+                     "Indigo, so an open window cannot switch it off", level="WARNING")
+            return
+        self._floor_missing_warned = False
+        if floor.states.get("onOffState", False):
+            indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
+            _log("En Suite: floor heating turned off (window open)")
 
     def _en_suite_floor_off(self):
         """Switch the En Suite floor heating off, the one way every path does it."""

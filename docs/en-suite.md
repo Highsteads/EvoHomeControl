@@ -12,7 +12,7 @@ The En Suite has a radiator and electric underfloor heating, and two rules of it
 This runs every morning outside the [summer shut-off](summer-shut-off.md).
 
 - **At 6am** the radiator is set to **22 degrees**, the underfloor heating switch is turned on, and the underfloor heating thermostat is set to heat to 14 degrees, so the floor looks after itself for the morning. If the plugin starts later than 6am, the schedule starts then instead.
-- **Opening the window ends it for the day.** I take opening the window to mean the shower is over. At the next heating check, within five minutes, the radiator goes down while the window is open and the underfloor heating is switched off. After that the room follows its normal plan.
+- **Opening the window ends it for the day.** I take opening the window to mean the shower is over. Within 30 seconds the underfloor heating is switched off, and at the next heating check, within five minutes, the radiator goes down while the window is open. After that the room follows its normal plan. The underfloor heating goes off even when the radiator is being left alone, because somebody has set it by hand or its temperature reading is missing or out of date. If the window is already open at 6am, the morning waits and starts once the window is shut.
 - **At 10am** it ends, and the underfloor heating switch is turned off. If the plugin was not running at 10am, it turns the switch off as soon as it starts again.
 - **Away mode** stops it. The morning does not start while away mode is on, and one already running ends within 30 seconds of away mode being switched on, with the underfloor heating switched off. If away mode is switched off before 10am, the morning starts then.
 

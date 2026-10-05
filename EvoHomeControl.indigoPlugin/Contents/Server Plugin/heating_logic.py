@@ -8,7 +8,9 @@
 # Version:     1.7
 
 import logging
+import time
 from datetime import datetime as dt, timedelta
+from zoneinfo import ZoneInfo
 
 import indigo  # noqa — available in plugin context
 
@@ -515,17 +517,59 @@ def is_within_summer_off(today, start_month, start_day, end_month, end_day):
 _ZONE_STALE_LATCH = {}
 
 
-def zone_reading_age_minutes(dev, now=None):
-    """Minutes since this zone's temperature was last reported, local time.
+# The house's clock. A zone's temperatureSeen / lastSeen text is local wall-clock time
+# with no offset, so it is read through this zone, never through UTC (1.18.1).
+HOUSE_TZ = ZoneInfo("Europe/London")
 
-    RAMSES ESP 1.16.0 and later keep that in temperatureSeen. A blank one means no
-    temperature has arrived since the device was made, so the reading (RAMSES starts
-    a new zone at 0) is not one: infinity, which every caller treats as too old.
+
+def _now_epoch(now=None):
+    """Seconds since the epoch for now, or for a given datetime: an aware one as it
+    stands, a naive one as house time."""
+    if now is None:
+        return time.time()
+    if now.tzinfo is None:
+        return now.replace(tzinfo=HOUSE_TZ).timestamp()
+    return now.timestamp()
+
+
+def _local_text_age_minutes(seen, now_epoch):
+    """Age in minutes of a naive house-time reading.
+
+    On 25 October 01:00-01:59 happens twice, so the text means two moments an hour
+    apart; both are tried (fold 0 is the BST one, fold 1 the GMT one). A reading
+    cannot come from the future, so a negative age is ruled out, and of what is left
+    the newer moment is taken - zones report every few minutes, so that is the likely
+    one. In spring a text in the missing hour cannot occur, and the two folds simply
+    agree on every real one."""
+    ages = sorted((now_epoch - seen.replace(tzinfo=HOUSE_TZ, fold=f).timestamp()) / 60.0
+                  for f in (0, 1))
+    usable = [a for a in ages if a >= 0]
+    return usable[0] if usable else ages[-1]
+
+
+def zone_reading_age_minutes(dev, now=None):
+    """Minutes since this zone's temperature was last reported.
+
+    RAMSES ESP 1.17.0 and later keep that moment in temperatureSeenEpoch, seconds
+    since the epoch, which the clocks changing cannot confuse (1.18.1); this is used
+    whenever it holds a time. Otherwise the local text: temperatureSeen (RAMSES ESP
+    1.16.0 on), read as house time through Europe/London. A blank temperatureSeen
+    means no temperature has arrived since the device was made, so the reading (RAMSES
+    starts a new zone at 0) is not one: infinity, which every caller treats as too old.
     Older versions have no temperatureSeen, and then lastSeen - any report from the
     zone - is the best there is. None when neither can be read: "cannot tell", and
-    the caller carries on rather than stopping the heating on a missing state."""
+    the caller carries on rather than stopping the heating on a missing state.
+
+    `now` (for tests) is a datetime: aware as it stands, naive as house time."""
     try:
         states = dev.states
+        epoch = states.get("temperatureSeenEpoch")
+        try:
+            epoch = int(float(epoch)) if epoch not in (None, "") else 0
+        except (TypeError, ValueError):
+            epoch = 0
+        if epoch > 0:
+            return (_now_epoch(now) - epoch) / 60.0
         if "temperatureSeen" in states:
             raw = states.get("temperatureSeen")
             if not raw:
@@ -540,7 +584,7 @@ def zone_reading_age_minutes(dev, now=None):
         seen = dt.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
     except (ValueError, TypeError):
         return None
-    return ((now or dt.now()) - seen).total_seconds() / 60.0
+    return _local_text_age_minutes(seen, _now_epoch(now))
 
 
 def calculate_temp_offset(outdoor_temp):

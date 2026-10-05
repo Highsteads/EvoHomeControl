@@ -7,6 +7,13 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.18.1 — 5 October 2026
+
+Two fixes from an external review.
+
+- **An open En Suite window switches the underfloor heating off whatever the radiator is doing.** It used to happen only as part of the radiator's own heating check, which stops early for a radiator set by hand or one whose temperature is missing or out of date, so on those mornings the floor could heat an open window until 10am. Now it is checked every 30 seconds, and the radiator is still left alone when somebody has set it by hand. If the window is open at 6am, the morning waits until it is shut instead of starting and stopping straight away.
+- **The clocks going back no longer confuse how old a reading is.** On 25 October the hour from 1am to 2am happens twice, and a reading 55 minutes old could look as if it came from five minutes in the future, so a room that had stopped reporting would be noticed up to an hour late. With RAMSES ESP 1.17.0 the plugin uses a count of seconds that cannot repeat, and with older versions it reads the time through the UK clock, both sides of the change.
+
 ## 1.18.0 — 2 October 2026
 
 Fixes from an independent review of 1.17.0. None of them is known to have happened here.
