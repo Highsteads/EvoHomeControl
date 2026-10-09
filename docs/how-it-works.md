@@ -15,7 +15,7 @@ It sets each radiator to a target for two hours at a time — Evohome calls this
 
 ## Changing a room by hand
 
-You can still change a room the ordinary Evohome way, at the controller, on a radiator valve's wheel or in the app, and the plugin will not undo it. RAMSES ESP tells the plugin who made each change, and a room changed by hand is left alone until its plan next changes, or midnight if that is sooner. After that the plugin sets it as usual. A room set permanently by hand is left alone until somebody puts it back on its timetable, for example by pressing **Auto** on the controller. The Event Log says when a room is being left alone and when it comes back.
+You can still change a room the ordinary Evohome way, at the controller, on a radiator valve's wheel or in the app, and the plugin will not undo it. RAMSES ESP tells the plugin who made each change, and a room changed by hand is left alone until its plan next changes, or midnight if that is sooner. After that the plugin sets it as usual. A room set permanently by hand is left alone until somebody puts it back on its timetable, for example by pressing **Auto** on the controller. The Event Log says when a room is being left alone and when it comes back. Opening a window or outside door in that room still turns its radiator down, and ends the setting made by hand.
 
 The same goes for a room changed through Indigo itself, from the Indigo client, the Home app or a dashboard. The plugin remembers what it last sent each room, so a change through Indigo to a different temperature must be somebody else's, and it is left alone until the room's plan next changes, or midnight. Indigo sends these as permanent settings, but the plugin never holds them for good, because nobody chose that.
 
@@ -27,14 +27,16 @@ If one room fails — a radiator missing from Indigo, say — the other rooms ar
 
 ## How each room's temperature is decided
 
-For each room, the plugin starts from the room's plan and works down this list. Where two things apply, the one lower down the list changes the answer the one above gave.
+**An open window or outside door comes first and beats everything else.** If one of a room's windows or outside doors is open, its radiator goes down to 8 degrees, whatever else is going on: a temperature set by hand, a boost, the En Suite morning or drying run, the Conservatory's sliding-door rule, or a reading that is missing or out of date. The plugin looks at the windows and doors every 30 seconds and runs a heating check as soon as one opens or shuts, so this happens within about half a minute. A temperature set by hand does not come back when the window shuts; the room goes back to its plan, and the Event Log says so when it happens. The one exception is the Dining Room, which has no window of its own and watches the conservatory's: it goes down to 16 degrees rather than 8, unless away mode is on or it is mild outside.
+
+Otherwise, the plugin starts from the room's plan and works down this list. Where two things apply, the one lower down the list changes the answer the one above gave.
 
 1. **The room's plan.** The temperature for this hour from `schedules.py`, or the guest plan when that room has a guest.
 2. **The weather.** One degree comes off above 8 degrees outside, and two above 9. When snow is forecast, a little is added — one degree to start with.
 3. **Bedroom limits.** Bedroom 1, Bedroom 2 and the Utility Room go no higher than 16 degrees, or 18 for Bedroom 2 when it has a guest. Bedroom 3, which holds my computers, goes no higher than 14.
-4. **Overheating.** If the room is too warm, its radiator is turned down, and nothing below this in the list changes that, except an open window or door, which takes it lower still. The section below explains it.
-5. **The room's own rule.** The Conservatory is held at 12 degrees while its sliding door is shut, whatever its garden windows are doing. The Dining Room is held at 16 degrees while a garden window or the garden door is open, rather than going down to 8. The En Suite has its [morning schedule and drying run](en-suite.md).
-6. **Away, windows and doors.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside. An open window or door then takes the radiator down to 8 degrees, whether away mode is on or not. The Dining Room keeps the 16 degrees its own rule gave it. An open En Suite window switches the underfloor heating off within 30 seconds, whether away mode is on or not, and even when the radiator itself is being left alone.
+4. **Overheating.** If the room is too warm, its radiator is turned down, and nothing below this in the list changes that. The section below explains it.
+5. **The room's own rule.** The Conservatory is held at 12 degrees while its sliding door is shut. The En Suite has its [morning schedule and drying run](en-suite.md).
+6. **Away.** Away mode sets every room to 14 degrees, or 16 when it is below 3 degrees outside.
 7. **Mild weather.** Above 14 degrees outside, the radiator goes down to 8 degrees. The En Suite's morning schedule and drying run are the exceptions.
 8. **Boost.** The boost, or the timed boost, adds its two or three degrees, but not to a room with a window or outside door open, which keeps its open-window setting, and not while away mode is on or it is mild outside.
 9. **Both out.** Takes four degrees off, except while away mode is on, when it is mild outside, or for a room with a window or door open.

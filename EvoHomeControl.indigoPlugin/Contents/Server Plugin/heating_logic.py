@@ -39,7 +39,9 @@ def _to_level(level):
 # ---------------------------------------------------------------------------
 
 # Windows / Doors / Floor heating
-DEV_BATHROOM_WINDOW_ID     = 470834502
+# Was 470834502, a device that no longer existed, so the Bathroom never saw its window
+# open (found 09-10-2026). validate_configuration() now checks every contact below.
+DEV_BATHROOM_WINDOW_ID     = 528094753   # "Bathroom Window Contact Sensor" (z2m)
 DEV_BEDROOM_1_WINDOW_ID    = 398804951
 DEV_BEDROOM_2_WINDOW_ID    = 431560729
 DEV_BEDROOM_3_WINDOW_ID    = 980886156
@@ -56,6 +58,25 @@ DEV_LIVING_ROOM_R_WIN_ID   = 988734901
 DEV_LIVING_ROOM_L_WIN_ID   = 1085940495
 DEV_UTILITY_WINDOW_ID      = 181963388
 DEV_UTILITY_DOOR_ID        = 1627038252
+
+# Every contact a room's heating reacts to, with a name for the startup check and the
+# 30-second change watch (1.22.0). The sliding door is internal but drives the
+# Conservatory's own rule, so it is watched too.
+WATCHED_CONTACTS = (
+    (DEV_BATHROOM_WINDOW_ID,   "Bathroom window"),
+    (DEV_BEDROOM_1_WINDOW_ID,  "Bedroom 1 window"),
+    (DEV_BEDROOM_2_WINDOW_ID,  "Bedroom 2 window"),
+    (DEV_BEDROOM_3_WINDOW_ID,  "Bedroom 3 window"),
+    (DEV_EN_SUITE_WINDOW_ID,   "En Suite window"),
+    (DEV_GARDEN_WINDOW_L_ID,   "Conservatory left window"),
+    (DEV_GARDEN_WINDOW_R_ID,   "Conservatory right window"),
+    (DEV_GARDEN_DOOR_ID,       "Conservatory outside door"),
+    (DEV_SLIDE_DOOR_ID,        "Conservatory sliding door"),
+    (DEV_LIVING_ROOM_R_WIN_ID, "Living Room right window"),
+    (DEV_LIVING_ROOM_L_WIN_ID, "Living Room left window"),
+    (DEV_UTILITY_WINDOW_ID,    "Utility Room window"),
+    (DEV_UTILITY_DOOR_ID,      "Utility Room door"),
+)
 
 # Radiators — RAMSES ESP thermostat devices (zone index in comment)
 DEV_BATHROOM_ID            = 1886011292  # Zone  5
@@ -526,6 +547,18 @@ def validate_configuration():
             indigo.devices[dev_id]
         except Exception:
             errors.append(f"Missing required device: {dev_label} (ID: {dev_id})")
+
+    # The window and door contacts, and the En Suite floor devices (1.22.0). A missing
+    # contact reads as "shut" (_contact_is_open fails safe), so without this check an
+    # open window could be ignored for ever with nothing logged - as the Bathroom's was.
+    for dev_id, dev_label in WATCHED_CONTACTS + (
+            (DEV_EN_SUITE_FLOOR_HEAT_ID, "En Suite floor heating switch"),
+            (DEV_EN_SUITE_FLOOR_THERMOSTAT_ID, "En Suite floor heating thermostat")):
+        try:
+            indigo.devices[dev_id]
+        except Exception:
+            errors.append(f"Missing device: {dev_label} (ID: {dev_id}). Until it is fixed "
+                          f"in heating_logic.py its room's heating cannot react to it.")
 
     for error in errors:
         indigo.server.log(_stamp(error), level=_to_level("ERROR"))
@@ -1146,6 +1179,77 @@ def en_suite_special_rules(temp, msg, windows_open, doors_open,
 
 
 # ---------------------------------------------------------------------------
+# AN OPEN WINDOW BEATS EVERYTHING (1.22.0)
+# ---------------------------------------------------------------------------
+# CliveS, 09-10-2026: "Whenever a window opens then that overrides heating". That
+# morning the En Suite window was open with its radiator at 25, set by hand at 8:50,
+# and the plugin left it heating: the hand hold returned before the window was read.
+# A missing or stale reading returned before it too, and the Conservatory's
+# sliding-door rule (12 degC) was exempt from it. Now an open window or outside door
+# is read first and the radiator goes to RADIATORS_OFF_TEMP whatever else applies.
+# The one exception is the Dining Room's 16 degC (messages 20/21): it has no window of
+# its own and reacts to the conservatory's, so it is turned down, not off.
+# A hand setting does not come back when the window shuts: sending 8 makes the room
+# ours again, and it returns to its plan.
+_WINDOW_OVERRIDE_ANNOUNCED = {}
+
+
+def open_window_override(room_name, dev_radiator, windows_open, doors_open,
+                         window_count, door_count, special_rules, floor_heat_device,
+                         outdoor_temp, hour, plan_hours=None,
+                         last_setpoints=None, last_messages=None,
+                         log_buffer=None, changes_buffer=None,
+                         force_log=False, event_log_dump=True, is_away=False):
+    """Set the radiator for a room with a window or outside door open."""
+    if windows_open:
+        new_temp, message = RADIATORS_OFF_TEMP, (2 if window_count >= 2 else 1)
+    else:
+        new_temp, message = RADIATORS_OFF_TEMP, (4 if (windows_open and doors_open) else 3)
+
+    # A room's own rule may say what an open window means for it. Only the Dining
+    # Room's turn-down (20/21) is kept, and not with away mode on or above
+    # OUTDOOR_TEMP_TRIGGER, where it went to 8 before too. The En Suite rule is still
+    # called because it cancels the morning for the day when the window opens.
+    mild = outdoor_temp is not None and outdoor_temp > OUTDOOR_TEMP_TRIGGER
+    if special_rules:
+        try:
+            rule_temp, rule_msg = special_rules(new_temp, message, windows_open, doors_open,
+                                                window_count, door_count, outdoor_temp, hour)
+            if rule_msg in (20, 21) and not is_away and not mild:
+                new_temp, message = rule_temp, rule_msg
+        except Exception as e:
+            _log(f"{room_name}: room rule failed with a window open: {e}",
+                 level="WARNING", log_buffer=log_buffer)
+
+    if windows_open and floor_heat_device:
+        try:
+            floor_heat_off("window open", log_buffer=log_buffer)
+        except Exception as e:
+            _log(f"Error turning off floor heating in {room_name}: {e}",
+                 level="ERROR", log_buffer=log_buffer)
+
+    held = manual_hold_until(dev_radiator, plan_hours or [0] * 24)
+    if held is not None and not _WINDOW_OVERRIDE_ANNOUNCED.get(room_name):
+        _WINDOW_OVERRIDE_ANNOUNCED[room_name] = True
+        what = "window" if windows_open else "outside door"
+        _log(f"{room_name}: a {what} is open, so the temperature set by hand gives way and "
+             f"the radiator goes down to {new_temp:g} degrees. When it shuts the room goes "
+             f"back to its plan.", log_buffer=log_buffer)
+
+    temp_str = dev_radiator.states.get("temperatureInput1")
+    try:
+        dev_temp = float(temp_str)
+    except (TypeError, ValueError):
+        dev_temp = None
+    update_radiator_setpoint(
+        dev_radiator, new_temp, message, room_name,
+        last_setpoints if last_setpoints is not None else {},
+        last_messages if last_messages is not None else {},
+        log_buffer, changes_buffer, dev_temp, None, None,
+        force_log=force_log, event_log_dump=event_log_dump)
+
+
+# ---------------------------------------------------------------------------
 # MAIN ROOM PROCESSING
 # ---------------------------------------------------------------------------
 
@@ -1209,12 +1313,54 @@ def process_room_temperature(
     window_count    = 0
     door_count      = 0
 
+    # --- Check window states (Zigbee contact sensors) ---
+    # Read FIRST (1.22.0): an open window or outside door decides the radiator before
+    # anything else is looked at - see open_window_override().
+    if window_devices:
+        for dev_id in window_devices:
+            try:
+                if _contact_is_open(dev_id):
+                    windows_open = True
+                    window_count += 1
+            except Exception as e:
+                _log(f"Error accessing window {dev_id} in {room_name}: {e}",
+                     level="ERROR", log_buffer=log_buffer)
+
+    # --- Check door states ---
+    # Use the same _contact_is_open() reader as windows so a Zigbee2MQTT door
+    # contact (states["contact"]: False = open) is read correctly rather than via
+    # the raw onOffState.ui, which a Zigbee contact device does not drive reliably.
+    if door_devices:
+        for dev_id in door_devices:
+            try:
+                if _contact_is_open(dev_id):
+                    doors_open = True
+                    door_count += 1
+            except Exception as e:
+                _log(f"Error accessing door {dev_id} in {room_name}: {e}",
+                     level="ERROR", log_buffer=log_buffer)
+
     # --- Retrieve RAMSES thermostat device ---
     try:
         if not ha_device_id:
             _log(f"ERROR: No RAMSES device ID for {room_name}", level="ERROR", log_buffer=log_buffer)
             return
         dev_radiator = indigo.devices[ha_device_id]
+
+        # An open window or outside door beats everything (1.22.0): a setting made by
+        # hand, a missing or stale reading, the En Suite morning or drying run, boost.
+        if windows_open or doors_open:
+            open_window_override(
+                room_name, dev_radiator, windows_open, doors_open, window_count, door_count,
+                special_rules, floor_heat_device, current_outdoor_temp, current_hour,
+                plan_hours=(guest_schedule if (is_guest and guest_schedule) else room_schedule),
+                last_setpoints=last_setpoints, last_messages=last_messages,
+                log_buffer=log_buffer, changes_buffer=changes_buffer,
+                force_log=(force_log_override if force_log_override is not None
+                           else (current_minute == 0)),
+                event_log_dump=event_log_dump, is_away=is_away)
+            return
+        _WINDOW_OVERRIDE_ANNOUNCED.pop(room_name, None)
 
         # No temperature state at all is the same as an unreadable one - never 0degC.
         temp_str = dev_radiator.states.get("temperatureInput1")
@@ -1260,31 +1406,6 @@ def process_room_temperature(
     except Exception as e:
         _log(f"Error retrieving device for {room_name}: {e}", level="ERROR", log_buffer=log_buffer)
         return
-
-    # --- Check window states (Zigbee contact sensors) ---
-    if window_devices:
-        for dev_id in window_devices:
-            try:
-                if _contact_is_open(dev_id):
-                    windows_open = True
-                    window_count += 1
-            except Exception as e:
-                _log(f"Error accessing window {dev_id} in {room_name}: {e}",
-                     level="ERROR", log_buffer=log_buffer)
-
-    # --- Check door states ---
-    # Use the same _contact_is_open() reader as windows so a Zigbee2MQTT door
-    # contact (states["contact"]: False = open) is read correctly rather than via
-    # the raw onOffState.ui, which a Zigbee contact device does not drive reliably.
-    if door_devices:
-        for dev_id in door_devices:
-            try:
-                if _contact_is_open(dev_id):
-                    doors_open = True
-                    door_count += 1
-            except Exception as e:
-                _log(f"Error accessing door {dev_id} in {room_name}: {e}",
-                     level="ERROR", log_buffer=log_buffer)
 
     # --- Base temperature from schedule ---
     if guest_schedule:
@@ -1366,16 +1487,6 @@ def process_room_temperature(
         if special_msg is not None and special_msg != message:
             message = special_msg
 
-    # An open window switches the floor heating off whatever mode the house is in.
-    # This used to sit in the windows branch below, which is an elif of Away, so
-    # with Away on an open En Suite window left the floor heating running.
-    if windows_open and floor_heat_device:
-        try:
-            floor_heat_off("window open", log_buffer=log_buffer)
-        except Exception as e:
-            _log(f"Error turning off floor heating in {room_name}: {e}",
-                 level="ERROR", log_buffer=log_buffer)
-
     # --- Standard priority overrides ---
 
     # Away mode
@@ -1388,26 +1499,14 @@ def process_room_temperature(
             new_temp = AWAY_TEMP
             message  = 8
 
-    # Windows open. 20/21 are a special rule that has already decided what an open
-    # window means for this room (the Dining Room holds 16 degC rather than closing
-    # its valve), so the general rule must not overwrite that decision with 8 degC.
-    # An `if`, not an `elif` of Away (1.14.0): with Away on, an open window used to
-    # leave the radiator at 14 or 16 degC heating the garden. Away's own setting is a
-    # message 8/15, which is not exempt here, so the window wins.
-    if windows_open and message not in (5, 20, 21):
-        new_temp = RADIATORS_OFF_TEMP
-        message  = 2 if window_count >= 2 else 1
-
-    # Doors open (20/21 exempt for the same reason as windows above)
-    elif doors_open and message not in (5, 20, 21):
-        new_temp = RADIATORS_OFF_TEMP
-        message  = 4 if (windows_open and doors_open) else 3
+    # Open windows and outside doors never reach here: open_window_override() has
+    # already set the radiator and returned (1.22.0).
 
     # Restore floor heating when window closes (En Suite only, morning schedule active)
     # Also the second chance for a 6am start that only powered the thermostat, or a
     # command the thermostat did not confirm (1.21.0): floor_heat_on sends nothing
     # while the thermostat already reports Heat at the morning temperature.
-    elif floor_heat_device and not windows_open and floor_heat_restore_enabled and not is_away:
+    if floor_heat_device and floor_heat_restore_enabled and not is_away:
         try:
             floor_heat_on(log_buffer=log_buffer)
         except Exception as e:

@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.21.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.22.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.22.0** — An open window or outside door now turns its room's radiator down within about half a minute, whatever else is going on, including a temperature set by hand. The Bathroom's window is watched again.
 
 **v1.21.0** — The En Suite underfloor heating is now turned on and off through its thermostat. The switch that powers the thermostat stays on, so the thermostat can always be reached.
 

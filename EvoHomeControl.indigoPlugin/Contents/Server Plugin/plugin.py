@@ -4,8 +4,20 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        09-10-2026 09:45
-# Version:     1.21.0
+# Date:        09-10-2026 10:15
+# Version:     1.22.0
+#
+# v1.22.0 (09-10-2026): AN OPEN WINDOW BEATS EVERYTHING. CliveS: "Whenever a window opens then
+#   that overrides heating" - the En Suite heated an open window at 25 degC set by hand, because
+#   the manual-hold return came before the window was read (a missing/stale reading returned
+#   first too, and the Conservatory's message 5 was exempt). heating_logic now reads the
+#   contacts first and open_window_override() sets RADIATORS_OFF_TEMP, keeping only the Dining
+#   Room's 16 (20/21; not with away or mild). The hand setting is not restored (our 8 makes the
+#   room ours). _check_contacts_changed() requests a cycle on any change, every 30-s tick.
+#   DEV_BATHROOM_WINDOW_ID was 470834502, a device that no longer exists - now 528094753 - and
+#   validate_configuration() checks every WATCHED_CONTACTS id at startup. The dead window
+#   branches in process_room_temperature are gone. test_1_22_open_window.py 14 tests,
+#   10/10 mutations caught. (Claude Opus 5.5)
 #
 # v1.21.0 (09-10-2026): THE EN SUITE FLOOR IS SWITCHED THROUGH ITS THERMOSTAT. The Heatit
 #   TF021 is powered through Z-Wave switch 69786879, and the plugin used that switch as the
@@ -431,6 +443,7 @@ from heating_logic    import (
     EN_SUITE_DRYING_START_HOUR,
     EN_SUITE_DRYING_END_HOUR,
     ALL_RADIATOR_IDS,
+    WATCHED_CONTACTS,
     RADIATORS_OFF_TEMP,
     TEMP_CHANGE_TOLERANCE,
     is_within_summer_off,
@@ -473,7 +486,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.21.0"
+PLUGIN_VERSION  = "1.22.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -870,7 +883,7 @@ class Plugin(indigo.PluginBase):
 
         # Validate Indigo variable IDs before first cycle
         if not validate_configuration():
-            _log("[Startup] WARNING: Some Indigo variables are missing — check IDs in heating_logic.py",
+            _log("[Startup] WARNING: Some Indigo variables or devices are missing — check IDs in heating_logic.py",
                  level="WARNING")
 
         # Set initial device states
@@ -1020,6 +1033,13 @@ class Plugin(indigo.PluginBase):
         # Timed boost expiry check (every tick)
         self._check_timed_boost_expiry()
 
+        # A window or door opening or shutting gets a heating cycle at once (1.22.0),
+        # not up to five minutes later. Its own try, like the interlock above.
+        try:
+            self._check_contacts_changed()
+        except Exception as e:
+            _log(f"[Windows] Check failed: {e}", level="WARNING")
+
         # Main heating cycle (time-delta dispatch), or sooner when one was asked for.
         # The request count is read BEFORE the cycle, so a request that arrives while
         # it runs is still outstanding afterwards and gets its own cycle next tick.
@@ -1029,6 +1049,16 @@ class Plugin(indigo.PluginBase):
             self._run_heating_cycle()
             self.store["last_heating_cycle"]    = now
             self.store["cycle_requests_served"] = requested
+
+    def _check_contacts_changed(self):
+        """Ask for a heating cycle when any watched window or door has opened or shut
+        since the last tick. The first tick only records what is open."""
+        now_open = frozenset(dev_id for dev_id, _ in WATCHED_CONTACTS
+                             if _contact_is_open(dev_id))
+        last = self.store.get("open_contacts")
+        self.store["open_contacts"] = now_open
+        if last is not None and now_open != last:
+            self._request_cycle()
 
     def _request_cycle(self):
         """Ask for a heating cycle at the next tick, even if one is running now."""

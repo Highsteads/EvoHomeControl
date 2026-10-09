@@ -7,6 +7,12 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.22.0 — 9 October 2026
+
+- **An open window beats everything.** Open a window or outside door and that room's radiator goes down to 8 degrees, even if somebody has set a temperature by hand, a boost is on, the En Suite morning or drying run is going, or the room's reading is missing or out of date. Before, a temperature set by hand kept heating an open window, as the En Suite did that morning at 25 degrees. The setting made by hand does not come back when the window shuts; the room returns to its plan. The Conservatory's 12 degree rule for a shut sliding door no longer beats an open garden window. The Dining Room still turns down to 16 rather than 8, because it reacts to the conservatory's windows rather than its own.
+- **Within half a minute.** The plugin looks at every window and door every 30 seconds and runs a heating check as soon as one opens or shuts, instead of waiting up to five minutes.
+- **The Bathroom window is watched again.** The plugin was looking for a Bathroom window sensor that no longer existed, so it never saw that window open. It now uses the right one, and checks every window and door sensor at start-up, logging an error for any that is missing.
+
 ## 1.21.0 — 9 October 2026
 
 - **The En Suite underfloor heating is switched through its thermostat.** The plugin used to turn the floor on and off with the switch that powers its thermostat, so the thermostat had no power whenever the floor was off. It showed as faulty for a week, and the 6am setting was sent before the thermostat had started up. Now the thermostat is set to heat at 14 degrees for the morning and to off at other times, and the power switch is left on. If the switch is found off it is turned on, and the thermostat is set at the next heating check once it has started. Each check during the morning makes sure the thermostat really is heating.
