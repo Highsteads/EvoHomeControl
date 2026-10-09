@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.19.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.20.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.20.0** — The En Suite is warmed to 20 degrees from 6am to 10am every day for the morning shower, whatever the weather. It used to be 22, and was skipped altogether when it was 10 degrees or more outside.
 
 **v1.19.0** — A room you turn up or down through Indigo, the Home app or a dashboard is now left alone until its plan next changes, the same as a change made at the Evohome controller, a valve or the app. Until now the plugin put it back within five minutes.
 

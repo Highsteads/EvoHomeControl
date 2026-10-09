@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.20.0 — 9 October 2026
+
+- **The En Suite is 20 degrees every morning for the shower.** From 6am to 10am the radiator is set to 20 degrees, every day, along with the underfloor heating as before. It used to be 22 degrees, and the whole morning was skipped when it was 10 degrees or more outside at 6am, which left the room at 16 degrees on a 14 degree morning. The rule that turns every radiator down above 14 degrees outside no longer applies to the En Suite during the morning either. Opening the window and away mode still end it, as before.
+
 ## 1.19.0 — 9 October 2026
 
 - **A room changed through Indigo is left alone too.** Turn a radiator up or down from the Indigo client, the Home app or a dashboard and the plugin now treats it as a change made by hand: it leaves the room until its plan next changes, or midnight if that is sooner, and then carries on as normal. Until now only changes at the Evohome controller, on a valve or in the app counted, because RAMSES ESP reports anything sent through Indigo as Indigo's own, so the plugin put the room back at its next check, within five minutes. The plugin now remembers what it last sent each room, and a change through Indigo to a different temperature is somebody else's. Such a change is never held for good, even though Indigo sends it as a permanent setting, because nobody chose that. The Event Log says *En Suite was set to 20 degrees by hand through Indigo, so the heating plugin leaves it alone until 10am*.

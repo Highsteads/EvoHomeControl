@@ -172,19 +172,16 @@ OVERHEAT_EXCLUDED_ROOMS = {"Bedroom 3"}
 # 17=overheat (radiator contributing)  19=window/door closed  20=window open (reduced)
 # 21=door open (reduced)  22=En Suite morning schedule
 # 23=above target (passive warmth — solar/internal gain, valve has been off 3+ cycles)
-# 24=En Suite warm-morning skip (radiator off + floor heat suppressed)
 # 25=En Suite drying run (radiator held warm to dry the room out)
-ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23, 24, 25}
+ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23, 25}
 
-# En Suite morning schedule temperature
-EN_SUITE_MORNING_TEMP = 22.0
-
-# Outdoor temperature at 06:00 above which the En Suite morning schedule is
-# skipped entirely (radiator stays off AND floor heat is not turned on).
-# Set lower than OUTDOOR_TEMP_TRIGGER (14.0) because that threshold rarely
-# fires at 6am even on warm days. 10.0 catches genuinely warm mornings where
-# the room is already comfortable and the floor isn't cold to the touch.
-EN_SUITE_WARM_MORNING_THRESHOLD = 10.0
+# En Suite morning schedule temperature, 06:00-09:59 every day for the morning shower.
+# 1.20.0 (CliveS, 09-10-2026): "I would like the EnSuite to be 20 each day for the
+# morning shower". Was 22, and skipped whenever it was 10 degC or more outside at 6am
+# (message 24) - which left the room at 16 on a 14.5 degC morning. The skip is gone,
+# and the morning is exempt from the mild-weather cut-off (OUTDOOR_TEMP_TRIGGER) as the
+# drying run is. Its message code 24 is retired; do not reuse it.
+EN_SUITE_MORNING_TEMP = 20.0
 
 # ---------------------------------------------------------------------------
 # EN SUITE DRYING RUN
@@ -834,8 +831,7 @@ def get_log_message(message_code, room_name, current_setpoint, new_temp,
         19: "Window/door closed  (valve restored)",
         20: "Window open        (valve reduced)",
         21: "Door open          (valve reduced)",
-        22: "En Suite morning   (22degC)",
-        24: f"Warm morning skip  (out >={EN_SUITE_WARM_MORNING_THRESHOLD:.0f}degC, rad+floor off)",
+        22: f"En Suite morning   ({EN_SUITE_MORNING_TEMP:.0f}degC)",
         25: "En Suite drying    (radiator only)",
     }
 
@@ -1003,19 +999,15 @@ def en_suite_special_rules(temp, msg, windows_open, doors_open,
                             window_count, door_count, outdoor_temp, hour,
                             store=None):
     """
-    En Suite morning schedule: hold 22°C from 06:00 to 09:59 if:
+    En Suite morning schedule: hold EN_SUITE_MORNING_TEMP from 06:00 to 09:59 if:
       - en_suite_morning_active flag is set in store
       - window is closed (contact state True)
 
     Cancellation reasons (set in store["en_suite_morning_cancelled_reason"]):
       - "window_open"   — window opened during the morning slot
-      - "warm_outdoor"  — outdoor temp was at/above EN_SUITE_WARM_MORNING_THRESHOLD
-                          at 06:00; orchestrator never activated morning today
+      - "warm_outdoor"  — retired in 1.20.0; may still be in a saved state file from
+                          before, and means nothing now
       - "10am_expired"  — normal end-of-window auto-cancel
-
-    For "warm_outdoor", this function ALSO forces the radiator to
-    RADIATORS_OFF_TEMP during 06-10 — the En Suite schedule's non-morning
-    value in those hours is 19-20°C which is still unwanted on a warm day.
 
     Returns (temp, msg). If window is open during active morning, returns
     unchanged so the standard windows_open branch in process_room_temperature
@@ -1037,15 +1029,6 @@ def en_suite_special_rules(temp, msg, windows_open, doors_open,
         return store.get("en_suite_drying_temp", EN_SUITE_DRYING_TEMP), 25
 
     morning_active   = store.get("en_suite_morning_active", False)
-    cancelled_reason = store.get("en_suite_morning_cancelled_reason")
-
-    # Warm-morning cancellation: keep radiator off during the would-be morning
-    # hours even though the active flag is already False. The orchestrator in
-    # plugin.py set this reason BEFORE activation; floor heat was never turned on.
-    if (not morning_active
-            and cancelled_reason == "warm_outdoor"
-            and 6 <= hour < 10):
-        return RADIATORS_OFF_TEMP, 24  # message 24 = warm-morning skip
 
     # Check En Suite window contact sensor directly
     window_open = _contact_is_open(DEV_EN_SUITE_WINDOW_ID)
@@ -1092,8 +1075,8 @@ def process_room_temperature(
         # Floor heat restore guard — only True when morning schedule is active
         floor_heat_restore_enabled=False,
         # Override the temperature baseline used for overheat detection.
-        # When En Suite morning schedule is active, pass EN_SUITE_MORNING_TEMP (22°C)
-        # so the room is only flagged as overheating if it exceeds 22°C, not 18°C.
+        # When En Suite morning schedule is active, pass EN_SUITE_MORNING_TEMP
+        # so the room is only flagged as overheating above that, not its plan value.
         overheat_target_override=None,
         # Force this room's line into the hourly full event-log dump. When None
         # (caller did not specify) fall back to the legacy minute == 0 gate.
@@ -1252,7 +1235,7 @@ def process_room_temperature(
 
     # --- Overheat detection ---
     if dev_temp is not None and dev_temp > RADIATORS_OFF_TEMP:
-        # Use override target if provided (e.g. En Suite morning schedule sets 22°C —
+        # Use override target if provided (e.g. the En Suite morning schedule —
         # use that as the baseline so 21.9°C is not falsely flagged as overheating)
         overheat_target = overheat_target_override if overheat_target_override is not None else new_temp
         # A boosted room is judged against its boosted target, so a room at 20.9 degC
@@ -1349,9 +1332,10 @@ def process_room_temperature(
     # High outdoor temperature
     # 25 (drying run) is exempt: a warm damp morning still leaves wet towels, so a
     # mild day outside must not close the valve on a run that exists to dry the room.
+    # 22 (En Suite morning) is exempt too (1.20.0): the shower is every day.
     if (current_outdoor_temp is not None and
             current_outdoor_temp > OUTDOOR_TEMP_TRIGGER and
-            message not in (17, 23, 5, 25)):
+            message not in (17, 23, 5, 22, 25)):
         new_temp = RADIATORS_OFF_TEMP
         message  = 7
 

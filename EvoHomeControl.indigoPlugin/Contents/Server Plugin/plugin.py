@@ -4,8 +4,16 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        09-10-2026 09:30
-# Version:     1.19.0
+# Date:        09-10-2026 09:00
+# Version:     1.20.0
+#
+# v1.20.0 (09-10-2026): THE EN SUITE IS 20 DEGC EVERY MORNING FOR THE SHOWER. CliveS: "I would
+#   like the EnSuite to be 20 each day for the morning shower". EN_SUITE_MORNING_TEMP 22 -> 20;
+#   the 1.5 warm-morning skip (EN_SUITE_WARM_MORNING_THRESHOLD 10 degC at 6am, message 24,
+#   cancelled reason "warm_outdoor") is removed, and message 22 is exempt from the mild-weather
+#   cut-off (OUTDOOR_TEMP_TRIGGER 14) like the drying run's 25. That morning it was 14.5 degC at
+#   6am, so the run was skipped and the room sat at 16. A saved "warm_outdoor" reason now means
+#   nothing. test_1_20_en_suite_morning.py, 6 tests, 4/4 mutations caught. (Claude Opus 5.5)
 #
 # v1.19.0 (09-10-2026): A ROOM CHANGED THROUGH INDIGO IS LEFT ALONE TOO. RAMSES ESP tags this
 #   plugin's sends and a person's change from the Indigo client, the Home app or a dashboard
@@ -403,7 +411,6 @@ from heating_logic    import (
     DEV_HALL_BEDROOM_ID, DEV_HALL_KITCHEN_ID,
     DEV_LIVING_ROOM_DOOR_ID, DEV_LIVING_ROOM_FRONT_ID, DEV_UTILITY_ROOM_ID,
     EN_SUITE_MORNING_TEMP,
-    EN_SUITE_WARM_MORNING_THRESHOLD,
     EN_SUITE_DRYING_TEMP,
     EN_SUITE_DRYING_MAX_OUTDOOR,
     EN_SUITE_DRYING_ROOM_BELOW,
@@ -452,7 +459,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.19.0"
+PLUGIN_VERSION  = "1.20.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -724,7 +731,7 @@ class Plugin(indigo.PluginBase):
         # only, so a plugin restart re-announces once and then stays quiet.
         self.store["summer_lockout_logged"] = None
 
-        # En Suite morning schedule (auto 22°C 06:00-09:59, cancelled by window open)
+        # En Suite morning schedule (auto EN_SUITE_MORNING_TEMP 06:00-09:59, cancelled by window open)
         self.store["en_suite_morning_active"]           = False
         self.store["en_suite_morning_cancelled_date"]   = None  # "YYYY-MM-DD"
         self.store["en_suite_morning_cancelled_reason"] = None
@@ -2234,30 +2241,12 @@ class Plugin(indigo.PluginBase):
                 and not cancelled_today
                 and not _contact_is_open(DEV_EN_SUITE_WINDOW_ID)):
 
-            # Warm-morning skip: if outdoor temperature is at/above the warm
-            # threshold at activation time, the en suite room is already
-            # comfortable and the floor is not cold to the touch. Skip the
-            # 22degC morning slot entirely — radiator stays off, floor switch
-            # stays off, floor thermostat is not touched. en_suite_special_rules
-            # forces the radiator to RADIATORS_OFF_TEMP for the remaining 06-10
-            # hours (otherwise the schedule's 19-20degC values would still run).
-            outdoor_temp = self.weather.get_outdoor_temp() if self.weather else None
-            if (outdoor_temp is not None
-                    and outdoor_temp >= EN_SUITE_WARM_MORNING_THRESHOLD):
-                self.store["en_suite_morning_cancelled_date"]   = today
-                self.store["en_suite_morning_cancelled_reason"] = "warm_outdoor"
-                _log(
-                    f"[EnSuiteMorning] 6am — outdoor {outdoor_temp:.1f}degC >= "
-                    f"{EN_SUITE_WARM_MORNING_THRESHOLD:.0f}degC: skipping morning "
-                    f"schedule (radiator + floor heat stay off)"
-                )
-                self._save_state()
-                self._fire_event("enSuiteMorningCancelled")
-                return  # Don't activate; don't touch floor switch or thermostat
-
+            # Every day, whatever the weather (1.20.0, CliveS: "I would like the
+            # EnSuite to be 20 each day for the morning shower"). The warm-morning
+            # skip at 10 degC outside is gone.
             self.store["en_suite_morning_active"]           = True
             self.store["en_suite_morning_cancelled_reason"] = None
-            _log("[EnSuiteMorning] 6am — starting 22degC morning schedule")
+            _log(f"[EnSuiteMorning] 6am — starting {EN_SUITE_MORNING_TEMP:.0f}degC morning schedule")
             # Turn on floor heating switch immediately (don't wait for next heating cycle)
             try:
                 indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)

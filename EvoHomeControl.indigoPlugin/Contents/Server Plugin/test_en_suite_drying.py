@@ -169,21 +169,14 @@ class TestDryingSpecialRule(unittest.TestCase):
         _, msg = hl.en_suite_special_rules(18, 11, False, False, 0, 0, 5.0, 7, store=store)
         self.assertEqual(msg, 25, "drying is the higher-priority rule")
 
-    def test_drying_beats_the_warm_morning_skip(self):
-        # The warm-morning skip forces the radiator OFF between 06:00 and 09:59.
-        # A drying run must override it: a warm damp morning still has wet towels.
+    def test_drying_beats_a_saved_warm_morning_reason(self):
+        # The warm-morning skip (retired in 1.20.0) used to force the radiator OFF
+        # between 06:00 and 09:59; a saved state file may still carry its reason.
         store = {"en_suite_drying_active": True, "en_suite_drying_temp": 22.0,
                  "en_suite_morning_active": False,
                  "en_suite_morning_cancelled_reason": "warm_outdoor"}
         temp, msg = hl.en_suite_special_rules(19, 11, False, False, 0, 0, 15.0, 7, store=store)
         self.assertEqual((temp, msg), (22.0, 25))
-
-    def test_warm_morning_skip_still_works_when_no_run_is_going(self):
-        store = {"en_suite_drying_active": False,
-                 "en_suite_morning_active": False,
-                 "en_suite_morning_cancelled_reason": "warm_outdoor"}
-        temp, msg = hl.en_suite_special_rules(19, 11, False, False, 0, 0, 15.0, 7, store=store)
-        self.assertEqual((temp, msg), (hl.RADIATORS_OFF_TEMP, 24))
 
 
 # ---------------------------------------------------------------------------

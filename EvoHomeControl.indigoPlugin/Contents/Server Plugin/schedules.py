@@ -29,7 +29,7 @@ Bedroom_3         = [14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14
 Bedroom_3_Guest   = [14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14]
 
 # En Suite: background floor heating means TRV contribution is modest.
-# Morning period (06:00-09:59) is overridden to 22°C by en_suite_special_rules()
+# Morning period (06:00-09:59) is overridden to 20°C by en_suite_special_rules()
 # when the morning schedule is active and the window is closed.
 En_Suite          = [18,18,18,19,19,19,19,20,20,20,18,18,18,18,18,18,18,18,18,18,20,20,18,18]
 

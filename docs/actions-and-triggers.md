@@ -38,7 +38,7 @@ To run something when one of these happens, create a new trigger, set its type t
 | **Timed Boost Ended** | When a timed boost runs out or is cancelled. |
 | **Snow Forecast Detected** | When snow first appears in the forecast, if the snow boost is switched on. |
 | **En Suite Morning Started** | When the En Suite morning schedule starts. |
-| **En Suite Morning Cancelled** | When the morning schedule ends at 10am, is skipped because it is a warm morning, or is ended by the window being opened. |
+| **En Suite Morning Cancelled** | When the morning schedule ends at 10am, or is ended by the window being opened or away mode being switched on. |
 | **Summer Force-On Started** | When a 24-hour Force Heating On starts. |
 | **Summer Force-On Ended** | When the 24 hours run out or are cancelled. |
 | **En Suite Drying Run Started** | When a drying run starts, including a test run. |
