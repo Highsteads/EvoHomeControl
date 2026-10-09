@@ -28,6 +28,7 @@ class TestHoldUntil(unittest.TestCase):
 
     def setUp(self):
         hl._MANUAL_ANNOUNCED.clear()
+        hl._SENT.clear()
 
     def test_a_morning_change_holds_until_the_plan_next_moves(self):
         dev = _hand(FakeZone(), datetime(2026, 10, 20, 8, 15))

@@ -17,6 +17,8 @@ It sets each radiator to a target for two hours at a time — Evohome calls this
 
 You can still change a room the ordinary Evohome way, at the controller, on a radiator valve's wheel or in the app, and the plugin will not undo it. RAMSES ESP tells the plugin who made each change, and a room changed by hand is left alone until its plan next changes, or midnight if that is sooner. After that the plugin sets it as usual. A room set permanently by hand is left alone until somebody puts it back on its timetable, for example by pressing **Auto** on the controller. The Event Log says when a room is being left alone and when it comes back.
 
+The same goes for a room changed through Indigo itself, from the Indigo client, the Home app or a dashboard. The plugin remembers what it last sent each room, so a change through Indigo to a different temperature must be somebody else's, and it is left alone until the room's plan next changes, or midnight. Indigo sends these as permanent settings, but the plugin never holds them for good, because nobody chose that.
+
 Because that timetable is the fallback, the plugin checks it every morning at 4am against its own plans, room by room, using the copy RAMSES ESP reads from the controller each night. If a room differs, the Event Log says where and you get one Pushover message.
 
 Between heating checks, the plugin looks every 30 seconds at the things that need a quicker answer: a boost or a 24-hour override running out, the En Suite's 6am start and 10am finish, and the En Suite window during a drying run.

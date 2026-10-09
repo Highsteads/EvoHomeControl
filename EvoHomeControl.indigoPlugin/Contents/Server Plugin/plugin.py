@@ -4,8 +4,18 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        05-10-2026 22:54
-# Version:     1.18.1
+# Date:        09-10-2026 09:30
+# Version:     1.19.0
+#
+# v1.19.0 (09-10-2026): A ROOM CHANGED THROUGH INDIGO IS LEFT ALONE TOO. RAMSES ESP tags this
+#   plugin's sends and a person's change from the Indigo client, the Home app or a dashboard
+#   alike as "indigo", so 1.16.0's hand hold missed them: CliveS turned the En Suite up from
+#   8 to 20 at 07:52 on 09-10-2026 and the next cycle put it back at 07:57. heating_logic now
+#   remembers what send_setpoint last sent each zone (_SENT, saved in setpoint_cache.json); an
+#   "indigo" change after that, to a different temperature, is held like a hand change, until
+#   the plan next changes even when it came as a permanent override (RAMSES sends Indigo's own
+#   thermostat command as permanent). test_1_19_indigo_hand.py, 13 tests, 8/8 mutations caught.
+#   (Claude Opus 5.5)
 #
 # v1.18.1 (05-10-2026): TWO FINDINGS FROM AN EXTERNAL AUDIT, tests watched failing first
 #   (test_1_18_1_fixes.py, 17 tests, 14 red on 1.18.0). HI-03: new _check_en_suite_window_interlock
@@ -442,7 +452,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.18.1"
+PLUGIN_VERSION  = "1.19.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1505,6 +1515,7 @@ class Plugin(indigo.PluginBase):
         except (AttributeError, NameError):
             plans = {}   # no plan to hand: a hold made by hand then lasts until midnight
         hold_end = self._summer_hold_until()
+        sent_any = False
         for dev_id in ALL_RADIATOR_IDS:
             try:
                 dev = indigo.devices[dev_id]
@@ -1530,11 +1541,19 @@ class Plugin(indigo.PluginBase):
             until     = None if is_drying else hold_end
             changed   = (before is None) or (abs(before - target) > TEMP_CHANGE_TOLERANCE)
             if changed or heating_logic.needs_override_refresh(dev, until=until):
+                sent_any = True
                 try:
                     heating_logic.send_setpoint(dev, target, until=until)
                 except Exception as e:
                     _log(f"[Summer] Could not set radiator {dev.name} to "
                          f"{target:.0f}degC: {e}", level="WARNING")
+        # Keep the record of what was sent across a restart (1.19.0); the heating
+        # cycle that normally saves it does not run during the shut-off.
+        if sent_any:
+            try:
+                self._save_setpoint_cache()
+            except Exception as e:
+                _log(f"[Summer] Could not save the setpoint cache: {e}", level="WARNING")
 
         # En Suite floor heating switch off (idempotent on onState)
         try:
@@ -2825,6 +2844,7 @@ class Plugin(indigo.PluginBase):
             if isinstance(raw, dict) and "setpoints" in raw:
                 self.store["last_setpoints"] = raw.get("setpoints", {})
                 self.store["last_messages"]  = raw.get("messages",  {})
+                heating_logic.restore_sent(raw.get("sent", {}))
             else:
                 self.store["last_setpoints"] = raw if isinstance(raw, dict) else {}
                 self.store["last_messages"]  = {}
@@ -2949,6 +2969,7 @@ class Plugin(indigo.PluginBase):
             _atomic_write_json(cache_path, {
                 "setpoints": self.store["last_setpoints"],
                 "messages":  self.store["last_messages"],
+                "sent":      heating_logic.sent_snapshot(),
             })
         except OSError as e:
             _log(f"[SetpointCache] Write error: {e}", level="WARNING")

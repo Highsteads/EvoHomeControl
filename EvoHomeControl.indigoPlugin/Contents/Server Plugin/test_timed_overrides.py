@@ -106,10 +106,12 @@ class _Base(unittest.TestCase):
                                        getPlugin=lambda pid: self.ramses)
         _indigo.server = server
         hl._OVERRIDE_WARNED.clear()
+        hl._SENT.clear()
         hl.set_override_minutes(120)
 
     def tearDown(self):
         hl.set_override_minutes(0)
+        hl._SENT.clear()
         _indigo.server     = self._saved_server
         _indigo.thermostat = self._saved_thermo
         _indigo.devices.clear()

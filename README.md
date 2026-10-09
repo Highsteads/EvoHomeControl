@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.18.1 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.19.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.19.0** — A room you turn up or down through Indigo, the Home app or a dashboard is now left alone until its plan next changes, the same as a change made at the Evohome controller, a valve or the app. Until now the plugin put it back within five minutes.
 
 **v1.18.1** — An open En Suite window switches the underfloor heating off within 30 seconds, even when the radiator is being left alone, and the clocks going back no longer confuse how old a room's reading is (best with RAMSES ESP 1.17.0).
 

@@ -307,6 +307,7 @@ def send_setpoint(dev, value, permanent=False, until=None):
     With `until` ("YYYY-MM-DD HH:MM") the setting ends at that time instead (1.16.0:
     the summer hold ends on the day heating is due back, so a stopped Indigo cannot
     keep the house cold into the winter). Needs RAMSES ESP 1.15.0; permanent before."""
+    note_sent(dev, value)
     if until is not None:
         if _timed_overrides_on() and _ramses_takes_until():
             try:
@@ -348,14 +349,67 @@ def send_setpoint(dev, value, permanent=False, until=None):
 # by hand is left alone until its plan next changes (at the latest midnight), or for as
 # long as it stays on a permanent setting. So anyone can run the heating the ordinary
 # Evohome way while Indigo is still running, without Indigo undoing it minutes later.
+#
+# CHANGES MADE THROUGH INDIGO (1.19.0). RAMSES ESP calls every setpoint sent through it
+# "indigo", whether this plugin sent it or a person did from the Indigo client, the Home
+# app or a dashboard. CliveS turned the En Suite up from the Home app on 09-10-2026 and
+# this plugin put it back to 8 five minutes later. So it now remembers what it last sent
+# each zone, and an "indigo" change made after that, to a different temperature, is a
+# person's and held like one made by hand. It is held until the plan next changes even
+# when it arrived as a permanent setting: RAMSES ESP sends Indigo's own thermostat command
+# as permanent, so the person never chose "for good".
 _MANUAL_ANNOUNCED = {}
+
+# {device id: (temperature, when)} - the last setpoint this plugin sent each zone.
+# Saved with the setpoint cache, so a plugin restart does not forget a person's change.
+_SENT = {}
+
+
+def note_sent(dev, value, when=None):
+    """Remember that this plugin sent `value` to `dev` (now, unless `when` is given)."""
+    try:
+        _SENT[int(dev.id)] = (float(value), when or dt.now())
+    except (TypeError, ValueError, AttributeError):
+        pass
+
+
+def sent_snapshot():
+    """The record above as JSON-friendly data, for the setpoint cache."""
+    return {str(k): [v, when.isoformat()] for k, (v, when) in _SENT.items()}
+
+
+def restore_sent(data):
+    """Load what sent_snapshot() wrote. Anything unreadable is skipped, never raised."""
+    if not isinstance(data, dict):
+        return
+    for k, item in data.items():
+        try:
+            _SENT[int(k)] = (float(item[0]), dt.fromisoformat(str(item[1])))
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+
+
+def _changed_through_indigo(dev, changed):
+    """True when an "indigo" change was not this plugin's: it came after the last thing
+    this plugin sent the zone, and to a different temperature. With nothing on record
+    (no send since the record began) the change is taken to be ours."""
+    sent = _SENT.get(int(dev.id)) if hasattr(dev, "id") else None
+    if sent is None:
+        return False
+    value, when = sent
+    try:
+        now_value = float(dev.states.get("setpointHeat"))
+    except (TypeError, ValueError):
+        return False
+    return changed > when and abs(now_value - value) > TEMP_CHANGE_TOLERANCE
 
 
 def manual_hold_until(dev, hours, now=None):
     """None when the room is not held; otherwise when the hold ends (a datetime), or
     the string "permanent" while it stays on a permanent setting made by hand."""
     states = dev.states
-    if states.get("setpointSource") != "manual":
+    source = states.get("setpointSource")
+    if source not in ("manual", "indigo"):
         return None
     mode = states.get("zoneMode", "")
     if mode == "schedule":
@@ -364,7 +418,10 @@ def manual_hold_until(dev, hours, now=None):
         changed = dt.strptime(str(states.get("setpointChangedAt", ""))[:19], "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
-    if mode == "permanent override":
+    if source == "indigo":
+        if not _changed_through_indigo(dev, changed):
+            return None
+    elif mode == "permanent override":
         return "permanent"
     hour_start = changed.replace(minute=0, second=0, microsecond=0)
     end = None
@@ -398,8 +455,9 @@ def check_manual_hold(room, dev, hours, now=None, log_buffer=None):
             how = "while it stays on that permanent setting"
         else:
             how = f"until {_clock_words(held)}"
-        _log(f"{room} was set to {value} by hand, so the heating plugin leaves it alone {how}.",
-             log_buffer=log_buffer)
+        where = " through Indigo" if dev.states.get("setpointSource") == "indigo" else ""
+        _log(f"{room} was set to {value} by hand{where}, so the heating plugin leaves it "
+             f"alone {how}.", log_buffer=log_buffer)
     return True
 
 
