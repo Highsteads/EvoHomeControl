@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.21.0 — 9 October 2026
+
+- **The En Suite underfloor heating is switched through its thermostat.** The plugin used to turn the floor on and off with the switch that powers its thermostat, so the thermostat had no power whenever the floor was off. It showed as faulty for a week, and the 6am setting was sent before the thermostat had started up. Now the thermostat is set to heat at 14 degrees for the morning and to off at other times, and the power switch is left on. If the switch is found off it is turned on, and the thermostat is set at the next heating check once it has started. Each check during the morning makes sure the thermostat really is heating.
+
 ## 1.20.0 — 9 October 2026
 
 - **The En Suite is 20 degrees every morning for the shower.** From 6am to 10am the radiator is set to 20 degrees, every day, along with the underfloor heating as before. It used to be 22 degrees, and the whole morning was skipped when it was 10 degrees or more outside at 6am, which left the room at 16 degrees on a 14 degree morning. The rule that turns every radiator down above 14 degrees outside no longer applies to the En Suite during the morning either. Opening the window and away mode still end it, as before.

@@ -4,8 +4,22 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        09-10-2026 09:00
-# Version:     1.20.0
+# Date:        09-10-2026 09:45
+# Version:     1.21.0
+#
+# v1.21.0 (09-10-2026): THE EN SUITE FLOOR IS SWITCHED THROUGH ITS THERMOSTAT. The Heatit
+#   TF021 is powered through Z-Wave switch 69786879, and the plugin used that switch as the
+#   floor's on/off, so the thermostat had no power whenever the floor was off ("no ack"
+#   2-9 Oct) and the 6am Heat/14 went to a thermostat still starting (it answered 24 s after
+#   power-on, measured). CliveS: the switch was "a belt and braces fix originally". New
+#   heating_logic floor_heat_on / floor_heat_off / floor_heat_is_heating: ON = power on if
+#   off (and send nothing yet), mode Heat + FLOOR_HEAT_ON_TEMP 14; OFF = mode Off, never the
+#   switch; nothing sent to an unpowered or already-Off thermostat; an unconfirmed Off resent
+#   at most every 10 min. Every floor path uses them (morning start, 10am, away, window
+#   interlock + cycle, restore, summer). The cycle's restore branch is the second chance for
+#   a morning: it resends while the thermostat does not REPORT Heat at 14. Proven live first:
+#   Off, Heat and setpoint each confirmed. test_1_21_floor_by_thermostat.py 8 tests, 9
+#   floor tests rewritten, 12/12 mutations caught. (Claude Opus 5.5)
 #
 # v1.20.0 (09-10-2026): THE EN SUITE IS 20 DEGC EVERY MORNING FOR THE SHOWER. CliveS: "I would
 #   like the EnSuite to be 20 each day for the morning shower". EN_SUITE_MORNING_TEMP 22 -> 20;
@@ -402,7 +416,7 @@ from heating_logic    import (
     VAR_TEMP_OFFSET_ID, VAR_HOME_AWAY_ID, VAR_BOOST_ID,
     DEV_BATHROOM_WINDOW_ID, DEV_BEDROOM_1_WINDOW_ID, DEV_BEDROOM_2_WINDOW_ID,
     DEV_BEDROOM_3_WINDOW_ID, DEV_EN_SUITE_WINDOW_ID,
-    DEV_EN_SUITE_FLOOR_HEAT_ID, DEV_EN_SUITE_FLOOR_THERMOSTAT_ID,
+    DEV_EN_SUITE_FLOOR_THERMOSTAT_ID,
     DEV_GARDEN_WINDOW_L_ID, DEV_GARDEN_WINDOW_R_ID, DEV_GARDEN_DOOR_ID,
     DEV_LIVING_ROOM_R_WIN_ID, DEV_LIVING_ROOM_L_WIN_ID,
     DEV_UTILITY_WINDOW_ID, DEV_UTILITY_DOOR_ID,
@@ -459,7 +473,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.20.0"
+PLUGIN_VERSION  = "1.21.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1226,7 +1240,7 @@ class Plugin(indigo.PluginBase):
             room_name                  = "En Suite",
             room_schedule              = schedules.En_Suite,
             window_devices             = [DEV_EN_SUITE_WINDOW_ID],
-            floor_heat_device          = DEV_EN_SUITE_FLOOR_HEAT_ID,
+            floor_heat_device          = DEV_EN_SUITE_FLOOR_THERMOSTAT_ID,
             special_rules              = en_suite_rules,
             ha_device_id               = DEV_EN_SUITE_ID,
             floor_heat_restore_enabled = morning_active,
@@ -1562,12 +1576,10 @@ class Plugin(indigo.PluginBase):
             except Exception as e:
                 _log(f"[Summer] Could not save the setpoint cache: {e}", level="WARNING")
 
-        # En Suite floor heating switch off (idempotent on onState)
+        # En Suite floor heating off, through its thermostat (1.21.0). Sends nothing
+        # while the thermostat already reports Off, so this per-tick call is quiet.
         try:
-            floor = indigo.devices[DEV_EN_SUITE_FLOOR_HEAT_ID]
-            if floor.onState:
-                indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
-                _log("[Summer] En Suite floor heating switched OFF")
+            heating_logic.floor_heat_off("summer shut-off")
         except Exception as e:
             _log(f"[Summer] Could not turn off En Suite floor heat: {e}", level="WARNING")
 
@@ -2247,20 +2259,12 @@ class Plugin(indigo.PluginBase):
             self.store["en_suite_morning_active"]           = True
             self.store["en_suite_morning_cancelled_reason"] = None
             _log(f"[EnSuiteMorning] 6am — starting {EN_SUITE_MORNING_TEMP:.0f}degC morning schedule")
-            # Turn on floor heating switch immediately (don't wait for next heating cycle)
+            # Floor heating on through its thermostat (1.21.0); powers it first if the
+            # switch is off, and the heating cycle then sets it once it has started.
             try:
-                indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)
-                _log("[EnSuiteMorning] Floor heating switch turned ON")
+                heating_logic.floor_heat_on()
             except Exception as e:
-                _log(f"[EnSuiteMorning] Floor heat switch on error: {e}", level="ERROR")
-            # Set floor thermostat to heat mode at 14degC — self-regulates until switch off
-            try:
-                therm = indigo.devices[DEV_EN_SUITE_FLOOR_THERMOSTAT_ID]
-                indigo.thermostat.setHvacMode(therm, value=indigo.kHvacMode.Heat)
-                indigo.thermostat.setHeatSetpoint(therm, value=14.0)
-                _log("[EnSuiteMorning] Floor thermostat set to Heat / 14degC")
-            except Exception as e:
-                _log(f"[EnSuiteMorning] Floor thermostat set error: {e}", level="ERROR")
+                _log(f"[EnSuiteMorning] Floor heat on error: {e}", level="ERROR")
             self._save_state()
             self._fire_event("enSuiteMorningStarted")
 
@@ -2290,23 +2294,21 @@ class Plugin(indigo.PluginBase):
             self._save_state()
             self._fire_event("enSuiteMorningCancelled")
         try:
-            floor = indigo.devices[DEV_EN_SUITE_FLOOR_HEAT_ID]
+            indigo.devices[DEV_EN_SUITE_FLOOR_THERMOSTAT_ID]
         except Exception:
             if not getattr(self, "_floor_missing_warned", False):
                 self._floor_missing_warned = True
-                _log("[EnSuiteMorning] The En Suite floor heating switch is missing from "
-                     "Indigo, so an open window cannot switch it off", level="WARNING")
+                _log("[EnSuiteMorning] The En Suite floor heating thermostat is missing from "
+                     "Indigo, so an open window cannot switch the floor off", level="WARNING")
             return
         self._floor_missing_warned = False
-        if floor.states.get("onOffState", False):
-            indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
-            _log("En Suite: floor heating turned off (window open)")
+        heating_logic.floor_heat_off("window open")
 
-    def _en_suite_floor_off(self):
-        """Switch the En Suite floor heating off, the one way every path does it."""
+    def _en_suite_floor_off(self, reason="morning schedule ended"):
+        """Turn the En Suite floor heating off, the one way every path does it -
+        through its thermostat since 1.21.0; the power switch is left on."""
         try:
-            indigo.device.turnOff(DEV_EN_SUITE_FLOOR_HEAT_ID)
-            _log("[EnSuiteMorning] Floor heating switch turned OFF")
+            heating_logic.floor_heat_off(reason)
         except Exception as e:
             _log(f"[EnSuiteMorning] Floor heat off error: {e}", level="ERROR")
 
@@ -2324,7 +2326,7 @@ class Plugin(indigo.PluginBase):
             self.store["en_suite_morning_active"] = True
             _log("[EnSuiteMorning] Restored from state — still within morning window")
             try:
-                indigo.device.turnOn(DEV_EN_SUITE_FLOOR_HEAT_ID)
+                heating_logic.floor_heat_on()
             except Exception as e:
                 _log(f"[EnSuiteMorning] Could not re-assert floor heat: {e}", level="WARNING")
             return

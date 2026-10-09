@@ -44,6 +44,8 @@ DEV_BEDROOM_1_WINDOW_ID    = 398804951
 DEV_BEDROOM_2_WINDOW_ID    = 431560729
 DEV_BEDROOM_3_WINDOW_ID    = 980886156
 DEV_EN_SUITE_WINDOW_ID     = 566450110   # contact state: False = open
+# The switch only POWERS the floor thermostat (1.21.0): the floor is turned on and off
+# through the thermostat, and the switch is turned on when the floor is wanted, never off.
 DEV_EN_SUITE_FLOOR_HEAT_ID       = 69786879    # "En Suite Floor Heating Switch"
 DEV_EN_SUITE_FLOOR_THERMOSTAT_ID = 152351167   # "En Suite Floor Heating Thermostat" (Z-Wave TF021)
 DEV_GARDEN_WINDOW_L_ID     = 682946229
@@ -678,6 +680,95 @@ def _contact_is_open(dev_id):
 
 
 # ---------------------------------------------------------------------------
+# EN SUITE UNDERFLOOR HEATING (1.21.0)
+# ---------------------------------------------------------------------------
+# The Heatit TF021 thermostat is powered through a Z-Wave switch. Until 1.21.0 the
+# plugin turned the floor on and off with that switch, which also cut the thermostat's
+# power, so it answered nothing while the floor was off ("no ack" for a week) and the
+# 6am "heat to 14" was sent before it had started up. CliveS, 09-10-2026: the switch
+# was "a belt and braces fix originally" - control it through the thermostat. Proven
+# live that morning: Off, Heat and a setpoint each confirmed with no error.
+# So: ON = power on, mode Heat, setpoint FLOOR_HEAT_ON_TEMP. OFF = mode Off. The switch
+# is never turned off; with it off the thermostat has no power, so the floor is off.
+FLOOR_HEAT_ON_TEMP     = 14.0
+FLOOR_OFF_RESEND_SECS  = 600    # an Off the thermostat has not confirmed is resent this often
+_FLOOR = {"off_sent_at": 0.0}
+
+
+def _floor_devices():
+    """(power switch, thermostat), or None for either one Indigo does not have."""
+    out = []
+    for dev_id in (DEV_EN_SUITE_FLOOR_HEAT_ID, DEV_EN_SUITE_FLOOR_THERMOSTAT_ID):
+        try:
+            out.append(indigo.devices[dev_id])
+        except Exception:
+            out.append(None)
+    return tuple(out)
+
+
+def floor_heat_is_heating(thermostat):
+    """True only when the thermostat REPORTS heat mode at the morning temperature.
+    A missing state is never a match, so an unconfirmed command is sent again."""
+    if thermostat is None:
+        return False
+    states = thermostat.states
+    if states.get("hvacOperationModeIsHeat") is not True:
+        return False
+    try:
+        return abs(float(states.get("setpointHeat")) - FLOOR_HEAT_ON_TEMP) <= TEMP_CHANGE_TOLERANCE
+    except (TypeError, ValueError):
+        return False
+
+
+def floor_heat_on(log_buffer=None):
+    """Turn the En Suite floor on: power the thermostat if it is not, then Heat at
+    FLOOR_HEAT_ON_TEMP. A thermostat that has just been powered is not sent anything
+    yet - it takes about 25 seconds to start (measured 09-10-2026) and would lose the
+    command; the next heating check, within five minutes, finds it not heating and
+    sends it. Returns True when the commands were sent."""
+    switch, thermostat = _floor_devices()
+    if thermostat is None:
+        _log("En Suite: the floor heating thermostat is missing from Indigo, so the floor "
+             "cannot be turned on", level="WARNING", log_buffer=log_buffer)
+        return False
+    if switch is not None and switch.states.get("onOffState") is not True:
+        indigo.device.turnOn(switch)
+        _log("En Suite: the floor heating thermostat had no power, so it has been switched "
+             "on. It will be set to heat at the next check.", log_buffer=log_buffer)
+        return False
+    if floor_heat_is_heating(thermostat):
+        return True
+    indigo.thermostat.setHvacMode(thermostat, value=indigo.kHvacMode.Heat)
+    indigo.thermostat.setHeatSetpoint(thermostat, value=FLOOR_HEAT_ON_TEMP)
+    _FLOOR["off_sent_at"] = 0.0
+    _log(f"En Suite: floor heating on (thermostat set to heat to {FLOOR_HEAT_ON_TEMP:.0f} "
+         f"degrees)", log_buffer=log_buffer)
+    return True
+
+
+def floor_heat_off(reason="", log_buffer=None, now=None):
+    """Turn the En Suite floor off through its thermostat (mode Off). Leaves the power
+    switch alone. Nothing is sent while the thermostat reports Off already, or has no
+    power; an Off it has not confirmed is resent at most every FLOOR_OFF_RESEND_SECS,
+    so a 30-second caller cannot flood the Z-Wave network. Returns True when sent."""
+    switch, thermostat = _floor_devices()
+    if thermostat is None:
+        return False
+    if switch is not None and switch.states.get("onOffState") is False:
+        return False   # no power, so the floor is already off
+    if thermostat.states.get("hvacOperationModeIsOff") is True:
+        return False
+    now = time.time() if now is None else now
+    if now - _FLOOR["off_sent_at"] < FLOOR_OFF_RESEND_SECS:
+        return False
+    indigo.thermostat.setHvacMode(thermostat, value=indigo.kHvacMode.Off)
+    _FLOOR["off_sent_at"] = now
+    why = f" ({reason})" if reason else ""
+    _log(f"En Suite: floor heating off{why}", log_buffer=log_buffer)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # OVERHEAT DETECTION
 # ---------------------------------------------------------------------------
 
@@ -1280,11 +1371,7 @@ def process_room_temperature(
     # with Away on an open En Suite window left the floor heating running.
     if windows_open and floor_heat_device:
         try:
-            floor_dev = indigo.devices[floor_heat_device]
-            if floor_dev.states.get("onOffState", False):
-                indigo.device.turnOff(floor_dev)
-                _log(f"{room_name}: floor heating turned off (window open)",
-                     log_buffer=log_buffer)
+            floor_heat_off("window open", log_buffer=log_buffer)
         except Exception as e:
             _log(f"Error turning off floor heating in {room_name}: {e}",
                  level="ERROR", log_buffer=log_buffer)
@@ -1317,14 +1404,12 @@ def process_room_temperature(
         message  = 4 if (windows_open and doors_open) else 3
 
     # Restore floor heating when window closes (En Suite only, morning schedule active)
+    # Also the second chance for a 6am start that only powered the thermostat, or a
+    # command the thermostat did not confirm (1.21.0): floor_heat_on sends nothing
+    # while the thermostat already reports Heat at the morning temperature.
     elif floor_heat_device and not windows_open and floor_heat_restore_enabled and not is_away:
         try:
-            floor_dev = indigo.devices[floor_heat_device]
-            if not floor_dev.states.get("onOffState", True):
-                # Floor heat is off, window is now closed, morning schedule active — restore
-                indigo.device.turnOn(floor_dev)
-                _log(f"{room_name}: floor heating restored (window closed)",
-                     log_buffer=log_buffer)
+            floor_heat_on(log_buffer=log_buffer)
         except Exception as e:
             _log(f"Error restoring floor heating in {room_name}: {e}",
                  level="ERROR", log_buffer=log_buffer)

@@ -36,6 +36,7 @@ class TestAMildMorningStillStarts(unittest.TestCase):
     _plugin  = _F._plugin
     _at      = _F._at
     FLOOR    = _F.FLOOR
+    ON       = _F.ON
 
     def test_fifteen_degrees_outside_at_six_still_starts_the_morning(self):
         p = self._plugin()
@@ -43,7 +44,7 @@ class TestAMildMorningStillStarts(unittest.TestCase):
         self._at(6)
         p._check_en_suite_morning()
         self.assertTrue(p.store["en_suite_morning_active"])
-        self.assertIn(("on", self.FLOOR), self.sw.calls)
+        self.assertEqual(self.sw.calls, self.ON)
         self.assertNotEqual(p.store.get("en_suite_morning_cancelled_reason"), "warm_outdoor")
 
 

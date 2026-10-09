@@ -12,7 +12,7 @@ Through the warmer months there is no need to heat the house, so the plugin can 
 While the shut-off is on:
 
 - Every radiator is held at **8 degrees**, which keeps the valves shut on a summer day but still gives some protection if there is a cold snap. The hold is set to end at midnight at the start of the day heating returns, so if Indigo is not running on that day the house goes back to its Evohome timetable on time. If a radiator is changed by hand, at the controller, on its valve, in the app or through Indigo, the plugin leaves it until the room's plan next changes, or midnight, and then puts it back at 8 degrees. Any other change is put back at the next check.
-- The **En Suite underfloor heating** switch is turned off.
+- The **En Suite underfloor heating** thermostat is turned off.
 - The normal heating check stops — the room plans, the weather adjustment, the modes and the overheating checks all wait until the shut-off ends.
 - The En Suite morning schedule does not run, and a timed boost will not start.
 - The En Suite [drying run](en-suite.md) is the one exception. It only runs during the shut-off.

@@ -52,6 +52,8 @@ for _name, _value in (
     ("device",     types.SimpleNamespace(turnOn=lambda *a, **k: None,
                                          turnOff=lambda *a, **k: None)),
     ("trigger",    types.SimpleNamespace(execute=lambda *a, **k: None)),
+    # Live values (IndigoConformance): Off 0, Heat 1. The floor runs on these from 1.21.0.
+    ("kHvacMode",  types.SimpleNamespace(Off=0, Heat=1)),
 ):
     if not hasattr(_indigo, _name):
         setattr(_indigo, _name, _value)
@@ -158,8 +160,20 @@ class TestEnSuiteWindowInterlock(unittest.TestCase):
                                             states={"contact": False})   # False = open
         _indigo.devices[hl.DEV_EN_SUITE_FLOOR_HEAT_ID] = self.floor
         _indigo.devices[hl.DEV_EN_SUITE_WINDOW_ID] = self.window
+        # 1.21.0: the floor is turned off through its thermostat; the switch only powers it.
+        self.therm = types.SimpleNamespace(id=hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID, states={
+            "hvacOperationModeIsHeat": True, "hvacOperationModeIsOff": False,
+            "setpointHeat": 14.0})
+        _indigo.devices[hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID] = self.therm
+        self.modes = []
+        self._saved_thermo = _indigo.thermostat
+        _indigo.thermostat = types.SimpleNamespace(
+            setHvacMode=lambda d, value=None: self.modes.append(value),
+            setHeatSetpoint=lambda d, value=None: self.modes.append(("setpoint", value)))
+        hl._FLOOR["off_sent_at"] = 0.0
 
     def tearDown(self):
+        _indigo.thermostat = self._saved_thermo
         _indigo.device = self._saved_device
         _indigo.devices.clear()
         _indigo.devices.update(self._saved_devices)
@@ -180,7 +194,8 @@ class TestEnSuiteWindowInterlock(unittest.TestCase):
     def test_an_open_window_switches_the_floor_off_and_ends_the_morning(self):
         p = self._plugin()
         p._check_en_suite_window_interlock()
-        self.assertEqual(self.turned_off, [hl.DEV_EN_SUITE_FLOOR_HEAT_ID])
+        self.assertEqual(self.modes, [_indigo.kHvacMode.Off])
+        self.assertEqual(self.turned_off, [], "the power switch is never turned off")
         self.assertFalse(p.store["en_suite_morning_active"])
         self.assertEqual(p.store["en_suite_morning_cancelled_reason"], "window_open")
         self.assertEqual(p.store["en_suite_morning_cancelled_date"],
@@ -192,22 +207,36 @@ class TestEnSuiteWindowInterlock(unittest.TestCase):
         self.window.states["contact"] = True
         p = self._plugin()
         p._check_en_suite_window_interlock()
-        self.assertEqual(self.turned_off, [])
+        self.assertEqual(self.modes, [])
         self.assertTrue(p.store["en_suite_morning_active"])
         self.assertEqual(self.events, [])
 
     def test_a_floor_already_off_is_not_switched_again(self):
-        self.floor.states["onOffState"] = False
-        self.floor.onState = False
+        self.therm.states.update({"hvacOperationModeIsHeat": False, "hvacOperationModeIsOff": True})
         p = self._plugin(morning=False)
         p._check_en_suite_window_interlock()
-        self.assertEqual(self.turned_off, [])
+        self.assertEqual(self.modes, [])
         self.assertEqual(self.events, [])
+
+    def test_an_unpowered_thermostat_is_not_sent_anything(self):
+        self.floor.states["onOffState"] = False
+        p = self._plugin(morning=False)
+        p._check_en_suite_window_interlock()
+        self.assertEqual(self.modes, [])
+
+    def test_an_unconfirmed_off_is_not_resent_every_tick(self):
+        p = self._plugin(morning=False)
+        for _ in range(5):
+            p._check_en_suite_window_interlock()
+        self.assertEqual(self.modes, [_indigo.kHvacMode.Off])
+        hl._FLOOR["off_sent_at"] -= hl.FLOOR_OFF_RESEND_SECS
+        p._check_en_suite_window_interlock()
+        self.assertEqual(self.modes, [_indigo.kHvacMode.Off] * 2)
 
     def test_the_floor_goes_off_outside_the_morning_too(self):
         p = self._plugin(morning=False)
         p._check_en_suite_window_interlock()
-        self.assertEqual(self.turned_off, [hl.DEV_EN_SUITE_FLOOR_HEAT_ID])
+        self.assertEqual(self.modes, [_indigo.kHvacMode.Off])
         self.assertEqual(self.events, [])
 
     def test_the_radiator_is_never_touched(self):
@@ -215,12 +244,14 @@ class TestEnSuiteWindowInterlock(unittest.TestCase):
         written = []
         saved = _indigo.thermostat
         _indigo.thermostat = types.SimpleNamespace(
-            setHeatSetpoint=lambda *a, **k: written.append(a))
+            setHeatSetpoint=lambda d, **k: written.append(d.id),
+            setHvacMode=lambda d, **k: written.append(d.id))
         try:
             self._plugin()._check_en_suite_window_interlock()
         finally:
             _indigo.thermostat = saved
-        self.assertEqual(written, [])
+        self.assertNotIn(hl.DEV_EN_SUITE_ID, written)
+        self.assertEqual(written, [hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID])
 
     def test_every_tick_runs_it(self):
         p = self._plugin()
@@ -244,6 +275,7 @@ class TestEnSuiteWindowInterlock(unittest.TestCase):
             p._check_en_suite_morning()
         self.assertFalse(p.store["en_suite_morning_active"])
         self.assertEqual(self.turned_on, [])
+        self.assertNotIn(_indigo.kHvacMode.Heat, self.modes)
         self.assertIsNone(p.store["en_suite_morning_cancelled_date"],
                           "not cancelled for the day: it starts once the window shuts")
 

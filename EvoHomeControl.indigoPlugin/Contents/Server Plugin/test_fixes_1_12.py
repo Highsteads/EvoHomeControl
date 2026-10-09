@@ -57,6 +57,8 @@ for _name, _value in (
     ("device",     types.SimpleNamespace(turnOn=lambda *a, **k: None,
                                          turnOff=lambda *a, **k: None)),
     ("trigger",    types.SimpleNamespace(execute=lambda *a, **k: None)),
+    # Live values (IndigoConformance): Off 0, Heat 1. The floor runs on these from 1.21.0.
+    ("kHvacMode",  types.SimpleNamespace(Off=0, Heat=1)),
 ):
     if not hasattr(_indigo, _name):
         setattr(_indigo, _name, _value)
@@ -281,8 +283,19 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
         self._saved_thermo  = _indigo.thermostat
         self.sw = _SwitchRecorder()
         _indigo.device     = self.sw
-        _indigo.thermostat = types.SimpleNamespace(setHeatSetpoint=lambda *a, **k: None,
-                                                   setHvacMode=lambda *a, **k: None)
+        # 1.21.0: the floor goes on and off through its thermostat; the switch only
+        # powers it. Both kinds of command land in the one list, in order.
+        _indigo.thermostat = types.SimpleNamespace(
+            setHeatSetpoint=lambda d, value=None, **k: self.sw.calls.append(("setpoint", value)),
+            setHvacMode=lambda d, value=None, **k: self.sw.calls.append(("mode", value)))
+        self.switch = FakeDevice({"onOffState": True})
+        self.switch.id = hl.DEV_EN_SUITE_FLOOR_HEAT_ID
+        self.therm = FakeDevice({"hvacOperationModeIsHeat": False,
+                                 "hvacOperationModeIsOff": True, "setpointHeat": 8.0})
+        self.therm.id = hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID
+        _indigo.devices[hl.DEV_EN_SUITE_FLOOR_HEAT_ID]       = self.switch
+        _indigo.devices[hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID] = self.therm
+        hl._FLOOR["off_sent_at"] = 0.0
 
     def tearDown(self):
         _indigo.device     = self._saved_device
@@ -311,7 +324,13 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
         m.strptime = datetime.strptime
         return m
 
-    FLOOR = plugin_mod.DEV_EN_SUITE_FLOOR_HEAT_ID
+    FLOOR = hl.DEV_EN_SUITE_FLOOR_HEAT_ID
+    ON    = [("mode", _indigo.kHvacMode.Heat), ("setpoint", hl.FLOOR_HEAT_ON_TEMP)]
+    OFF   = [("mode", _indigo.kHvacMode.Off)]
+
+    def _heating(self):
+        self.therm.states.update({"hvacOperationModeIsHeat": True,
+                                  "hvacOperationModeIsOff": False, "setpointHeat": 14.0})
 
     # -- Away mode --------------------------------------------------------------
     def test_a_cold_morning_at_home_still_starts_the_floor_heating(self):
@@ -319,7 +338,16 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
         self._at(6)
         p._check_en_suite_morning()
         self.assertTrue(p.store["en_suite_morning_active"])
-        self.assertIn(("on", self.FLOOR), self.sw.calls)
+        self.assertEqual(self.sw.calls, self.ON)
+
+    def test_an_unpowered_thermostat_is_powered_and_set_at_the_next_check(self):
+        self.switch.states["onOffState"] = False
+        p = self._plugin()
+        self._at(6)
+        p._check_en_suite_morning()
+        self.assertTrue(p.store["en_suite_morning_active"])
+        self.assertEqual(self.sw.calls, [("on", self.FLOOR)],
+                         "nothing is sent to a thermostat that is still starting up")
 
     def test_away_mode_does_not_start_the_floor_heating(self):
         p = self._plugin(away=True)
@@ -329,11 +357,12 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
         self.assertEqual(self.sw.calls, [])
 
     def test_away_mode_stops_a_morning_already_running(self):
+        self._heating()
         p = self._plugin(store={"en_suite_morning_active": True}, away=True)
         self._at(7)
         p._check_en_suite_morning()
         self.assertFalse(p.store["en_suite_morning_active"])
-        self.assertEqual(self.sw.calls, [("off", self.FLOOR)])
+        self.assertEqual(self.sw.calls, self.OFF)
 
     def test_away_is_not_a_cancel_for_the_whole_day(self):
         p = self._plugin(store={"en_suite_morning_active": True}, away=True)
@@ -345,18 +374,19 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
 
     # -- Plugin stopped across 10:00 ---------------------------------------------
     def test_a_morning_saved_as_running_is_switched_off_after_ten(self):
+        self._heating()
         p = self._plugin()
         self._at(11)
         p._restore_en_suite_morning(True)
         self.assertFalse(p.store["en_suite_morning_active"])
-        self.assertEqual(self.sw.calls, [("off", self.FLOOR)])
+        self.assertEqual(self.sw.calls, self.OFF)
 
     def test_a_morning_saved_as_running_carries_on_before_ten(self):
         p = self._plugin()
         self._at(8)
         p._restore_en_suite_morning(True)
         self.assertTrue(p.store["en_suite_morning_active"])
-        self.assertEqual(self.sw.calls, [("on", self.FLOOR)])
+        self.assertEqual(self.sw.calls, self.ON)
 
     def test_nothing_saved_touches_nothing(self):
         p = self._plugin()
@@ -366,10 +396,11 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
 
     # -- The heating cycle crossing 10:00 first ----------------------------------
     def test_the_cycle_ending_the_morning_at_ten_switches_the_floor_off(self):
+        self._heating()
         p = self._plugin(store={"en_suite_morning_active": False,
                                 "en_suite_morning_cancelled_reason": "10am_expired"})
         p._note_en_suite_morning_cancelled(True)
-        self.assertEqual(self.sw.calls, [("off", self.FLOOR)])
+        self.assertEqual(self.sw.calls, self.OFF)
 
     def test_the_window_path_leaves_the_floor_to_the_room_rule(self):
         p = self._plugin(store={"en_suite_morning_active": False,
@@ -383,19 +414,18 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
             "temperatureInput1": "18.0", "setpointHeat": "15.0",
             "zoneMode": "permanent override", "lastSeen": _ago(1)})
         _indigo.devices[hl.DEV_EN_SUITE_WINDOW_ID]    = FakeDevice({"contact": False})
-        floor = FakeDevice({"onOffState": True})
-        floor.id = hl.DEV_EN_SUITE_FLOOR_HEAT_ID
-        _indigo.devices[hl.DEV_EN_SUITE_FLOOR_HEAT_ID] = floor
+        self._heating()
         hl.process_room_temperature(
             room_name="En Suite", room_schedule=[18] * 24,
             window_devices=[hl.DEV_EN_SUITE_WINDOW_ID],
-            floor_heat_device=hl.DEV_EN_SUITE_FLOOR_HEAT_ID,
+            floor_heat_device=hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID,
             ha_device_id=hl.DEV_EN_SUITE_ID, current_hour=12, current_minute=5,
             current_outdoor_temp=5.0, is_away=True,
             last_setpoints={}, last_messages={}, log_buffer=[], changes_buffer=[],
             overheat_monitor=None,
         )
-        self.assertEqual(self.sw.calls, [("off", hl.DEV_EN_SUITE_FLOOR_HEAT_ID)])
+        self.assertIn(self.OFF[0], self.sw.calls)
+        self.assertNotIn(("off", hl.DEV_EN_SUITE_FLOOR_HEAT_ID), self.sw.calls)
 
 
 if __name__ == "__main__":
