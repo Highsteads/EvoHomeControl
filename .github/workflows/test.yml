@@ -12,6 +12,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Fixtures use local wall-clock times; the house clock is Europe/London.
+      TZ: Europe/London
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
