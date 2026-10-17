@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.22.1 — 17 October 2026
+
+Morning targets are one degree lower for the Bathroom, Bedroom 2, Hall Bedroom and both Living Room radiators from 5am to noon, and the Dining Room from 6am to noon. The En Suite, guest plans and the rest of the day stay as before.
+
 ## 1.22.0 — 9 October 2026
 
 - **An open window beats everything.** Open a window or outside door and that room's radiator goes down to 8 degrees, even if somebody has set a temperature by hand, a boost is on, the En Suite morning or drying run is going, or the room's reading is missing or out of date. Before, a temperature set by hand kept heating an open window, as the En Suite did that morning at 25 degrees. The setting made by hand does not come back when the window shuts; the room returns to its plan. The Conservatory's 12 degree rule for a shut sliding door no longer beats an open garden window. The Dining Room still turns down to 16 rather than 8, because it reacts to the conservatory's windows rather than its own.

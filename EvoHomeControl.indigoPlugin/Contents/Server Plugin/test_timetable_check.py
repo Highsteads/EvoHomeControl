@@ -112,7 +112,7 @@ class TestCompare(unittest.TestCase):
         diff = tc.first_difference(hours, week)
         self.assertEqual(tc.describe_difference("Dining Room", diff),
                          "Dining Room: at 6am on Monday the controller has 16 degrees "
-                         "where the plan has 18.")
+                         "where the plan has 17.")
 
     def test_a_missing_day_is_a_difference(self):
         week = as_written(REAL.Bathroom)

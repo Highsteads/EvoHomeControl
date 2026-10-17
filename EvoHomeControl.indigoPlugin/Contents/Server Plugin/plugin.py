@@ -3,9 +3,13 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Opus 5, Claude Opus 5.5
-# Date:        09-10-2026 10:15
-# Version:     1.22.0
+# Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6
+# Date:        17-10-2026 09:51
+# Version:     1.22.1
+#
+# v1.22.1 (17-10-2026): Six morning radiator plans reduced by 1 degree until noon
+#   at CliveS's request: Bathroom, Bedroom 2, Hall Bedroom and both Living Room
+#   radiators from 5am, Dining Room from 6am. En Suite and guest plans unchanged.
 #
 # v1.22.0 (09-10-2026): AN OPEN WINDOW BEATS EVERYTHING. CliveS: "Whenever a window opens then
 #   that overrides heating" - the En Suite heated an open window at 25 degC set by hand, because
@@ -486,7 +490,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.22.0"
+PLUGIN_VERSION  = "1.22.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

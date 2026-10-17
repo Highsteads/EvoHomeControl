@@ -13,6 +13,10 @@ Every five minutes, or every 10 or 15 if you choose, the plugin runs a heating c
 
 It sets each radiator to a target for two hours at a time — Evohome calls this a **temporary override** — and renews it once less than an hour is left (half way through with the one-hour setting), so while the plugin runs, the timetable in your Evohome controller does not run those radiators. If Indigo or the plugin stops, each radiator goes back to that timetable within two hours. You can change the two hours, or choose to hold the last setting indefinitely, in the [settings](settings.md). The summer 8 degree hold runs until the day heating returns, so it ends by itself even if Indigo has stopped.
 
+## Morning targets
+
+Morning targets are one degree lower for the Bathroom, Bedroom 2, Hall Bedroom and both Living Room radiators from 5am to noon, and the Dining Room from 6am to noon. The En Suite, guest plans and the rest of the day stay as before.
+
 ## Changing a room by hand
 
 You can still change a room the ordinary Evohome way, at the controller, on a radiator valve's wheel or in the app, and the plugin will not undo it. RAMSES ESP tells the plugin who made each change, and a room changed by hand is left alone until its plan next changes, or midnight if that is sooner. After that the plugin sets it as usual. A room set permanently by hand is left alone until somebody puts it back on its timetable, for example by pressing **Auto** on the controller. The Event Log says when a room is being left alone and when it comes back. Opening a window or outside door in that room still turns its radiator down, and ends the setting made by hand.
