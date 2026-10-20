@@ -11,7 +11,7 @@ These are under **Plugins → EvoHome Heating Controller**, in this order.
 |---|---|
 | **Start Timed Boost (1 hour)** | Adds two degrees to the Dining Room, Hall Kitchen, Living Room Door and Living Room Front for an hour. Refused during the summer shut-off. |
 | **Start Timed Boost (2 hours)** | The same, for two hours. |
-| **Cancel Timed Boost** | Ends a timed boost now, and lists in the Event Log the temperature each room goes back to. |
+| **Cancel Timed Boost** | Ends a timed boost and sets all radiators to 12 degrees until each room's next scheduled temperature change. |
 | **Start En Suite Drying Run (30 minute test)** | Starts a half-hour drying run now, whatever the time, the season or the weather, so you can see it work. |
 | **Stop En Suite Drying Run** | Ends a drying run now, and logs how the humidity changed if you have a humidity sensor set. |
 | **Show En Suite Drying Run Status** | Writes to the Event Log whether the drying run is switched on, whether the season allows it, its hours and temperature, the outdoor limit against the temperature now, whether a run is going, whether the window reads shut, and the humidity. |

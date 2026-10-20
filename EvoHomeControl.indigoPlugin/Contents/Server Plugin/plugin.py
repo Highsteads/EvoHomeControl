@@ -3,9 +3,9 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6
-# Date:        17-10-2026 09:51
-# Version:     1.22.1
+# Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
+# Date:        20-10-2026 15:35 UK
+# Version:     1.23.0
 #
 # v1.22.1 (17-10-2026): Six morning radiator plans reduced by 1 degree until noon
 #   at CliveS's request: Bathroom, Bedroom 2, Hall Bedroom and both Living Room
@@ -347,6 +347,7 @@ import tempfile
 import time
 import logging
 import threading
+from contextlib import nullcontext
 import functools
 from datetime import datetime, timedelta
 
@@ -490,7 +491,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.22.1"
+PLUGIN_VERSION  = "1.23.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1220,6 +1221,7 @@ class Plugin(indigo.PluginBase):
             run_interval_mins    = run_interval,
             timed_boost_active   = self.store["timed_boost_active"],
             timed_boost_rooms    = schedules.TIMED_BOOST_ROOMS,
+            cancel_boost_holds   = self.store.setdefault("cancel_boost_holds", {}),
             force_log_override   = force_hourly,
             # Quiet by default: the hourly table still goes to the plugin's own
             # daily log, just not into the shared estate event log.
@@ -1376,6 +1378,7 @@ class Plugin(indigo.PluginBase):
                  level="WARNING")
             return
         expiry = _now_aware() + timedelta(hours=hours)
+        self.store["cancel_boost_holds"] = {}
         self.store["timed_boost_active"] = True
         self.store["timed_boost_expiry"] = expiry
         self.store["timed_boost_hours"]  = hours
@@ -1386,16 +1389,47 @@ class Plugin(indigo.PluginBase):
         self._fire_event("timedBoostStarted")
 
     def _cancel_timed_boost(self, reason="expired"):
-        """Cancel timed boost and log reason."""
-        if self.store["timed_boost_active"]:
+        """A manual cancel holds every radiator at 12 until its next plan change."""
+        manual = reason in ("manual cancel", "menu cancel")
+        with self._cycle_lock if manual else nullcontext():
+            was_active = self.store.get("timed_boost_active", False)
             self.store["timed_boost_active"] = False
             self.store["timed_boost_expiry"] = None
-            self.store["timed_boost_hours"]  = 0
-            _log(f"[TimedBoost] Cancelled ({reason}) — rooms reverting to schedule")
-            self._save_state()
-            # Log what the 4 rooms will revert to on the next cycle
-            self._log_boost_revert_summary()
-            self._fire_event("timedBoostEnded")
+            self.store["timed_boost_hours"] = 0
+            if manual:
+                now = time.time()
+                holds = {}
+                for dev_id, room, plan in _room_plans():
+                    guest = self.store.get("is_guest_2") or self.store.get("is_guest_3")
+                    if room == "Bathroom" and guest:
+                        plan = schedules.Bathroom_Guest
+                    elif room == "Bedroom 2" and self.store.get("is_guest_2"):
+                        plan = schedules.Bedroom_2_Guest
+                    elif room == "Bedroom 3" and self.store.get("is_guest_3"):
+                        plan = schedules.Bedroom_3_Guest
+                    holds[str(dev_id)] = heating_logic.next_plan_change(plan, now)
+                self.store["cancel_boost_holds"] = holds
+                # Persist before dispatch so a restart cannot lose the user's intent.
+                self._save_state()
+                for dev_id in ALL_RADIATOR_IDS:
+                    try:
+                        dev = indigo.devices[dev_id]
+                        end = holds[str(dev_id)]
+                        heating_logic.send_setpoint(
+                            dev, 12.0, until=heating_logic.hold_wire_time(end))
+                    except Exception as exc:
+                        _log(f"[TimedBoost] Could not turn radiator {dev_id} down to "
+                             f"12 degrees: {exc}", level="WARNING")
+                self._save_setpoint_cache()
+                _log("[TimedBoost] Cancel requested: all radiators are being set to 12 degrees "
+                     "until each room's next scheduled temperature change.")
+            elif was_active:
+                self._save_state()
+                _log(f"[TimedBoost] Cancelled ({reason}) - rooms reverting to schedule")
+                self._log_boost_revert_summary()
+            if was_active:
+                self._fire_event("timedBoostEnded")
+            self._request_cycle()
 
     def _check_timed_boost_expiry(self):
         """Cancel timed boost if its expiry datetime has passed."""
@@ -2882,6 +2916,9 @@ class Plugin(indigo.PluginBase):
             with open(state_path, "r", encoding="utf-8") as f:
                 st = json.load(f)
 
+            self.store["cancel_boost_holds"] = heating_logic.valid_cancel_holds(
+                st.get("cancel_boost_holds", {}))
+
             # Restore timed boost only if expiry is still in the future
             expiry_str = st.get("timed_boost_expiry")
             if expiry_str:
@@ -2963,6 +3000,7 @@ class Plugin(indigo.PluginBase):
         expiry     = self.store.get("timed_boost_expiry")
         force_exp  = self.store.get("summer_force_expiry")
         data = {
+            "cancel_boost_holds":          self.store.get("cancel_boost_holds", {}),
             "timed_boost_active":           self.store["timed_boost_active"],
             "timed_boost_expiry":           expiry.isoformat() if expiry else None,
             "timed_boost_hours":            self.store.get("timed_boost_hours", 0),

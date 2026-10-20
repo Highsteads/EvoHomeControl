@@ -49,7 +49,7 @@ A room with a window or outside door open is not boosted either. It keeps its op
 
 A timed boost adds two degrees to the **Dining Room**, **Hall Kitchen**, **Living Room Door** and **Living Room Front** for one hour or two, then ends by itself. Start it from **Plugins → EvoHome Heating Controller → Start Timed Boost (1 hour)** or **(2 hours)**, or from the actions of the same names, which you can put on a control page button.
 
-- **Cancel Timed Boost** ends it early.
+- **Cancel Timed Boost** ends it early and sets all twelve radiators to 12 degrees until each room's next scheduled temperature change. The hold survives a restart, and a new timed boost clears it. Open-window protection still wins. A room whose plan has no temperature changes resumes its plan at midnight.
 - When it ends, the Event Log lists the temperature each room goes back to.
 - A timed boost carries on after the plugin or Indigo restarts, as long as its time has not run out.
 - It does not start during the summer shut-off. Use **Force Heating On (24 hours)** first if you need the heat.

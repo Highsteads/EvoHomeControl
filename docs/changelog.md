@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.23.0 - 20 October 2026
+
+Cancel Timed Boost now sets all twelve radiators to 12 degrees, holding each room until its next scheduled temperature change. The holds survive a plugin restart. Starting a new timed boost clears them. Open-window protection still takes priority, and a boost that expires naturally returns to the normal schedule.
+
 ## 1.22.1 — 17 October 2026
 
 Morning targets are one degree lower for the Bathroom, Bedroom 2, Hall Bedroom and both Living Room radiators from 5am to noon, and the Dining Room from 6am to noon. The En Suite, guest plans and the rest of the day stay as before.

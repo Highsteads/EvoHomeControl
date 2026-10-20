@@ -3,9 +3,9 @@
 # Filename:    heating_logic.py
 # Description: Core heating logic — room processing, overheat detection, special rules
 #              Ported from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Sonnet 4.6
-# Date:        30-04-2026
-# Version:     1.7
+# Author:      CliveS & Claude Sonnet 4.6; Codex GPT-6 (1.8)
+# Date:        20-10-2026 UK
+# Version:     1.8
 
 import logging
 import time
@@ -1253,6 +1253,63 @@ def open_window_override(room_name, dev_radiator, windows_open, doors_open,
 # MAIN ROOM PROCESSING
 # ---------------------------------------------------------------------------
 
+def next_plan_change(plan, now_epoch):
+    """Next actual hourly plan change; a constant plan falls back to midnight.
+
+    Walk real hours so the spring gap and autumn repeated hour are not invented
+    wall-clock instants. Plans are hourly and this installation uses UK time.
+    """
+    start = dt.fromtimestamp(now_epoch, HOUSE_TZ)
+    previous = plan[start.hour]
+    edge = int(now_epoch // 3600 + 1) * 3600
+    for step in range(26):
+        candidate = edge + step * 3600
+        local = dt.fromtimestamp(candidate, HOUSE_TZ)
+        value = plan[local.hour]
+        if value != previous or (len(set(plan)) == 1 and local.date() != start.date()):
+            return candidate
+        previous = value
+    raise ValueError("No schedule boundary found")
+
+
+def hold_wire_time(epoch):
+    return dt.fromtimestamp(epoch, HOUSE_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def valid_cancel_holds(raw, now=None):
+    """Accept only future finite epoch deadlines for known radiators."""
+    now = time.time() if now is None else now
+    if not isinstance(raw, dict):
+        return {}
+    clean = {}
+    for dev_id in ALL_RADIATOR_IDS:
+        value = raw.get(str(dev_id))
+        if isinstance(value, (int, float)) and now < value <= now + 26 * 3600:
+            clean[str(dev_id)] = value
+    return clean
+
+
+def apply_cancel_hold(dev, holds, now=None):
+    """Keep a cancellation setting until its saved deadline; never renew past it."""
+    if not holds:
+        return False
+    key = str(dev.id)
+    end = holds.get(key)
+    now = time.time() if now is None else now
+    if not isinstance(end, (int, float)) or not now < end <= now + 26 * 3600:
+        if holds is not None:
+            holds.pop(key, None)
+        return False
+    try:
+        current = float(dev.states.get("setpointHeat"))
+    except (ValueError, TypeError):
+        current = None
+    until = hold_wire_time(end)
+    if current != 12.0 or needs_override_refresh(dev, until=until):
+        send_setpoint(dev, 12.0, until=until)
+    return True
+
+
 def process_room_temperature(
         room_name, room_schedule, guest_schedule=None,
         window_devices=None, door_devices=None,
@@ -1266,7 +1323,7 @@ def process_room_temperature(
         log_buffer=None, changes_buffer=None,
         overheat_monitor=None, run_interval_mins=5,
         # Timed boost
-        timed_boost_active=False, timed_boost_rooms=None,
+        timed_boost_active=False, timed_boost_rooms=None, cancel_boost_holds=None,
         # Floor heat restore guard — only True when morning schedule is active
         floor_heat_restore_enabled=False,
         # Override the temperature baseline used for overheat detection.
@@ -1361,6 +1418,11 @@ def process_room_temperature(
                 event_log_dump=event_log_dump, is_away=is_away)
             return
         _WINDOW_OVERRIDE_ANNOUNCED.pop(room_name, None)
+        # Cancellation is a requested target, not a temperature-derived decision.
+        # Windows still win; closing one restores the hold for its remaining time.
+        if apply_cancel_hold(dev_radiator, cancel_boost_holds):
+            return
+
 
         # No temperature state at all is the same as an unreadable one - never 0degC.
         temp_str = dev_radiator.states.get("temperatureInput1")

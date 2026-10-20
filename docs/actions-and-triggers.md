@@ -13,7 +13,7 @@ These can go in an action group, a schedule, a trigger or a control page button.
 |---|---|
 | **Start Timed Boost (1 hour)** | Adds two degrees to the Dining Room, Hall Kitchen, Living Room Door and Living Room Front for an hour. Refused during the summer shut-off. |
 | **Start Timed Boost (2 hours)** | The same, for two hours. |
-| **Cancel Timed Boost** | Ends a timed boost now. |
+| **Cancel Timed Boost** | Ends a timed boost and sets all radiators to 12 degrees until each room's next scheduled temperature change. |
 | **Force Heating On (24 hours)** | Brings back normal heating for 24 hours during the summer shut-off. |
 | **Cancel Forced Heating** | Ends the 24 hours early and puts the summer shut-off back. |
 | **Show Summer Shut-off Status** | Writes the state of the summer shut-off to the Event Log. |

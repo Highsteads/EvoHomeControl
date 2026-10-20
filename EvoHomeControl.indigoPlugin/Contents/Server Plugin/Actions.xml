@@ -27,7 +27,7 @@
         <CallbackMethod>actionStartTimedBoost2h</CallbackMethod>
     </Action>
 
-    <!-- Cancel timed boost immediately, revert to schedule -->
+    <!-- Cancel timed boost and hold all radiators at 12 until their next plan change -->
     <Action id="cancelTimedBoost" uiPath="DeviceActions">
         <Name>Cancel Timed Boost</Name>
         <CallbackMethod>actionCancelTimedBoost</CallbackMethod>
