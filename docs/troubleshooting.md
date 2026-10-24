@@ -40,7 +40,11 @@ Every morning at 4am the plugin compares the timetable stored on the Evohome con
 
 ## The log says RAMSES ESP has not read the Evohome timetable
 
-The rooms named have no timetable reading from the last 30 hours, so they could not be checked. RAMSES ESP reads them at 3:15am. Check that RAMSES ESP is running and its gateway is online, or use its **Read Evohome Timetables Now** menu item.
+The rooms named have no timetable reading from the last 30 hours, so they could not be checked. RAMSES ESP reads them at 3:15am. Check that RAMSES ESP is running and its gateway is online, or use its **Read Evohome Timetables Now** menu item. While any room could not be checked, the plugin checks again every hour that day, so a reading that arrives later in the morning is still checked. A room with no timetable reading at all is named in its own line, and if no room could be checked the log says so, rather than saying the timetables match.
+
+## The log says radiator settings are not reaching Evohome
+
+RAMSES ESP could not send the plugin's settings, and the line gives its reason, such as *the gateway is offline*. Nothing was sent, so the plugin does not treat the rooms as changed, and it tries every room again each cycle. It says this once, and once more when settings are getting through again. Check the RAMSES ESP plugin and its gateway.
 
 ## Every radiator is at 8 degrees
 
@@ -54,7 +58,7 @@ Look at the plugin's own daily log for that room — the [How it works](how-it-w
 
 ## A room shows "Above Target (solar gain)"
 
-The room is warmer than its target although its radiator has been turned down for a while, so the warmth is coming from the sun or from inside the house. It is not a fault, and no alert is sent for it.
+The room is warmer than its target although its radiator has been turned down for a while. Usually the warmth is from the sun or from inside the house. But a radiator valve stuck open, or one with flat batteries, looks exactly the same, and nothing tells the plugin whether the valve really closed. So if the room stays too warm for six hours, you get an alert anyway, at normal priority, saying both. Until version 1.25 no alert was sent at all.
 
 ## The log says a room's temperature is unavailable and it is skipped
 
@@ -81,7 +85,7 @@ The plugin cannot be sure the En Suite window is shut — its sensor is missing,
 
 - Check the Pushover plugin is installed and enabled. If it is not, the Event Log says **Pushover plugin not available**.
 - Alerts go to the **Pushover user key** in the settings, or to the user set up in the Pushover plugin when that is blank. Check the key is the one on your Pushover account page.
-- No alert is sent when it is above 12 degrees outside, or when the warmth is from the sun.
+- No alert is sent when it is above 12 degrees outside.
 
 ## The hourly room table is not in the Event Log
 

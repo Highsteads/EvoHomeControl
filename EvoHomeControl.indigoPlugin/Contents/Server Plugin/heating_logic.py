@@ -158,6 +158,7 @@ OVERHEAT_BACKOFF            =  6.0
 OVERHEAT_MIN_SETPOINT       = 12.0
 OVERHEAT_MIN_OFF_MINUTES    = 45     # min time valve must be off before reopen — scaled by run_interval_mins
 OVERHEAT_REOPEN_FLOOR       =  0.3
+OVERHEAT_SANITY_FLOOR       =  1.0   # this far below target a closed valve reopens at once (1.25.0)
 OVERHEAT_PREDICTIVE_MARGIN  =  0.1
 OVERHEAT_COAST_MARGIN       =  0.5
 
@@ -326,29 +327,33 @@ def send_setpoint(dev, value, permanent=False, until=None):
 
     With `until` ("YYYY-MM-DD HH:MM") the setting ends at that time instead (1.16.0:
     the summer hold ends on the day heating is due back, so a stopped Indigo cannot
-    keep the house cold into the winter). Needs RAMSES ESP 1.15.0; permanent before."""
-    note_sent(dev, value)
+    keep the house cold into the winter). Needs RAMSES ESP 1.15.0; permanent before.
+
+    Returns True when the command was handed on, False when RAMSES ESP said it could not
+    send it (1.25.0, review finding 3). Only a command handed on is recorded as sent;
+    last_refusal() gives the reason for a False."""
     if until is not None:
         if _timed_overrides_on() and _ramses_takes_until():
             try:
-                indigo.server.getPlugin(RAMSES_PLUGIN_ID).executeAction(
+                reply = indigo.server.getPlugin(RAMSES_PLUGIN_ID).executeAction(
                     "setTemporarySetpoint", deviceId=dev.id,
                     props={"setpoint": f"{float(value):.2f}", "until": until})
-                return
+                return _accepted(dev, value, reply)
             except Exception as e:
                 _log(f"Could not send a setting ending {until} to {dev.name}: {e}. "
                      f"Sending a permanent one instead.", level="WARNING")
         indigo.thermostat.setHeatSetpoint(dev, value=value)
-        return
+        note_sent(dev, value)
+        return True
     if _timed_overrides_on(permanent):
         try:
             ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
             if ramses is not None and ramses.isEnabled():
-                ramses.executeAction("setTemporarySetpoint", deviceId=dev.id, props={
+                reply = ramses.executeAction("setTemporarySetpoint", deviceId=dev.id, props={
                     "setpoint": f"{float(value):.2f}",
                     "minutes":  str(_OVERRIDE["minutes"]),
                 })
-                return
+                return _accepted(dev, value, reply)
             reason = "the RAMSES ESP plugin is not enabled"
         except Exception as e:
             reason = f"RAMSES ESP refused it ({e})"
@@ -359,6 +364,34 @@ def send_setpoint(dev, value, permanent=False, until=None):
                  f"instead; timed ones need RAMSES ESP 1.12.0 or later. Save the settings "
                  f"to try again.", level="WARNING")
     indigo.thermostat.setHeatSetpoint(dev, value=value)
+    note_sent(dev, value)
+    return True
+
+
+# {device id: reason} for the last command RAMSES ESP refused, until one is accepted.
+_REFUSED = {}
+
+
+def _accepted(dev, value, reply):
+    """Read RAMSES ESP's answer to Set Temporary Setpoint. 1.18.0 and later answer
+    {"accepted": bool, "reason": str}, which executeAction hands back as an indigo.Dict
+    (not a dict subclass, so read it through .get). An older RAMSES ESP answers nothing,
+    and then the command is taken as sent, as it always was."""
+    get = getattr(reply, "get", None)
+    if callable(get) and get("accepted", True) is False:
+        _REFUSED[int(dev.id)] = str(get("reason", "") or "RAMSES ESP could not send it")
+        return False
+    _REFUSED.pop(int(dev.id), None)
+    note_sent(dev, value)
+    return True
+
+
+def last_refusal(dev):
+    """Why RAMSES ESP last refused a command for this zone, or None."""
+    try:
+        return _REFUSED.get(int(dev.id))
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -380,31 +413,43 @@ def send_setpoint(dev, value, permanent=False, until=None):
 # as permanent, so the person never chose "for good".
 _MANUAL_ANNOUNCED = {}
 
-# {device id: (temperature, when)} - the last setpoint this plugin sent each zone.
-# Saved with the setpoint cache, so a plugin restart does not forget a person's change.
+# {"reason": text} while radiator commands are being refused, so it is said once (1.25.0).
+_REFUSAL_ANNOUNCED = {}
+
+# {device id: (temperature, when, epoch)} - the last setpoint this plugin sent each zone,
+# with the moment as seconds since the epoch too (1.25.0). Saved with the setpoint cache,
+# so a plugin restart does not forget a person's change.
 _SENT = {}
 
 
-def note_sent(dev, value, when=None):
+def note_sent(dev, value, when=None, epoch=None):
     """Remember that this plugin sent `value` to `dev` (now, unless `when` is given)."""
     try:
-        _SENT[int(dev.id)] = (float(value), when or dt.now())
+        if when is None:
+            # Now: the real clock, never the local time, which repeats an hour in October.
+            when, epoch = dt.now(), (time.time() if epoch is None else epoch)
+        elif epoch is None:
+            epoch = _now_epoch(when)
+        _SENT[int(dev.id)] = (float(value), when, float(epoch))
     except (TypeError, ValueError, AttributeError):
         pass
 
 
 def sent_snapshot():
     """The record above as JSON-friendly data, for the setpoint cache."""
-    return {str(k): [v, when.isoformat()] for k, (v, when) in _SENT.items()}
+    return {str(k): [v[0], v[1].isoformat(), v[2]] for k, v in _SENT.items()}
 
 
 def restore_sent(data):
-    """Load what sent_snapshot() wrote. Anything unreadable is skipped, never raised."""
+    """Load what sent_snapshot() wrote, with or without the epoch (older caches have only
+    the local time, read as house time). Anything unreadable is skipped, never raised."""
     if not isinstance(data, dict):
         return
     for k, item in data.items():
         try:
-            _SENT[int(k)] = (float(item[0]), dt.fromisoformat(str(item[1])))
+            when = dt.fromisoformat(str(item[1]))
+            epoch = float(item[2]) if len(item) > 2 else _now_epoch(when)
+            _SENT[int(k)] = (float(item[0]), when, epoch)
         except (TypeError, ValueError, IndexError, KeyError):
             continue
 
@@ -412,16 +457,29 @@ def restore_sent(data):
 def _changed_through_indigo(dev, changed):
     """True when an "indigo" change was not this plugin's: it came after the last thing
     this plugin sent the zone, and to a different temperature. With nothing on record
-    (no send since the record began) the change is taken to be ours."""
+    (no send since the record began) the change is taken to be ours.
+
+    "After" compares seconds since the epoch where RAMSES ESP gives them
+    (setpointChangedAtEpoch, 1.18.0): on the night the clocks go back, a person's change
+    at 01:10 GMT read as BEFORE our send at 01:55 BST, and their hold was lost (1.25.0,
+    review finding 4). Otherwise the local times, as before."""
     sent = _SENT.get(int(dev.id)) if hasattr(dev, "id") else None
     if sent is None:
         return False
-    value, when = sent
+    value, when, when_epoch = (tuple(sent) + (None,))[:3]
     try:
         now_value = float(dev.states.get("setpointHeat"))
     except (TypeError, ValueError):
         return False
-    return changed > when and abs(now_value - value) > TEMP_CHANGE_TOLERANCE
+    try:
+        changed_epoch = int(float(dev.states.get("setpointChangedAtEpoch") or 0))
+    except (TypeError, ValueError):
+        changed_epoch = 0
+    if changed_epoch > 0 and when_epoch:
+        later = changed_epoch > when_epoch
+    else:
+        later = changed > when
+    return later and abs(now_value - value) > TEMP_CHANGE_TOLERANCE
 
 
 def manual_hold_until(dev, hours, now=None):
@@ -868,11 +926,22 @@ def check_overheating(current_temp, target_temp, room_name,
     # Only release if room has also dropped back near target — if it is still
     # significantly above the trigger threshold, fall through to Tier 2 rather
     # than blindly opening the valve just because the rate of rise has stopped.
+    #
+    # The valve stays closed for OVERHEAT_MIN_OFF_MINUTES unless the room has fallen
+    # OVERHEAT_SANITY_FLOOR below target (1.25.0, review finding 6). It used to reopen as
+    # soon as the rise stopped, after a single five-minute cycle.
     if room_data.get("is_coasting", False) and temp_rise_rate <= 0:
-        room_data["is_coasting"]    = False
-        room_data["off_since_cycle"] = 0
+        off_cycles = room_data.get("off_since_cycle", 0)
         if overheat_amount <= OVERHEAT_TRIGGER_THRESHOLD:
-            return False, target_temp, 0.0
+            if off_cycles >= min_off_cycles or overheat_amount < -OVERHEAT_SANITY_FLOOR:
+                room_data["is_coasting"]     = False
+                room_data["off_since_cycle"] = 0
+                return False, target_temp, 0.0
+            room_data["off_since_cycle"] = off_cycles + 1
+            adjusted = max(OVERHEAT_MIN_SETPOINT, target_temp - OVERHEAT_BACKOFF)
+            return True, adjusted, overheat_amount
+        room_data["is_coasting"]     = False
+        room_data["off_since_cycle"] = 0
         # Still above threshold — fall through to Tier 2
 
     room_data["is_coasting"] = False
@@ -885,8 +954,10 @@ def check_overheating(current_temp, target_temp, room_name,
 
     # TIER 2 / TIER 3: Threshold and recovery
     if was_overheating:
-        # Sanity gate: release immediately if room has cooled well below target
-        if overheat_amount < -OVERHEAT_REOPEN_FLOOR:
+        # Sanity gate: release immediately if the room has cooled WELL below target. It
+        # used the same 0.3 degC as the minimum-time branch below, so that branch could
+        # never be reached and the 45 minutes never applied (1.25.0, review finding 6).
+        if overheat_amount < -OVERHEAT_SANITY_FLOOR:
             room_data["off_since_cycle"]    = 0
             room_data["consecutive_cycles"] = 0
             return False, target_temp, 0.0
@@ -1046,7 +1117,18 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
         refresh = needs_override_refresh(dev_radiator)
         changed = abs(setpoint_before - new_temp) > TEMP_CHANGE_TOLERANCE
         if changed or refresh or not setpoint_available:
-            send_setpoint(dev_radiator, new_temp)
+            if not send_setpoint(dev_radiator, new_temp):
+                # Not sent: say so once, keep the cache as it was, and let the next cycle
+                # try again; logging "set to" here would claim a change that never left
+                # (1.25.0, review finding 3).
+                reason = last_refusal(dev_radiator) or "RAMSES ESP could not send it"
+                if _REFUSAL_ANNOUNCED.get("reason") != reason:
+                    _REFUSAL_ANNOUNCED["reason"] = reason
+                    _log(f"Radiator settings are not reaching Evohome: {reason}. Each room is "
+                         f"tried again every cycle.", level="WARNING", log_buffer=log_buffer)
+                return
+            if _REFUSAL_ANNOUNCED.pop("reason", None) is not None:
+                _log("Radiator settings are reaching Evohome again.", log_buffer=log_buffer)
 
         # Change detection uses our own cache (not RAMSES device state)
         last_calc      = last_setpoints.get(room_name)
@@ -1542,14 +1624,18 @@ def process_room_temperature(
             message = 23 if is_passive else 17
 
         if overheat_monitor is not None:
+            # The target the decision was judged against (boosted, or the En Suite
+            # morning), and the setting it chose - not the plain schedule, which made the
+            # alert quote the wrong arithmetic (1.25.0, review finding 9).
             overheat_monitor.update_room(
                 room_name       = room_name,
                 is_overheating  = is_overheating,
                 overheat_amount = overheat_amt,
                 current_temp    = dev_temp,
-                target_temp     = original_scheduled_temp,
+                target_temp     = overheat_target,
                 outdoor_temp    = current_outdoor_temp,
                 is_passive      = is_passive,
+                reduced_temp    = adjusted_temp if is_overheating else None,
             )
 
     # --- Special room rules ---

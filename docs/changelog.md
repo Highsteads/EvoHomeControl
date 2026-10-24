@@ -7,6 +7,17 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.0 - 24 October 2026
+
+Fixes from a review of this plugin and RAMSES ESP together.
+
+- **A setting RAMSES ESP could not send is not counted as sent.** While the gateway was offline, the plugin logged rooms as set and recorded the sends. It now says once that radiator settings are not reaching Evohome, tries every room again each cycle, and says when they get through. Needs RAMSES ESP 1.18.0; with an older RAMSES ESP it works as before.
+- **A radiator turned down for overheating stays down for at least 45 minutes.** It used to open again after a single five-minute check. If the room falls a whole degree below its target before then, it opens again at once.
+- **A room still too warm after its radiator is turned down now sends an alert.** It used to be called solar gain and sent nothing, but a valve stuck open looks just the same. The alert now says it may be either, at normal priority.
+- **The overheating alert quotes the right numbers:** the target the room was judged against, including a boost, and the setting the radiator was actually turned down to.
+- **The clocks going back no longer confuse it.** A change made through Indigo during the repeated hour is still recognised as a person's, and the age of an Ecowitt reading is worked out correctly.
+- **The morning timetable check is honest.** It names any room it could not check, never says the timetables match when it checked none, and tries again every hour that day until every room is checked.
+
 ## 1.24.0 - 24 October 2026
 
 Timed boost and the Boost variable now set the boosted rooms to 22 degrees, not a set number of degrees above the schedule. That covers the Dining Room, Hall Kitchen, Living Room Door and Living Room Front, and the Conservatory too. The Conservatory is boosted only while its sliding door is open. With the door shut it is held at 12 degrees, as before. An open garden window or garden door still stops its boost. The Conservatory now takes the timed boost as well as the global Boost.

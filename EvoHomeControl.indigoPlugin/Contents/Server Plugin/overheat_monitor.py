@@ -202,10 +202,14 @@ class OverheatMonitor:
             }
 
     def update_room(self, room_name, is_overheating, overheat_amount,
-                    current_temp, target_temp, outdoor_temp, is_passive=False):
+                    current_temp, target_temp, outdoor_temp, is_passive=False,
+                    reduced_temp=None):
         """
         Update overheat tracking for a room and send alerts if thresholds crossed.
         Called every heating cycle for every room regardless of overheat state.
+
+        target_temp is the target the decision was judged against, and reduced_temp the
+        setting it chose (1.25.0), so the alert quotes the real arithmetic.
         """
         self.initialize_room(room_name)
         room_data = self.history[room_name]
@@ -214,6 +218,8 @@ class OverheatMonitor:
         room_data["current_temp"]  = current_temp
         room_data["target_temp"]   = target_temp
         room_data["outdoor_temp"]  = outdoor_temp
+        room_data["reduced_temp"]  = reduced_temp
+        room_data["passive"]       = bool(is_passive)
         room_data["last_update"]   = dt.now().strftime("%d-%m-%Y %H:%M:%S")
 
         # Room-specific threshold overrides
@@ -248,18 +254,12 @@ class OverheatMonitor:
                 alert_type   = "CRITICAL_PERSISTENT"
 
             if should_alert and not room_data["alert_sent"]:
-                if is_passive:
-                    # Valve has been off 3+ cycles — passive warmth (solar/internal gain)
-                    # Not a TRV fault; suppress alert and mark sent so it does not
-                    # re-trigger every cycle.
-                    _slog(
-                        f"[OverheatMonitor] {room_name}: alert suppressed "
-                        f"(passive warmth — solar/internal gain, no TRV action)"
-                    )
-                    room_data["alert_sent"]      = True
-                    room_data["alert_type"]      = "PASSIVE_GAIN"
-                    room_data["all_clear_sent"]  = False
-                elif outdoor_temp is not None and outdoor_temp > self.outdoor_suppress_temp:
+                # A room that stays too warm after its radiator has been turned down used to
+                # be called passive warmth and get no alert at all. Nothing proves the valve
+                # closed - no zone reports its valve position - so a valve stuck open looked
+                # exactly the same (1.25.0, review finding 5). It now alerts, at normal
+                # priority, and the message names both explanations.
+                if outdoor_temp is not None and outdoor_temp > self.outdoor_suppress_temp:
                     _slog(
                         f"[OverheatMonitor] {room_name}: alert suppressed "
                         f"(outdoor {outdoor_temp:.1f}degC > {self.outdoor_suppress_temp}degC)"
@@ -323,9 +323,13 @@ class OverheatMonitor:
         target_temp  = room_data["target_temp"]
         outdoor_temp = room_data["outdoor_temp"]
 
-        # The backoff is clamped to a 12degC floor, so report the real setting.
-        reduced_temp = max(12.0, target_temp - 6.0)
+        # The setting the heating actually chose; before 1.25.0 it was worked out again
+        # here from the plain schedule, and could differ from what was sent.
+        reduced_temp = room_data.get("reduced_temp")
+        if not isinstance(reduced_temp, (int, float)):
+            reduced_temp = max(12.0, target_temp - 6.0)
         hours        = (room_data["consecutive_cycles"] * self.run_interval_mins) / 60.0
+        passive      = bool(room_data.get("passive"))
 
         title = f"The {room_name} is {_deg(overheat_amount)} degrees too warm"
         if alert_type == "CRITICAL_IMMEDIATE":
@@ -339,13 +343,18 @@ class OverheatMonitor:
             outside = f" It is {_deg(outdoor_temp)} degrees outside."
         else:
             outside = ""
-        message = (
-            f"{opening}{outside} The heating has turned its radiator down to "
-            f"{_deg(reduced_temp)} degrees. A room this far over usually means the "
-            f"radiator valve is stuck open or its batteries are flat, so please check it."
-        )
+        if passive:
+            advice = (f" The radiator has been turned down to {_deg(reduced_temp)} degrees for "
+                      f"a while and the room is still too warm. Sun or other heat can do that, "
+                      f"but a valve stuck open or with flat batteries looks the same, so please "
+                      f"check it.")
+        else:
+            advice = (f" The heating has turned its radiator down to {_deg(reduced_temp)} "
+                      f"degrees. A room this far over usually means the radiator valve is "
+                      f"stuck open or its batteries are flat, so please check it.")
+        message = f"{opening}{outside}{advice}"
 
-        pushed  = self._send_pushover(title, message, priority=1)
+        pushed  = self._send_pushover(title, message, priority=0 if passive else 1)
         emailed = self._send_email(title, message)
         if fire_event and self.event_callback:
             try:

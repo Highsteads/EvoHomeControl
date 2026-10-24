@@ -4,8 +4,21 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        20-10-2026 15:35 UK
-# Version:     1.24.0
+# Date:        24-10-2026 23:30 UK
+# Version:     1.25.0
+#
+# v1.25.0 (24-10-2026): FIXES FROM THE 17-OCT JOINT REVIEW WITH RAMSES ESP. (3) send_setpoint returns
+#   whether RAMSES ESP 1.18.0 accepted the command ({accepted, reason}); a refused one is not recorded as
+#   sent, the cycle keeps its cache and says once that settings are not reaching Evohome. (4) _SENT keeps
+#   an epoch and is compared with setpointChangedAtEpoch; the Ecowitt reading age tries both meanings of a
+#   repeated-hour time. (5) a room still too warm after being turned down alerts (normal priority, both
+#   explanations) instead of being suppressed as passive gain. (6) the 45-minute minimum off time is
+#   honoured in the coast and Tier 3 paths; only OVERHEAT_SANITY_FLOOR (1.0) below target reopens at once.
+#   (7) the timetable check names what it could not check, never claims a match in no rooms, and retries
+#   hourly until complete. (9) the overheat alert gets the target and setting actually used.
+#
+# v1.24.0 (24-10-2026): Boost sets the boosted rooms to a fixed 22 degrees (BOOST_TARGETS); the
+#   Conservatory is boosted only while its sliding door is open, and is in the timed boost too.
 #
 # v1.22.1 (17-10-2026): Six morning radiator plans reduced by 1 degree until noon
 #   at CliveS's request: Bathroom, Bedroom 2, Hall Bedroom and both Living Room
@@ -482,6 +495,7 @@ def _room_plans():
 TIMETABLE_CHECK_MINUTE = 4 * 60
 # A reading older than this means RAMSES ESP has stopped reading them.
 TIMETABLE_STALE_HOURS  = 30
+TIMETABLE_RETRY_SECONDS = 3600     # an incomplete daily check is tried again this much later
 
 # Short month labels for summer-window status strings (index 1-12)
 _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -491,7 +505,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.24.0"
+PLUGIN_VERSION  = "1.25.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1415,8 +1429,11 @@ class Plugin(indigo.PluginBase):
                     try:
                         dev = indigo.devices[dev_id]
                         end = holds[str(dev_id)]
-                        heating_logic.send_setpoint(
-                            dev, 12.0, until=heating_logic.hold_wire_time(end))
+                        if not heating_logic.send_setpoint(
+                                dev, 12.0, until=heating_logic.hold_wire_time(end)):
+                            _log(f"[TimedBoost] {dev.name} was not turned down to 12 degrees: "
+                                 f"{heating_logic.last_refusal(dev)}. The next heating cycle "
+                                 f"tries again.", level="WARNING")
                     except Exception as exc:
                         _log(f"[TimedBoost] Could not turn radiator {dev_id} down to "
                              f"12 degrees: {exc}", level="WARNING")
@@ -1632,7 +1649,10 @@ class Plugin(indigo.PluginBase):
             if changed or heating_logic.needs_override_refresh(dev, until=until):
                 sent_any = True
                 try:
-                    heating_logic.send_setpoint(dev, target, until=until)
+                    if not heating_logic.send_setpoint(dev, target, until=until):
+                        _log(f"[Summer] {dev.name} was not set to {target:.0f} degrees: "
+                             f"{heating_logic.last_refusal(dev)}. It is tried again next cycle.",
+                             level="WARNING")
                 except Exception as e:
                     _log(f"[Summer] Could not set radiator {dev.name} to "
                          f"{target:.0f}degC: {e}", level="WARNING")
@@ -3105,14 +3125,33 @@ class Plugin(indigo.PluginBase):
     # -----------------------------------------------------------------------
 
     def _maybe_check_timetable(self, now):
-        """Once a day after 04:00, after RAMSES ESP has read the timetables at 03:15."""
+        """Once a day after 04:00, after RAMSES ESP has read the timetables at 03:15.
+
+        The day counts as done only when every room was checked (1.25.0, review finding
+        7). A check with rooms missing or stale, or one that failed, is tried again an
+        hour later, so a read RAMSES ESP retries later in the morning is still checked."""
         today = now.strftime("%Y-%m-%d")
         if self.store.get("timetable_check_date") == today:
             return
         if now.hour * 60 + now.minute < TIMETABLE_CHECK_MINUTE:
             return
-        self.store["timetable_check_date"] = today
-        self._check_timetable(now, manual=False)
+        retry = str(self.store.get("timetable_retry_after") or "")
+        if retry[:10] == today and now.strftime("%Y-%m-%d %H:%M") < retry:
+            return
+        try:
+            complete = self._check_timetable(now, manual=False) is not False
+        except Exception as exc:
+            _log(f"[Timetable] The daily timetable check failed ({exc}). It runs again in "
+                 f"an hour.", level="WARNING")
+            complete = False
+        if complete:
+            self.store["timetable_check_date"]  = today
+            self.store["timetable_retry_after"] = ""
+        else:
+            # Held in the same local time the check runs on; a retry left from an earlier
+            # day is ignored by the date test above.
+            later = now + timedelta(seconds=TIMETABLE_RETRY_SECONDS)
+            self.store["timetable_retry_after"] = later.strftime("%Y-%m-%d %H:%M")
 
     def _check_timetable(self, now, manual=False):
         """Compare each room's timetable on the Evohome controller with its plan.
@@ -3120,7 +3159,11 @@ class Plugin(indigo.PluginBase):
         That timetable is what a room falls back to within two hours if Indigo stops, so a
         difference is worth knowing about. Silent when everything matches (DEBUG), one
         WARNING per room that differs, and one Pushover when the set of differing rooms
-        changes - keyed on the rooms and the differences, never on the message text."""
+        changes - keyed on the rooms and the differences, never on the message text.
+
+        Returns True when every room was checked. Rooms that could not be checked are
+        named, and "matches" is said only of rooms actually compared (1.25.0): it used to
+        report "matches ... in all 0 rooms checked" when every reading was out of date."""
         plans = _room_plans()
         missing, stale, differ = [], [], []
         for dev_id, room, hours in plans:
@@ -3149,19 +3192,35 @@ class Plugin(indigo.PluginBase):
             if manual:
                 _log("[Timetable] The radiators carry no timetable yet. This needs RAMSES ESP "
                      "1.13.0 or later, which reads the Evohome controller's timetable each night.")
-            return
+            return False
         for room, diff in differ:
             _log(f"[Timetable] {timetable_check.describe_difference(room, diff)} If Indigo "
                  f"stopped, this room would fall back to the controller's version.",
                  level="WARNING")
-        if stale:
-            _log(f"[Timetable] RAMSES ESP has not read the Evohome timetable in the last "
-                 f"{TIMETABLE_STALE_HOURS} hours for {timetable_check.join_names(stale)}, so "
-                 f"they could not be checked.", level="WARNING")
+        unchecked = "missing:" + ",".join(sorted(missing)) + "|stale:" + ",".join(sorted(stale))
+        if (stale or missing) and (manual or unchecked != self.store.get("timetable_unchecked_key")):
+            # Said once for a given set of rooms, not on every hourly retry.
+            self.store["timetable_unchecked_key"] = unchecked
+            if stale:
+                _log(f"[Timetable] RAMSES ESP has not read the Evohome timetable in the last "
+                     f"{TIMETABLE_STALE_HOURS} hours for {timetable_check.join_names(stale)}, so "
+                     f"they could not be checked.", level="WARNING")
+            if missing:
+                _log(f"[Timetable] {timetable_check.join_names(missing)} "
+                     f"{'carries' if len(missing) == 1 else 'carry'} no timetable from RAMSES "
+                     f"ESP, so {'it' if len(missing) == 1 else 'they'} could not be checked.",
+                     level="WARNING")
         checked = len(plans) - len(missing) - len(stale)
         if not differ:
-            line = (f"[Timetable] The Evohome controller's timetable matches the plan in all "
-                    f"{checked} rooms checked.")
+            if checked == 0:
+                line = "[Timetable] No room could be checked: every timetable reading is missing or out of date."
+            elif stale or missing:
+                line = (f"[Timetable] The Evohome controller's timetable matches the plan in the "
+                        f"{checked} room{'s' if checked != 1 else ''} that could be checked; "
+                        f"{len(plans) - checked} could not be.")
+            else:
+                line = (f"[Timetable] The Evohome controller's timetable matches the plan in all "
+                        f"{checked} rooms.")
             if manual:
                 _log(line)
             else:
@@ -3173,6 +3232,9 @@ class Plugin(indigo.PluginBase):
             self._save_state()
             if differ:
                 self._send_timetable_alert(differ)
+        if not (stale or missing):
+            self.store["timetable_unchecked_key"] = None
+        return not (stale or missing)
 
     def _send_timetable_alert(self, differ):
         rooms = [room for room, _d in differ]

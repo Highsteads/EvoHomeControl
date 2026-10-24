@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.24.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.25.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.25.0** - Fixes from a joint review with RAMSES ESP. A setting the gateway could not send is no longer counted as sent, an overheating radiator stays turned down for at least 45 minutes, a room still too warm after being turned down now sends an alert (a stuck valve looks the same as sun), the alert quotes the right numbers, the clocks going back no longer confuse it, and the morning timetable check names what it could not check and tries again.
 
 **v1.24.0** - Timed boost and the Boost variable now set the boosted rooms to 22 degrees, not a set number of degrees above the schedule. That covers the Dining Room, Hall Kitchen, Living Room Door and Living Room Front, and the Conservatory too. The Conservatory is boosted only while its sliding door is open. With the door shut it is held at 12 degrees, as before. An open garden window or garden door still stops its boost. The Conservatory now takes the timed boost as well as the global Boost.
 

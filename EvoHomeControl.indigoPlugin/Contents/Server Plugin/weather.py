@@ -315,20 +315,28 @@ class WeatherData:
         return None
 
     @staticmethod
-    def _ecowitt_age_secs(dev):
+    def _ecowitt_age_secs(dev, now_epoch=None):
         """Seconds since the Ecowitt plugin last wrote this sensor: its lastUpdate
-        state, else the device's lastChanged. None when neither can be read."""
-        now = datetime.datetime.now()
+        state, else the device's lastChanged. None when neither can be read.
+
+        Both are local times with no offset. On the night the clocks go back the hour
+        01:00-01:59 happens twice, and a reading 50 minutes old read as 10 minutes in
+        the future, so a stale outdoor temperature passed for fresh (1.25.0, review
+        finding 4). Both meanings are tried and the newer one that is not in the future
+        is taken, as heating_logic does for zone readings."""
+        now = time.time() if now_epoch is None else now_epoch
         raw = dev.states.get("lastUpdate")
         if raw:
             try:
                 seen = datetime.datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
-                return (now - seen).total_seconds()
+                return _local_age_secs(seen, now)
             except (ValueError, TypeError):
                 pass
         changed = getattr(dev, "lastChanged", None)
         if isinstance(changed, datetime.datetime):
-            return (now - changed).total_seconds()
+            if changed.tzinfo is not None:
+                return now - changed.timestamp()
+            return _local_age_secs(changed, now)
         return None
 
     def get_precipitation_forecast(self, minutes=60):
@@ -398,3 +406,15 @@ class WeatherData:
                     "description": desc,
                 })
         return results
+
+
+def _local_age_secs(seen, now_epoch):
+    """Age in seconds of a naive local-time reading, trying both meanings of a time in
+    the repeated hour (fold 0 the earlier one, BST here; fold 1 the later, GMT). A naive
+    datetime's timestamp() reads it in this Mac's own zone and honours the fold, which
+    is the zone the Ecowitt plugin writes in. A reading cannot come from the future, so
+    of the ages that are not negative the smaller is taken; if both are negative the
+    larger, which is the closer to now."""
+    ages = sorted(now_epoch - seen.replace(tzinfo=None, fold=f).timestamp() for f in (0, 1))
+    usable = [a for a in ages if a >= 0]
+    return usable[0] if usable else ages[-1]

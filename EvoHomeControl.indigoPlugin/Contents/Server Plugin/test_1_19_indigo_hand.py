@@ -10,6 +10,7 @@
 # Version:     1.0
 
 import json
+import time
 import os
 import tempfile
 import types
@@ -92,9 +93,10 @@ class TestTheRecord(_Base):
         zone = FakeZone()
         before = datetime.now()
         hl.send_setpoint(zone, 17.5)
-        value, when = hl._SENT[zone.id]
+        value, when, epoch = hl._SENT[zone.id]
         self.assertEqual(value, 17.5)
         self.assertGreaterEqual(when, before)
+        self.assertAlmostEqual(epoch, time.time(), delta=5)   # the real clock (1.25.0)
 
     def test_the_record_survives_a_round_trip_and_junk_is_skipped(self):
         hl.note_sent(FakeZone(dev_id=11), 8.0, when=datetime(2026, 10, 9, 7, 47, 18))
@@ -104,7 +106,7 @@ class TestTheRecord(_Base):
         snap["22"] = ["nine", "2026-10-09T07:00:00"]
         hl.restore_sent(snap)
         hl.restore_sent("not a dict")
-        self.assertEqual(hl._SENT, {11: (8.0, datetime(2026, 10, 9, 7, 47, 18))})
+        self.assertEqual(hl._SENT, {11: (8.0, datetime(2026, 10, 9, 7, 47, 18), hl._now_epoch(datetime(2026, 10, 9, 7, 47, 18)))})
 
     def test_the_plugin_saves_and_reloads_it_with_the_setpoint_cache(self):
         p = plugin_mod.Plugin.__new__(plugin_mod.Plugin)
@@ -114,7 +116,7 @@ class TestTheRecord(_Base):
         p._save_setpoint_cache()
         hl._SENT.clear()
         p._load_state()
-        self.assertEqual(hl._SENT, {11: (8.0, datetime(2026, 10, 9, 7, 47, 18))})
+        self.assertEqual(hl._SENT, {11: (8.0, datetime(2026, 10, 9, 7, 47, 18), hl._now_epoch(datetime(2026, 10, 9, 7, 47, 18)))})
         self.assertTrue(os.path.exists(os.path.join(p.data_dir, "setpoint_cache.json")))
 
 

@@ -122,15 +122,43 @@ class TestCheckOverheating(unittest.TestCase):
         self.assertTrue(is_oh, "Should still be overheating: 18.5 > 16.0+0.25")
         self.assertEqual(adj, 12.0)
 
-    def test_coast_complete_when_back_to_target_releases(self):
-        """Coast-reset with overheat at/below threshold: release."""
+    def _coasting(self, off_cycles, temp):
         self.mon.initialize_room("Bathroom")
         rd = self.mon.history["Bathroom"]
         rd["is_coasting"]         = True
         rd["consecutive_cycles"]  = 5
-        rd["temp_history"]        = [16.1, 16.1, 16.1]   # rate=0, near target
-        is_oh, _, _ = hl.check_overheating(16.1, 16.0, "Bathroom", self.mon)
-        # 0.1 ≤ OVERHEAT_TRIGGER_THRESHOLD (0.25) → release
+        rd["off_since_cycle"]     = off_cycles
+        rd["temp_history"]        = [temp, temp, temp]     # rate 0: the rise has stopped
+        return hl.check_overheating(temp, 16.0, "Bathroom", self.mon)
+
+    def test_coast_complete_releases_after_the_minimum_off_time(self):
+        """Back near target and closed for the 45 minutes: release."""
+        minimum = hl.OVERHEAT_MIN_OFF_MINUTES // 5
+        is_oh, _, _ = self._coasting(minimum, 16.1)
+        self.assertFalse(is_oh)
+
+    def test_coast_complete_stays_closed_before_the_minimum_off_time(self):
+        """1.25.0, review finding 6: it used to reopen after a single five-minute cycle."""
+        is_oh, adjusted, _ = self._coasting(1, 15.6)
+        self.assertTrue(is_oh)
+        self.assertEqual(self.mon.history["Bathroom"]["off_since_cycle"], 2)
+
+    def test_coast_complete_releases_at_once_when_well_below_target(self):
+        is_oh, _, _ = self._coasting(1, 16.0 - hl.OVERHEAT_SANITY_FLOOR - 0.1)
+        self.assertFalse(is_oh)
+
+    def test_an_overheat_closure_honours_the_minimum_off_time(self):
+        """The minimum-time branch of Tier 3 was unreachable: the sanity gate used the
+        same 0.3 degC. Now 0.4 below target after one cycle stays closed."""
+        self.mon.initialize_room("Bathroom")
+        rd = self.mon.history["Bathroom"]
+        rd["consecutive_cycles"] = 3
+        rd["off_since_cycle"]    = 1
+        rd["temp_history"]       = [15.6, 15.6, 15.6]
+        is_oh, _, _ = hl.check_overheating(15.6, 16.0, "Bathroom", self.mon)
+        self.assertTrue(is_oh)
+        rd["off_since_cycle"] = hl.OVERHEAT_MIN_OFF_MINUTES // 5
+        is_oh, _, _ = hl.check_overheating(15.6, 16.0, "Bathroom", self.mon)
         self.assertFalse(is_oh)
 
 
