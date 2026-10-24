@@ -29,15 +29,17 @@ Set the **Both out** variable to `yes` and every room's target drops by four deg
 
 ## Boost
 
-Set the **Boost** variable to `yes` and the living areas get extra heat until you set it back to `no`:
+Set the **Boost** variable to `yes` and the living areas are heated to 22 degrees until you set it back to `no`:
 
-| Room | Extra |
+| Room | Boosted to |
 |---|---|
-| Conservatory | 3 degrees |
-| Dining Room | 2 degrees |
-| Hall Kitchen | 2 degrees |
-| Living Room Door | 2 degrees |
-| Living Room Front | 2 degrees |
+| Conservatory | 22 degrees, only while its sliding door is open |
+| Dining Room | 22 degrees |
+| Hall Kitchen | 22 degrees |
+| Living Room Door | 22 degrees |
+| Living Room Front | 22 degrees |
+
+The Conservatory's sliding door decides it. Shut, the Conservatory is held at 12 degrees and is not boosted. Open, it is boosted, unless one of its garden windows or its garden door is open.
 
 The bedrooms, Bathroom, En Suite, Hall Bedroom and Utility Room are not boosted.
 
@@ -47,7 +49,7 @@ A room with a window or outside door open is not boosted either. It keeps its op
 
 ## Timed boost
 
-A timed boost adds two degrees to the **Dining Room**, **Hall Kitchen**, **Living Room Door** and **Living Room Front** for one hour or two, then ends by itself. Start it from **Plugins → EvoHome Heating Controller → Start Timed Boost (1 hour)** or **(2 hours)**, or from the actions of the same names, which you can put on a control page button.
+A timed boost heats the **Conservatory** (only while its sliding door is open), **Dining Room**, **Hall Kitchen**, **Living Room Door** and **Living Room Front** to 22 degrees for one hour or two, then ends by itself. Start it from **Plugins → EvoHome Heating Controller → Start Timed Boost (1 hour)** or **(2 hours)**, or from the actions of the same names, which you can put on a control page button.
 
 - **Cancel Timed Boost** ends it early and sets all twelve radiators to 12 degrees until each room's next scheduled temperature change. The hold survives a restart, and a new timed boost clears it. Open-window protection still wins. A room whose plan has no temperature changes resumes its plan at midnight.
 - When it ends, the Event Log lists the temperature each room goes back to.

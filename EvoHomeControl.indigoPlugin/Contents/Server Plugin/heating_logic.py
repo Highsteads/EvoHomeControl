@@ -1088,6 +1088,14 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
 # SPECIAL ROOM RULES
 # ---------------------------------------------------------------------------
 
+def _slide_door_open():
+    """True only when the Conservatory sliding door reads open. Unreadable counts as closed,
+    so a faulty contact never boosts the room."""
+    try:
+        return _contact_is_open(DEV_SLIDE_DOOR_ID)
+    except Exception:
+        return False
+
 def conservatory_special_rules(temp, msg, windows_open, doors_open,
                                 window_count, door_count, outdoor_temp, hour,
                                 store=None):
@@ -1504,18 +1512,22 @@ def process_room_temperature(
         is_boost
         or (timed_boost_active and room_name in (timed_boost_rooms or set()))
     )
-    boost_applies = (effective_boost and room_name in schedules.BOOST_AMOUNTS
-                     and not (windows_open or doors_open) and not is_away)
+    # The Conservatory is boosted only while its sliding door is open (CliveS, 24-10-2026).
+    # A closed slide door is already held at 12 by conservatory_special_rules.
+    conservatory_slide_open = (room_name != "Conservatory" or _slide_door_open())
+    boost_applies = (effective_boost and room_name in schedules.BOOST_TARGETS
+                     and not (windows_open or doors_open) and not is_away
+                     and conservatory_slide_open)
 
     # --- Overheat detection ---
     if dev_temp is not None and dev_temp > RADIATORS_OFF_TEMP:
         # Use override target if provided (e.g. the En Suite morning schedule —
         # use that as the baseline so 21.9°C is not falsely flagged as overheating)
         overheat_target = overheat_target_override if overheat_target_override is not None else new_temp
-        # A boosted room is judged against its boosted target, so a room at 20.9 degC
-        # with a 20 degC schedule and a +2 degC boost is not falsely suppressed.
+        # A boosted room is judged against its boosted target, so a room at 21.5 degC
+        # on a 22 degC boost is not falsely suppressed.
         if boost_applies:
-            overheat_target = overheat_target + schedules.BOOST_AMOUNTS[room_name]
+            overheat_target = schedules.BOOST_TARGETS[room_name]
         is_overheating, adjusted_temp, overheat_amt = check_overheating(
             dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins
         )
@@ -1591,8 +1603,8 @@ def process_room_temperature(
     # Nor on top of Away (8/15) or the mild-weather cut-off (7) (1.14.0): Away plus a
     # boost gave 16 degC in an empty house.
     if boost_applies and message not in (17, 23, 5, 7, 8, 15):
-        new_temp += schedules.BOOST_AMOUNTS[room_name]
-        message   = 12
+        new_temp = schedules.BOOST_TARGETS[room_name]
+        message  = 12
 
     # Both-out. 25 is exempt so the drying run holds one predictable temperature
     # whoever happens to be in the house at 5am. Away (8/15) is exempt because Away

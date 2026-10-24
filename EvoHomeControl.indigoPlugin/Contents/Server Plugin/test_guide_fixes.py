@@ -63,7 +63,7 @@ if "schedules" not in sys.modules:
     _schedules = types.ModuleType("schedules")
     _schedules.MAX_TEMP_LIMITS       = {}
     _schedules.MAX_TEMP_LIMITS_GUEST = {}
-    _schedules.BOOST_AMOUNTS         = {}
+    _schedules.BOOST_TARGETS         = {}
     _schedules.TIMED_BOOST_ROOMS     = set()
     sys.modules["schedules"] = _schedules
 

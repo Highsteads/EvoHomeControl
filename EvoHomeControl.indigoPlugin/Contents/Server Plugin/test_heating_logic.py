@@ -42,7 +42,7 @@ sys.modules["indigo"] = _indigo
 _schedules = types.ModuleType("schedules")
 _schedules.MAX_TEMP_LIMITS       = {}
 _schedules.MAX_TEMP_LIMITS_GUEST = {}
-_schedules.BOOST_AMOUNTS         = {}
+_schedules.BOOST_TARGETS         = {}
 _schedules.TIMED_BOOST_ROOMS     = set()
 sys.modules["schedules"] = _schedules
 
@@ -428,9 +428,11 @@ class TestDiningRoomOpenGardenHoldsSixteen(unittest.TestCase):
                               "zoneMode": "permanent override"})
         _indigo.devices = {
             hl.DEV_DINING_ROOM_ID:     self.rad,
+            hl.DEV_CONSERVATORY_ID:    self.rad,
             hl.DEV_GARDEN_WINDOW_L_ID: self._Dev({"contact": True}),
             hl.DEV_GARDEN_WINDOW_R_ID: self._Dev({"contact": True}),
             hl.DEV_GARDEN_DOOR_ID:     self._Dev({"contact": True}),
+            hl.DEV_SLIDE_DOOR_ID:      self._Dev({"contact": True}),
         }
 
     def tearDown(self):
@@ -471,7 +473,7 @@ class TestDiningRoomOpenGardenHoldsSixteen(unittest.TestCase):
         self.assertEqual(self.written, [16.0])
         self.assertEqual(msgs["Dining Room"], 21)
 
-    @mock.patch.dict(hl.schedules.BOOST_AMOUNTS, {"Dining Room": 2})
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Dining Room": 22.0})
     def test_boost_is_ignored_while_the_garden_door_is_open(self):
         """1.11.0: a boost with a window or outside door open only heats the
         garden, so the room keeps its open-window setting (it gave 18 before)."""
@@ -492,7 +494,7 @@ class TestDiningRoomOpenGardenHoldsSixteen(unittest.TestCase):
         self.assertEqual(self.written, [16.0])
         self.assertEqual(msgs["Dining Room"], 21)
 
-    @mock.patch.dict(hl.schedules.BOOST_AMOUNTS, {"Dining Room": 2})
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Dining Room": 22.0})
     def test_boost_still_applies_when_everything_is_shut(self):
         msgs = {}
         hl.process_room_temperature(
@@ -508,6 +510,49 @@ class TestDiningRoomOpenGardenHoldsSixteen(unittest.TestCase):
             log_buffer = [], changes_buffer = [], overheat_monitor = None,
         )
         self.assertEqual(self.written[-1], 22.0)
+
+    def _conservatory(self, is_boost=True, timed=False):
+        """One Conservatory cycle at noon, scheduled at 20 degC, with a boost on."""
+        msgs = {}
+        hl.process_room_temperature(
+            room_name      = "Conservatory",
+            room_schedule  = [20] * 24,
+            window_devices = [hl.DEV_GARDEN_WINDOW_L_ID, hl.DEV_GARDEN_WINDOW_R_ID],
+            door_devices   = [hl.DEV_GARDEN_DOOR_ID],
+            special_rules  = hl.conservatory_special_rules,
+            ha_device_id   = hl.DEV_CONSERVATORY_ID,
+            current_hour   = 12, current_minute = 0,
+            current_outdoor_temp = 5.0, is_boost = is_boost,
+            timed_boost_active = timed,
+            timed_boost_rooms  = {"Conservatory"},
+            last_setpoints = {}, last_messages = msgs,
+            log_buffer = [], changes_buffer = [], overheat_monitor = None,
+        )
+        return msgs
+
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
+    def test_conservatory_boosts_to_22_with_the_sliding_door_open(self):
+        self._open(hl.DEV_SLIDE_DOOR_ID)
+        self._conservatory(is_boost=True)
+        self.assertEqual(self.written[-1], 22.0)
+
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
+    def test_conservatory_timed_boost_also_needs_the_sliding_door_open(self):
+        self._open(hl.DEV_SLIDE_DOOR_ID)
+        self._conservatory(is_boost=False, timed=True)
+        self.assertEqual(self.written[-1], 22.0)
+
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
+    def test_conservatory_is_held_at_twelve_with_the_sliding_door_closed(self):
+        self._conservatory(is_boost=True)
+        self.assertEqual(self.written[-1], 12)
+
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
+    def test_open_garden_door_blocks_the_conservatory_boost(self):
+        self._open(hl.DEV_SLIDE_DOOR_ID)
+        self._open(hl.DEV_GARDEN_DOOR_ID)
+        self._conservatory(is_boost=True)
+        self.assertNotEqual(self.written[-1], 22.0)
 
     def test_at_sixteen_already_it_still_says_the_window_is_open(self):
         """The message refinement must not relabel 20 as 'closed' (19) just

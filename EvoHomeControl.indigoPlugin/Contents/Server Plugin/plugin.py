@@ -5,7 +5,7 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        20-10-2026 15:35 UK
-# Version:     1.23.0
+# Version:     1.24.0
 #
 # v1.22.1 (17-10-2026): Six morning radiator plans reduced by 1 degree until noon
 #   at CliveS's request: Bathroom, Bedroom 2, Hall Bedroom and both Living Room
@@ -491,7 +491,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.23.0"
+PLUGIN_VERSION  = "1.24.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

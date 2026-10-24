@@ -61,7 +61,7 @@ if "schedules" not in sys.modules:
     _schedules = types.ModuleType("schedules")
     _schedules.MAX_TEMP_LIMITS       = {}
     _schedules.MAX_TEMP_LIMITS_GUEST = {}
-    _schedules.BOOST_AMOUNTS         = {}
+    _schedules.BOOST_TARGETS         = {}
     _schedules.TIMED_BOOST_ROOMS     = set()
     sys.modules["schedules"] = _schedules
 
@@ -178,7 +178,7 @@ class TestAway(_Rooms):
         self.assertEqual(self.written, [hl.RADIATORS_OFF_TEMP])
         self.assertIn(msg, (1, 2))
 
-    @mock.patch.dict(hl.schedules.BOOST_AMOUNTS, {"Conservatory": 3})
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
     def test_boost_does_not_add_to_away(self):
         self._room(is_away=True, is_boost=True)
         self.assertEqual(self.written, [hl.AWAY_TEMP])
@@ -205,22 +205,24 @@ class TestGlobalBoostAndOverheat(_Rooms):
     """The Conservatory's +3 only comes from the global Boost variable, and a room
     still warming within 0.8 degC of its normal target was coasting - valve shut."""
 
-    @mock.patch.dict(hl.schedules.BOOST_AMOUNTS, {"Conservatory": 3})
-    def test_a_warming_room_on_global_boost_gets_its_boost(self):
+    @mock.patch.object(hl, "_slide_door_open", return_value=True)
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
+    def test_a_warming_room_on_global_boost_gets_its_boost(self, _slide):
         monitor = om.OverheatMonitor(os.path.join(tempfile.mkdtemp(), "h.json"))
         monitor.initialize_room("Conservatory")
         monitor.history["Conservatory"]["temp_history"] = [18.3, 18.4]
         self._room(temp=18.6, is_boost=True, overheat_monitor=monitor)
-        self.assertEqual(self.written, [21.0])
+        self.assertEqual(self.written, [22.0])
 
-    @mock.patch.dict(hl.schedules.BOOST_AMOUNTS, {"Conservatory": 3})
-    def test_a_room_already_past_its_boosted_target_is_still_turned_down(self):
+    @mock.patch.object(hl, "_slide_door_open", return_value=True)
+    @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
+    def test_a_room_already_past_its_boosted_target_is_still_turned_down(self, _slide):
         monitor = om.OverheatMonitor(os.path.join(tempfile.mkdtemp(), "h.json"))
         monitor.initialize_room("Conservatory")
-        monitor.history["Conservatory"]["temp_history"] = [21.2, 21.4]
-        self._room(temp=21.6, is_boost=True, overheat_monitor=monitor)
-        # Judged against the boosted 21, so backed off from there.
-        self.assertEqual(self.written, [21.0 - hl.OVERHEAT_BACKOFF])
+        monitor.history["Conservatory"]["temp_history"] = [22.2, 22.4]
+        self._room(temp=22.6, is_boost=True, overheat_monitor=monitor)
+        # Judged against the boosted 22, so backed off from there.
+        self.assertEqual(self.written, [22.0 - hl.OVERHEAT_BACKOFF])
 
 
 # ===========================================================================

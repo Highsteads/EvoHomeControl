@@ -72,24 +72,27 @@ MAX_TEMP_LIMITS_GUEST = {
 # ---------------------------------------------------------------------------
 # BOOST AMOUNTS (°C added to scheduled setpoint when boost mode is active)
 # ---------------------------------------------------------------------------
+# A fixed setpoint, not an offset from the schedule (CliveS, 24-10-2026).
 # Rooms NOT listed here receive NO boost.
 # Bedrooms intentionally excluded (already at comfortable temps).
+# The Conservatory is boosted only while its sliding door is open (heating_logic).
 
-BOOST_AMOUNTS = {
-    "Conservatory":      3,
-    "Dining Room":       2,
-    "Hall Kitchen":      2,
-    "Living Room Door":  2,
-    "Living Room Front": 2,
+BOOST_TARGETS = {
+    "Conservatory":      22.0,
+    "Dining Room":       22.0,
+    "Hall Kitchen":      22.0,
+    "Living Room Door":  22.0,
+    "Living Room Front": 22.0,
 }
 
 # ---------------------------------------------------------------------------
 # TIMED BOOST ROOMS
 # ---------------------------------------------------------------------------
-# The 4 rooms targeted by the 1h/2h timed boost actions.
-# Conservatory uses the global boost only (not timed boost).
+# The rooms targeted by the 1h/2h timed boost actions. The Conservatory is in
+# both the timed boost and the global boost (CliveS, 24-10-2026).
 
 TIMED_BOOST_ROOMS = {
+    "Conservatory",
     "Dining Room",
     "Living Room Door",
     "Living Room Front",
