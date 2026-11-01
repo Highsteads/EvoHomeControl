@@ -5,7 +5,12 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.4
+# Version:     1.25.5
+#
+# v1.25.5 (01-11-2026): an unreadable setpoint_cache.json (corrupt, or not laid out as written) is no
+#   longer ignored without a word: _load_setpoint_cache warns once, keeps a copy as
+#   setpoint_cache.json.unreadable and starts afresh. A missing file is still a quiet fresh start
+#   (review of 01-11-2026, finding 6).
 #
 # v1.25.4 (01-11-2026): the summer force-on, En Suite morning, En Suite drying and boost expiry checks in
 #   _tick each run through _run_guarded, so a fault in one can no longer stop the heating cycle; logged once
@@ -525,7 +530,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.4"
+PLUGIN_VERSION  = "1.25.5"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -2976,18 +2981,7 @@ class Plugin(indigo.PluginBase):
             except Exception as e:
                 _log(f"[EvoHomeControl] Setpoint cache migration failed: {e}", level="WARNING")
 
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if isinstance(raw, dict) and "setpoints" in raw:
-                self.store["last_setpoints"] = raw.get("setpoints", {})
-                self.store["last_messages"]  = raw.get("messages",  {})
-                heating_logic.restore_sent(raw.get("sent", {}))
-            else:
-                self.store["last_setpoints"] = raw if isinstance(raw, dict) else {}
-                self.store["last_messages"]  = {}
-        except (OSError, ValueError):
-            pass  # fresh start — all rooms log once on first cycle
+        self._load_setpoint_cache(cache_path)
 
         # --- Timed boost + En Suite morning (plugin_state.json) ---
         state_path = os.path.join(self.data_dir, "plugin_state.json")
@@ -3068,6 +3062,53 @@ class Plugin(indigo.PluginBase):
             # a malformed file just means a fresh start for the persisted flags.
             _log(f"[State] Could not restore plugin_state.json ({type(e).__name__}) — fresh start",
                  level="WARNING")
+
+    def _load_setpoint_cache(self, cache_path):
+        """Load the setpoint cache: what each room was last set to, and what this plugin
+        last sent each zone (heating_logic._SENT), which is how a change made by hand
+        through Indigo or the Home app is told apart from the plugin's own.
+
+        No file is a normal fresh start and is not mentioned. A file that is there but
+        cannot be read used to be ignored without a word (1.25.5, review finding 6): the
+        plugin then forgot what it had sent, so a person's change could be taken for its
+        own and undone at the next cycle. Now it says so once, keeps a copy of the bad
+        file beside it as setpoint_cache.json.unreadable, and starts afresh."""
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except FileNotFoundError:
+            return   # fresh start - all rooms log once on the first cycle
+        except (OSError, ValueError) as e:
+            self._setpoint_cache_unreadable(cache_path, f"{type(e).__name__}: {e}")
+            return
+        if isinstance(raw, dict) and "setpoints" in raw:
+            setpoints, messages = raw.get("setpoints", {}), raw.get("messages", {})
+            if not isinstance(setpoints, dict) or not isinstance(messages, dict):
+                self._setpoint_cache_unreadable(cache_path, "its contents are not laid out "
+                                                "as this plugin writes them")
+                return
+            self.store["last_setpoints"] = setpoints
+            self.store["last_messages"]  = messages
+            heating_logic.restore_sent(raw.get("sent", {}))
+        elif isinstance(raw, dict):
+            # The layout before 1.19.0: {room: temperature} and nothing else.
+            self.store["last_setpoints"] = raw
+            self.store["last_messages"]  = {}
+        else:
+            self._setpoint_cache_unreadable(cache_path, "its contents are not laid out as "
+                                            "this plugin writes them")
+
+    def _setpoint_cache_unreadable(self, cache_path, why):
+        kept = cache_path + ".unreadable"
+        try:
+            shutil.copy2(cache_path, kept)
+            where = f" A copy of it is kept as {os.path.basename(kept)}."
+        except OSError:
+            where = ""
+        _log(f"[SetpointCache] The saved setpoint cache could not be read ({why}), so the "
+             f"plugin starts without it.{where} Until each room has been set again, a "
+             f"temperature changed by hand through Indigo or the Home app may be taken for "
+             f"the plugin's own and put back at the next heating check.", level="WARNING")
 
     def _save_state(self):
         """Persist timed boost and En Suite morning state to plugin_state.json."""

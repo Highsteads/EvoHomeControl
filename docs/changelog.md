@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.5 - 1 November 2026
+
+- **A damaged setpoint cache is reported.** The plugin keeps a small file, setpoint_cache.json, recording what it last set each room to. That is how it tells its own changes from a temperature somebody set by hand through Indigo or the Home app. If the file was damaged, the plugin ignored it without a word and forgot what it had sent, so for a while a change made by hand could be put back at the next heating check. Now it says once that the file could not be read and what that means, keeps a copy as setpoint_cache.json.unreadable, and starts afresh. A missing file, as on a first install, is still a quiet fresh start.
+
 ## 1.25.4 - 1 November 2026
 
 - **One faulty check can no longer stop the heating.** Every 30 seconds the plugin checks the En Suite morning, the En Suite drying run, and whether a timed boost or a 24-hour force-on has run out, before deciding whether a heating cycle is due. If one of those checks went wrong, for example because a device had been deleted, the heating cycle behind it never ran, and the same error went into the log every 30 seconds. Now each check is on its own: a fault is logged once, with the details needed to fix it, the heating carries on, and the plugin says when the check works again.
