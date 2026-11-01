@@ -5,7 +5,11 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.3
+# Version:     1.25.4
+#
+# v1.25.4 (01-11-2026): the summer force-on, En Suite morning, En Suite drying and boost expiry checks in
+#   _tick each run through _run_guarded, so a fault in one can no longer stop the heating cycle; logged once
+#   with its traceback, and once when it works again (review of 01-11-2026, finding 5).
 #
 # v1.25.3 (01-11-2026): a setting with an end time (the summer 8 degC hold, the 12 degC hold after Cancel
 #   Timed Boost) that RAMSES ESP refuses now uses the same fallback as other timed sends: warned once per
@@ -375,6 +379,7 @@ import tempfile
 import time
 import logging
 import threading
+import traceback
 from contextlib import nullcontext
 import functools
 from datetime import datetime, timedelta
@@ -520,7 +525,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.3"
+PLUGIN_VERSION  = "1.25.4"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1041,11 +1046,16 @@ class Plugin(indigo.PluginBase):
         """Called every POLL_SLEEP_SECS. Dispatches timed tasks."""
         run_interval_secs = self._run_interval_mins() * 60
 
-        # Summer 24h force-on expiry check (every tick) — revert to shut-off
-        self._check_summer_force_expiry()
+        # Summer 24h force-on expiry check (every tick) — revert to shut-off.
+        # This and the three checks below each run guarded (1.25.4, review finding 5): a
+        # fault in one used to end the tick before the heating cycle, so a check failing
+        # every time stopped the heating altogether, 30 seconds at a time.
+        self._run_guarded("Summer", "24-hour force-on check",
+                          lambda: self._check_summer_force_expiry())
 
         # En Suite morning auto-start / auto-cancel (every tick for responsiveness)
-        self._check_en_suite_morning()
+        self._run_guarded("EnSuiteMorning", "morning check",
+                          lambda: self._check_en_suite_morning())
 
         # En Suite open window -> floor heating off, every tick, whatever the radiator
         # path decided (1.18.1). Its own try: a fault here must not stop the cycle.
@@ -1056,7 +1066,8 @@ class Plugin(indigo.PluginBase):
 
         # En Suite drying run — every tick, so an opened window ends it within 30 s
         # rather than at the next 5-minute cycle.
-        self._check_en_suite_drying()
+        self._run_guarded("EnSuiteDrying", "drying-run check",
+                          lambda: self._check_en_suite_drying())
 
         # Daily check that the Evohome controller's own timetable still matches the plans
         try:
@@ -1065,7 +1076,8 @@ class Plugin(indigo.PluginBase):
             _log(f"[Timetable] Check failed: {e}", level="WARNING")
 
         # Timed boost expiry check (every tick)
-        self._check_timed_boost_expiry()
+        self._run_guarded("TimedBoost", "boost expiry check",
+                          lambda: self._check_timed_boost_expiry())
 
         # A window or door opening or shutting gets a heating cycle at once (1.22.0),
         # not up to five minutes later. Its own try, like the interlock above.
@@ -1083,6 +1095,31 @@ class Plugin(indigo.PluginBase):
             self._run_heating_cycle()
             self.store["last_heating_cycle"]    = now
             self.store["cycle_requests_served"] = requested
+
+    def _run_guarded(self, tag, what, check):
+        """Run one per-tick check so that a fault in it cannot stop the rest of the tick,
+        the heating cycle above all. The fault is logged once, with its traceback, and
+        again only if it changes; when the check works again that is said once too. Every
+        30 seconds a lasting fault would otherwise put 2,880 identical errors a day in the
+        shared event log. StopThread is never caught: Indigo uses it to stop the plugin."""
+        store  = self.store if isinstance(getattr(self, "store", None), dict) else {}
+        faults = store.setdefault("tick_faults", {})
+        try:
+            check()
+        except Exception as e:
+            stop = getattr(self, "StopThread", None)
+            if isinstance(stop, type) and isinstance(e, stop):
+                raise
+            key = f"{type(e).__name__}: {e}"
+            if faults.get(tag) != key:
+                faults[tag] = key
+                _log(f"[{tag}] The {what} failed ({key}). The heating cycle carries on; the "
+                     f"check is tried again every {POLL_SLEEP_SECS} seconds and this is not "
+                     f"repeated unless the fault changes.\n{traceback.format_exc()}",
+                     level="ERROR")
+            return
+        if faults.pop(tag, None) is not None:
+            _log(f"[{tag}] The {what} is working again.")
 
     def _check_contacts_changed(self):
         """Ask for a heating cycle when any watched window or door has opened or shut

@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.4 - 1 November 2026
+
+- **One faulty check can no longer stop the heating.** Every 30 seconds the plugin checks the En Suite morning, the En Suite drying run, and whether a timed boost or a 24-hour force-on has run out, before deciding whether a heating cycle is due. If one of those checks went wrong, for example because a device had been deleted, the heating cycle behind it never ran, and the same error went into the log every 30 seconds. Now each check is on its own: a fault is logged once, with the details needed to fix it, the heating carries on, and the plugin says when the check works again.
+
 ## 1.25.3 - 1 November 2026
 
 - **A refused hold is reported once, not twelve times every five minutes.** The summer 8 degree hold and the 12 degree hold after Cancel Timed Boost are sent with an end time. If RAMSES ESP could not take one, the plugin logged a warning for every radiator each time it tried, and asked RAMSES ESP again every time. It now handles this like any other timed setting that fails: one warning, permanent settings for 15 minutes, then it tries again and says when they get through.
