@@ -5,7 +5,12 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.2
+# Version:     1.25.3
+#
+# v1.25.3 (01-11-2026): a setting with an end time (the summer 8 degC hold, the 12 degC hold after Cancel
+#   Timed Boost) that RAMSES ESP refuses now uses the same fallback as other timed sends: warned once per
+#   outage, sent permanent, retried after 15 minutes. It used to warn for every room on every call
+#   (review of 01-11-2026, finding 4).
 #
 # v1.25.2 (01-11-2026): with the RAMSES ESP plugin missing or not enabled, heating_logic.send_setpoint
 #   now returns False (refused) instead of sending Indigo's thermostat command to a RAMSES device that
@@ -515,7 +520,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.2"
+PLUGIN_VERSION  = "1.25.3"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

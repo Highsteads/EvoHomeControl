@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.3 - 1 November 2026
+
+- **A refused hold is reported once, not twelve times every five minutes.** The summer 8 degree hold and the 12 degree hold after Cancel Timed Boost are sent with an end time. If RAMSES ESP could not take one, the plugin logged a warning for every radiator each time it tried, and asked RAMSES ESP again every time. It now handles this like any other timed setting that fails: one warning, permanent settings for 15 minutes, then it tries again and says when they get through.
+
 ## 1.25.2 - 1 November 2026
 
 - **Nothing is counted as sent while RAMSES ESP is stopped.** With the RAMSES ESP plugin disabled or not installed, the plugin still "sent" each radiator a permanent setting, recorded it and carried on as if it had worked, although every radiator is a RAMSES ESP device and nothing could reach it. Now it says once that radiator settings are not reaching Evohome because RAMSES ESP is not running, keeps what it knew about each room, and tries again every cycle. Once RAMSES ESP is back, settings go out as normal, timed as before.

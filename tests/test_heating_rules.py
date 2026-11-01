@@ -6,10 +6,10 @@
 #              change, reading ages, window contacts, cancel-hold validation and the
 #              timed-to-permanent fallback in send_setpoint
 #              and its retry (1.25.1), and the refusal when RAMSES ESP is not running
-#              (1.25.2).
+#              (1.25.2), and settings with an end time (1.25.3).
 # Author:      CliveS & Claude Opus 5.5
 # Date:        01-11-2026
-# Version:     1.2
+# Version:     1.3
 
 import types
 from datetime import date, datetime
@@ -300,6 +300,71 @@ def test_a_failure_that_lasts_is_warned_about_once(hl, wire, monkeypatch):
         clock[0] += hl.OVERRIDE_RETRY_SECS
     warnings = [m for m, _ in wire.lines if "Could not send a timed setpoint" in m]
     assert len(warnings) == 1
+
+
+# ------------------------------- settings with an end time (1.25.3, finding 4)
+
+UNTIL = "2026-11-02 07:00"
+
+
+def _until_zone(dev_id, mode="temporary override", until=""):
+    return _zone(dev_id, zoneMode=mode, zoneOverrideUntil=until, setpointHeat="12.0")
+
+
+def test_an_end_time_setting_goes_through_ramses(hl, wire):
+    hl.set_override_minutes(120)
+    assert hl.send_setpoint(_zone(7), 12.0, until=UNTIL) is True
+    assert wire.ramses.calls == [("setTemporarySetpoint", 7,
+                                  {"setpoint": "12.00", "until": UNTIL})]
+
+
+def test_a_failed_end_time_setting_warns_once_for_all_rooms(hl, wire, monkeypatch):
+    """It used to warn for every room on every call: 12 lines each summer cycle."""
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(hl.time, "time", lambda: clock[0])
+    hl.set_override_minutes(120)
+    wire.ramses.raises = RuntimeError("busy")
+    for cycle in range(3):
+        for dev_id in (7, 8, 9):
+            assert hl.send_setpoint(_zone(dev_id), 12.0, until=UNTIL) is True
+        clock[0] += 300
+    warnings = [m for m, lvl in wire.lines if "end time" in m]
+    assert len(warnings) == 1
+    assert len(wire.permanent) == 9
+
+
+def test_after_a_failure_end_time_settings_go_permanent_without_asking_ramses(hl, wire):
+    hl.set_override_minutes(120)
+    wire.ramses.raises = RuntimeError("busy")
+    hl.send_setpoint(_zone(7), 12.0, until=UNTIL)
+    wire.ramses.raises = None
+    hl.send_setpoint(_zone(8), 12.0, until=UNTIL)
+    assert wire.ramses.calls == []
+    assert wire.permanent == [(7, 12.0), (8, 12.0)]
+
+
+def test_a_permanent_hold_is_not_resent_every_cycle_during_the_fallback(hl, wire):
+    hl.set_override_minutes(120)
+    wire.ramses.raises = RuntimeError("busy")
+    hl.send_setpoint(_zone(7), 12.0, until=UNTIL)
+    assert hl.needs_override_refresh(_until_zone(7, "permanent override"), until=UNTIL) is False
+
+
+def test_end_time_settings_are_tried_again_after_the_retry_time(hl, wire, monkeypatch):
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(hl.time, "time", lambda: clock[0])
+    hl.set_override_minutes(120)
+    wire.ramses.raises = RuntimeError("busy")
+    hl.send_setpoint(_zone(7), 12.0, until=UNTIL)
+    wire.ramses.raises = None
+    clock[0] += hl.OVERRIDE_RETRY_SECS
+    # The zone now holds a permanent 12; the timed one is wanted again.
+    assert hl.needs_override_refresh(_until_zone(7, "permanent override"), until=UNTIL) is True
+    wire.lines.clear()
+    hl.send_setpoint(_zone(7), 12.0, until=UNTIL)
+    assert wire.ramses.calls == [("setTemporarySetpoint", 7,
+                                  {"setpoint": "12.00", "until": UNTIL})]
+    assert any("reaching RAMSES ESP again" in m for m, _ in wire.lines)
 
 
 def test_wanting_permanent_means_a_timed_zone_is_resent(hl):

@@ -5,7 +5,7 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6; Codex GPT-6 (1.8)
 # Date:        01-11-2026 UK
-# Version:     1.10
+# Version:     1.11
 
 import logging
 import time
@@ -382,10 +382,16 @@ def send_setpoint(dev, value, permanent=False, until=None):
                 reply = indigo.server.getPlugin(RAMSES_PLUGIN_ID).executeAction(
                     "setTemporarySetpoint", deviceId=dev.id,
                     props={"setpoint": f"{float(value):.2f}", "until": until})
+                _timed_send_worked()
                 return _accepted(dev, value, reply)
             except Exception as e:
-                _log(f"Could not send a setting ending {until} to {dev.name}: {e}. "
-                     f"Sending a permanent one instead.", level="WARNING")
+                # The same fallback as a failed timed send (1.25.3, review finding 4): warned
+                # once per outage and retried after OVERRIDE_RETRY_SECS. It used to warn for
+                # every room on every call - 12 lines each cycle of the summer hold - and try
+                # RAMSES ESP again each time. While the fallback lasts, _timed_overrides_on()
+                # is False, so the hold goes out permanent and needs_override_refresh() asks
+                # for a permanent one, so it is not resent every cycle either.
+                _timed_send_failed(f"RAMSES ESP refused a setting with an end time ({e})")
         return _send_permanent(dev, value)
     if _timed_overrides_on(permanent):
         try:
