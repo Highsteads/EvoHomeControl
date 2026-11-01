@@ -7,6 +7,40 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.8 - 1 November 2026
+
+- **The right RAMSES ESP version in the warning.** When a setting could not be sent to run for a while, the warning said such settings need RAMSES ESP 1.12.0 or later. That is true for ordinary settings, but the summer hold and the hold after Cancel Timed Boost run until a set time, which needs RAMSES ESP 1.15.0 or later. The warning now names the right one.
+
+## 1.25.7 - 1 November 2026
+
+- **Fewer repeated warnings.** Three more of the half-minute checks (the En Suite window, the daily timetable check, and windows and doors opening or shutting) now work like the four fixed in 1.25.4. A fault that lasts is logged once, with the details needed to fix it, and the plugin says when the check works again. They used to put the same warning in the log every 30 seconds.
+
+## 1.25.6 - 1 November 2026
+
+- **Hand-set temperatures and the clocks changing.** A temperature set by hand is left alone until the room's plan next changes, or midnight at the latest. That was worked out on the clock face, so on the nights the clocks change it could end at an hour that never happened in March, or be judged against the wrong one of October's two 1 o'clocks. It is now worked out in real time, using the exact moment RAMSES ESP records for the change where it gives one.
+
+## 1.25.5 - 1 November 2026
+
+- **A damaged setpoint cache is reported.** The plugin keeps a small file, setpoint_cache.json, recording what it last set each room to. That is how it tells its own changes from a temperature somebody set by hand through Indigo or the Home app. If the file was damaged, the plugin ignored it without a word and forgot what it had sent, so for a while a change made by hand could be put back at the next heating check. Now it says once that the file could not be read and what that means, keeps a copy as setpoint_cache.json.unreadable, and starts afresh. A missing file, as on a first install, is still a quiet fresh start.
+
+## 1.25.4 - 1 November 2026
+
+- **One faulty check can no longer stop the heating.** Every 30 seconds the plugin checks the En Suite morning, the En Suite drying run, and whether a timed boost or a 24-hour force-on has run out, before deciding whether a heating cycle is due. If one of those checks went wrong, for example because a device had been deleted, the heating cycle behind it never ran, and the same error went into the log every 30 seconds. Now each check is on its own: a fault is logged once, with the details needed to fix it, the heating carries on, and the plugin says when the check works again.
+
+## 1.25.3 - 1 November 2026
+
+- **A refused hold is reported once, not twelve times every five minutes.** The summer 8 degree hold and the 12 degree hold after Cancel Timed Boost are sent with an end time. If RAMSES ESP could not take one, the plugin logged a warning for every radiator each time it tried, and asked RAMSES ESP again every time. It now handles this like any other timed setting that fails: one warning, permanent settings for 15 minutes, then it tries again and says when they get through.
+
+## 1.25.2 - 1 November 2026
+
+- **Nothing is counted as sent while RAMSES ESP is stopped.** With the RAMSES ESP plugin disabled or not installed, the plugin still "sent" each radiator a permanent setting, recorded it and carried on as if it had worked, although every radiator is a RAMSES ESP device and nothing could reach it. Now it says once that radiator settings are not reaching Evohome because RAMSES ESP is not running, keeps what it knew about each room, and tries again every cycle. Once RAMSES ESP is back, settings go out as normal, timed as before.
+- During the summer shut-off the same problem is reported once, not for every radiator every five minutes.
+
+## 1.25.1 - 1 November 2026
+
+- **One failed radiator command no longer leaves the whole house on permanent settings.** If RAMSES ESP could not take a timed setting once (while it was restarting, for example), every room was sent permanent settings from then on, until the settings were saved or the plugin restarted. Then, if Indigo stopped, the radiators would stay where they were instead of going back to the Evohome timetable. The plugin now tries a timed setting again every 15 minutes and says when they are getting through again.
+- **A second failure is reported too.** After saving the settings, a repeat of the same failure used to switch to permanent settings without a word. It now warns again.
+
 ## 1.25.0 - 24 October 2026
 
 Fixes from a review of this plugin and RAMSES ESP together.

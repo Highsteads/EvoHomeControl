@@ -4,8 +4,43 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        24-10-2026 23:30 UK
-# Version:     1.25.0
+# Date:        01-11-2026 UK
+# Version:     1.25.8
+#
+# v1.25.8 (01-11-2026): the fallback warning names the RAMSES ESP version each kind of setting needs:
+#   1.12.0 for timed settings, 1.15.0 for settings with an end time. It said 1.12.0 for both.
+#
+# v1.25.7 (01-11-2026): the En Suite window interlock, the timetable check and the window/door check in
+#   _tick run through _run_guarded too, so a lasting fault in one is logged once with its traceback (and
+#   once when it clears) instead of a warning every 30 seconds.
+#
+# v1.25.6 (01-11-2026): heating_logic.manual_hold_until works out when a hold made by hand ends in real
+#   hours (seconds since the epoch, setpointChangedAtEpoch where RAMSES ESP gives it), so the clocks
+#   changing no longer end it early or late (review of 01-11-2026, finding 7).
+#
+# v1.25.5 (01-11-2026): an unreadable setpoint_cache.json (corrupt, or not laid out as written) is no
+#   longer ignored without a word: _load_setpoint_cache warns once, keeps a copy as
+#   setpoint_cache.json.unreadable and starts afresh. A missing file is still a quiet fresh start
+#   (review of 01-11-2026, finding 6).
+#
+# v1.25.4 (01-11-2026): the summer force-on, En Suite morning, En Suite drying and boost expiry checks in
+#   _tick each run through _run_guarded, so a fault in one can no longer stop the heating cycle; logged once
+#   with its traceback, and once when it works again (review of 01-11-2026, finding 5).
+#
+# v1.25.3 (01-11-2026): a setting with an end time (the summer 8 degC hold, the 12 degC hold after Cancel
+#   Timed Boost) that RAMSES ESP refuses now uses the same fallback as other timed sends: warned once per
+#   outage, sent permanent, retried after 15 minutes. It used to warn for every room on every call
+#   (review of 01-11-2026, finding 4).
+#
+# v1.25.2 (01-11-2026): with the RAMSES ESP plugin missing or not enabled, heating_logic.send_setpoint
+#   now returns False (refused) instead of sending Indigo's thermostat command to a RAMSES device that
+#   cannot act on it and recording it as sent (review of 01-11-2026, finding 3). It does not switch later
+#   sends to permanent. The summer hold's refusal warning is said once per reason, not per radiator per cycle.
+#
+# v1.25.1 (01-11-2026): a failed timed send (RAMSES ESP restarting, say) no longer keeps every room on
+#   PERMANENT settings until the settings are saved or the plugin restarts: heating_logic retries timed
+#   sends every OVERRIDE_RETRY_SECS (15 min), says when they get through again, and the warn-once record
+#   is cleared on recovery and on Save, so a second outage is reported too (review of 01-11-2026, 1 and 2).
 #
 # v1.25.0 (24-10-2026): FIXES FROM THE 17-OCT JOINT REVIEW WITH RAMSES ESP. (3) send_setpoint returns
 #   whether RAMSES ESP 1.18.0 accepted the command ({accepted, reason}); a refused one is not recorded as
@@ -360,6 +395,7 @@ import tempfile
 import time
 import logging
 import threading
+import traceback
 from contextlib import nullcontext
 import functools
 from datetime import datetime, timedelta
@@ -505,7 +541,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.0"
+PLUGIN_VERSION  = "1.25.8"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1026,38 +1062,40 @@ class Plugin(indigo.PluginBase):
         """Called every POLL_SLEEP_SECS. Dispatches timed tasks."""
         run_interval_secs = self._run_interval_mins() * 60
 
-        # Summer 24h force-on expiry check (every tick) — revert to shut-off
-        self._check_summer_force_expiry()
+        # Summer 24h force-on expiry check (every tick) — revert to shut-off.
+        # Every per-tick check runs guarded: a fault in one is logged once and cannot stop
+        # the others or the heating cycle. Four of them had no guard before 1.25.4 (review
+        # finding 5); the other three had their own try but warned every 30 seconds until
+        # 1.25.7. Each has its own tag, which is also the key its fault is remembered by.
+        self._run_guarded("Summer", "24-hour force-on check",
+                          lambda: self._check_summer_force_expiry())
 
         # En Suite morning auto-start / auto-cancel (every tick for responsiveness)
-        self._check_en_suite_morning()
+        self._run_guarded("EnSuiteMorning", "morning check",
+                          lambda: self._check_en_suite_morning())
 
         # En Suite open window -> floor heating off, every tick, whatever the radiator
-        # path decided (1.18.1). Its own try: a fault here must not stop the cycle.
-        try:
-            self._check_en_suite_window_interlock()
-        except Exception as e:
-            _log(f"[EnSuiteMorning] Window check failed: {e}", level="WARNING")
+        # path decided (1.18.1).
+        self._run_guarded("EnSuiteWindow", "En Suite window check",
+                          lambda: self._check_en_suite_window_interlock())
 
         # En Suite drying run — every tick, so an opened window ends it within 30 s
         # rather than at the next 5-minute cycle.
-        self._check_en_suite_drying()
+        self._run_guarded("EnSuiteDrying", "drying-run check",
+                          lambda: self._check_en_suite_drying())
 
         # Daily check that the Evohome controller's own timetable still matches the plans
-        try:
-            self._maybe_check_timetable(datetime.now())
-        except Exception as e:
-            _log(f"[Timetable] Check failed: {e}", level="WARNING")
+        self._run_guarded("Timetable", "timetable check",
+                          lambda: self._maybe_check_timetable(datetime.now()))
 
         # Timed boost expiry check (every tick)
-        self._check_timed_boost_expiry()
+        self._run_guarded("TimedBoost", "boost expiry check",
+                          lambda: self._check_timed_boost_expiry())
 
         # A window or door opening or shutting gets a heating cycle at once (1.22.0),
-        # not up to five minutes later. Its own try, like the interlock above.
-        try:
-            self._check_contacts_changed()
-        except Exception as e:
-            _log(f"[Windows] Check failed: {e}", level="WARNING")
+        # not up to five minutes later.
+        self._run_guarded("Windows", "window and door check",
+                          lambda: self._check_contacts_changed())
 
         # Main heating cycle (time-delta dispatch), or sooner when one was asked for.
         # The request count is read BEFORE the cycle, so a request that arrives while
@@ -1068,6 +1106,31 @@ class Plugin(indigo.PluginBase):
             self._run_heating_cycle()
             self.store["last_heating_cycle"]    = now
             self.store["cycle_requests_served"] = requested
+
+    def _run_guarded(self, tag, what, check):
+        """Run one per-tick check so that a fault in it cannot stop the rest of the tick,
+        the heating cycle above all. The fault is logged once, with its traceback, and
+        again only if it changes; when the check works again that is said once too. Every
+        30 seconds a lasting fault would otherwise put 2,880 identical errors a day in the
+        shared event log. StopThread is never caught: Indigo uses it to stop the plugin."""
+        store  = self.store if isinstance(getattr(self, "store", None), dict) else {}
+        faults = store.setdefault("tick_faults", {})
+        try:
+            check()
+        except Exception as e:
+            stop = getattr(self, "StopThread", None)
+            if isinstance(stop, type) and isinstance(e, stop):
+                raise
+            key = f"{type(e).__name__}: {e}"
+            if faults.get(tag) != key:
+                faults[tag] = key
+                _log(f"[{tag}] The {what} failed ({key}). The heating cycle carries on; the "
+                     f"check is tried again every {POLL_SLEEP_SECS} seconds and this is not "
+                     f"repeated unless the fault changes.\n{traceback.format_exc()}",
+                     level="ERROR")
+            return
+        if faults.pop(tag, None) is not None:
+            _log(f"[{tag}] The {what} is working again.")
 
     def _check_contacts_changed(self):
         """Ask for a heating cycle when any watched window or door has opened or shut
@@ -1649,10 +1712,17 @@ class Plugin(indigo.PluginBase):
             if changed or heating_logic.needs_override_refresh(dev, until=until):
                 sent_any = True
                 try:
-                    if not heating_logic.send_setpoint(dev, target, until=until):
-                        _log(f"[Summer] {dev.name} was not set to {target:.0f} degrees: "
-                             f"{heating_logic.last_refusal(dev)}. It is tried again next cycle.",
-                             level="WARNING")
+                    if heating_logic.send_setpoint(dev, target, until=until):
+                        self.store.pop("summer_refusal_logged", None)
+                    else:
+                        # Said once per reason, not for every radiator every cycle: with
+                        # RAMSES ESP stopped that was 12 lines each five minutes (1.25.2).
+                        why = heating_logic.last_refusal(dev)
+                        if self.store.get("summer_refusal_logged") != why:
+                            self.store["summer_refusal_logged"] = why
+                            _log(f"[Summer] {dev.name} was not set to {target:.0f} degrees: "
+                                 f"{why}. Every radiator is tried again each cycle.",
+                                 level="WARNING")
                 except Exception as e:
                     _log(f"[Summer] Could not set radiator {dev.name} to "
                          f"{target:.0f}degC: {e}", level="WARNING")
@@ -2917,18 +2987,7 @@ class Plugin(indigo.PluginBase):
             except Exception as e:
                 _log(f"[EvoHomeControl] Setpoint cache migration failed: {e}", level="WARNING")
 
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if isinstance(raw, dict) and "setpoints" in raw:
-                self.store["last_setpoints"] = raw.get("setpoints", {})
-                self.store["last_messages"]  = raw.get("messages",  {})
-                heating_logic.restore_sent(raw.get("sent", {}))
-            else:
-                self.store["last_setpoints"] = raw if isinstance(raw, dict) else {}
-                self.store["last_messages"]  = {}
-        except (OSError, ValueError):
-            pass  # fresh start — all rooms log once on first cycle
+        self._load_setpoint_cache(cache_path)
 
         # --- Timed boost + En Suite morning (plugin_state.json) ---
         state_path = os.path.join(self.data_dir, "plugin_state.json")
@@ -3009,6 +3068,53 @@ class Plugin(indigo.PluginBase):
             # a malformed file just means a fresh start for the persisted flags.
             _log(f"[State] Could not restore plugin_state.json ({type(e).__name__}) — fresh start",
                  level="WARNING")
+
+    def _load_setpoint_cache(self, cache_path):
+        """Load the setpoint cache: what each room was last set to, and what this plugin
+        last sent each zone (heating_logic._SENT), which is how a change made by hand
+        through Indigo or the Home app is told apart from the plugin's own.
+
+        No file is a normal fresh start and is not mentioned. A file that is there but
+        cannot be read used to be ignored without a word (1.25.5, review finding 6): the
+        plugin then forgot what it had sent, so a person's change could be taken for its
+        own and undone at the next cycle. Now it says so once, keeps a copy of the bad
+        file beside it as setpoint_cache.json.unreadable, and starts afresh."""
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except FileNotFoundError:
+            return   # fresh start - all rooms log once on the first cycle
+        except (OSError, ValueError) as e:
+            self._setpoint_cache_unreadable(cache_path, f"{type(e).__name__}: {e}")
+            return
+        if isinstance(raw, dict) and "setpoints" in raw:
+            setpoints, messages = raw.get("setpoints", {}), raw.get("messages", {})
+            if not isinstance(setpoints, dict) or not isinstance(messages, dict):
+                self._setpoint_cache_unreadable(cache_path, "its contents are not laid out "
+                                                "as this plugin writes them")
+                return
+            self.store["last_setpoints"] = setpoints
+            self.store["last_messages"]  = messages
+            heating_logic.restore_sent(raw.get("sent", {}))
+        elif isinstance(raw, dict):
+            # The layout before 1.19.0: {room: temperature} and nothing else.
+            self.store["last_setpoints"] = raw
+            self.store["last_messages"]  = {}
+        else:
+            self._setpoint_cache_unreadable(cache_path, "its contents are not laid out as "
+                                            "this plugin writes them")
+
+    def _setpoint_cache_unreadable(self, cache_path, why):
+        kept = cache_path + ".unreadable"
+        try:
+            shutil.copy2(cache_path, kept)
+            where = f" A copy of it is kept as {os.path.basename(kept)}."
+        except OSError:
+            where = ""
+        _log(f"[SetpointCache] The saved setpoint cache could not be read ({why}), so the "
+             f"plugin starts without it.{where} Until each room has been set again, a "
+             f"temperature changed by hand through Indigo or the Home app may be taken for "
+             f"the plugin's own and put back at the next heating check.", level="WARNING")
 
     def _save_state(self):
         """Persist timed boost and En Suite morning state to plugin_state.json."""

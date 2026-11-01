@@ -4,12 +4,12 @@
 # Description: Core heating logic — room processing, overheat detection, special rules
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6; Codex GPT-6 (1.8)
-# Date:        20-10-2026 UK
-# Version:     1.8
+# Date:        01-11-2026 UK
+# Version:     1.13
 
 import logging
 import time
-from datetime import datetime as dt, timedelta
+from datetime import datetime as dt
 from zoneinfo import ZoneInfo
 
 import indigo  # noqa — available in plugin context
@@ -256,19 +256,31 @@ EN_SUITE_DRYING_END_HOUR   = 10
 # the old behaviour; the plugin sets the length from its settings at startup.
 RAMSES_PLUGIN_ID       = "uk.co.clives.ramses.esp"
 OVERRIDE_RENEW_MINUTES = 60
-_OVERRIDE = {"minutes": 0, "broken": False}
+# After a timed send fails, settings are sent permanent for this long, then a timed one
+# is tried again (1.25.1). Until 1.25.1 one failure - RAMSES ESP restarting, say - kept
+# EVERY room on permanent settings until the settings were saved or the plugin restarted,
+# so a stopped Indigo would no longer hand the house back to the Evohome timetable.
+# One retry costs one extra command per OVERRIDE_RETRY_SECS while RAMSES ESP stays broken.
+OVERRIDE_RETRY_SECS    = 900
+# "broken_until": seconds since the epoch until which timed sends are not tried; 0 = not broken.
+_OVERRIDE = {"minutes": 0, "broken": False, "broken_until": 0.0}
+# {reason: True} for the fallback warnings already given in the CURRENT outage. Cleared when
+# a timed send gets through and when the settings are saved, so the next outage is reported.
 _OVERRIDE_WARNED = {}
 
 
 def set_override_minutes(minutes):
     """Set how long each setpoint holds; 0 means permanent. Also clears a fallback
-    left by an earlier failed send, so a fixed RAMSES ESP is tried again."""
+    left by an earlier failed send, so a fixed RAMSES ESP is tried again, and forgets
+    the warnings already given, so a failure after this is reported again (1.25.1)."""
     try:
         minutes = int(minutes)
     except (ValueError, TypeError):
         minutes = 0
-    _OVERRIDE["minutes"] = max(0, minutes)
-    _OVERRIDE["broken"]  = False
+    _OVERRIDE["minutes"]      = max(0, minutes)
+    _OVERRIDE["broken"]       = False
+    _OVERRIDE["broken_until"] = 0.0
+    _OVERRIDE_WARNED.clear()
 
 
 def override_renew_minutes():
@@ -279,7 +291,36 @@ def override_renew_minutes():
 
 
 def _timed_overrides_on(permanent=False):
+    """True when a setting should be sent timed. A fallback left by a failed send lasts
+    OVERRIDE_RETRY_SECS, then timed sends are tried again (1.25.1)."""
+    if _OVERRIDE["broken"] and time.time() >= _OVERRIDE["broken_until"]:
+        _OVERRIDE["broken"] = False
     return (not permanent) and _OVERRIDE["minutes"] > 0 and not _OVERRIDE["broken"]
+
+
+# The RAMSES ESP version each kind of setting needs, for the fallback warning (1.25.8).
+# The warning named 1.12.0 for both, but a setting with an end time needs 1.15.0.
+TIMED_NEEDS = "timed settings need RAMSES ESP 1.12.0 or later"
+UNTIL_NEEDS = "settings with an end time need RAMSES ESP 1.15.0 or later"
+
+
+def _timed_send_failed(reason, needs=TIMED_NEEDS):
+    """Send permanent settings for OVERRIDE_RETRY_SECS, and say so once per outage.
+    `needs` names the RAMSES ESP version this kind of setting needs."""
+    _OVERRIDE["broken"]       = True
+    _OVERRIDE["broken_until"] = time.time() + OVERRIDE_RETRY_SECS
+    if not _OVERRIDE_WARNED.get(reason):
+        _OVERRIDE_WARNED[reason] = True
+        _log(f"Could not send a timed setpoint - {reason}. Sending permanent ones "
+             f"instead and trying a timed one again every {OVERRIDE_RETRY_SECS // 60} "
+             f"minutes; {needs}.", level="WARNING")
+
+
+def _timed_send_worked():
+    """A timed send got through: if a fallback was reported, say it has ended."""
+    if _OVERRIDE_WARNED:
+        _OVERRIDE_WARNED.clear()
+        _log("Timed setpoints are reaching RAMSES ESP again.")
 
 
 # RAMSES ESP versions that accept an explicit end time ("until") on its timed action.
@@ -332,19 +373,34 @@ def send_setpoint(dev, value, permanent=False, until=None):
     Returns True when the command was handed on, False when RAMSES ESP said it could not
     send it (1.25.0, review finding 3). Only a command handed on is recorded as sent;
     last_refusal() gives the reason for a False."""
+    # Every radiator is a RAMSES ESP device, so Indigo's own thermostat command reaches it
+    # only through that plugin too. With RAMSES ESP not running, nothing can be sent at all:
+    # report a refusal rather than "sending" a permanent setting that goes nowhere and
+    # recording it as sent (1.25.2, review finding 3). The caller says so and tries again.
+    if not _ramses_running():
+        try:
+            _REFUSED[int(dev.id)] = "the RAMSES ESP plugin is not running"
+        except (TypeError, ValueError, AttributeError):
+            pass
+        return False
     if until is not None:
         if _timed_overrides_on() and _ramses_takes_until():
             try:
                 reply = indigo.server.getPlugin(RAMSES_PLUGIN_ID).executeAction(
                     "setTemporarySetpoint", deviceId=dev.id,
                     props={"setpoint": f"{float(value):.2f}", "until": until})
+                _timed_send_worked()
                 return _accepted(dev, value, reply)
             except Exception as e:
-                _log(f"Could not send a setting ending {until} to {dev.name}: {e}. "
-                     f"Sending a permanent one instead.", level="WARNING")
-        indigo.thermostat.setHeatSetpoint(dev, value=value)
-        note_sent(dev, value)
-        return True
+                # The same fallback as a failed timed send (1.25.3, review finding 4): warned
+                # once per outage and retried after OVERRIDE_RETRY_SECS. It used to warn for
+                # every room on every call - 12 lines each cycle of the summer hold - and try
+                # RAMSES ESP again each time. While the fallback lasts, _timed_overrides_on()
+                # is False, so the hold goes out permanent and needs_override_refresh() asks
+                # for a permanent one, so it is not resent every cycle either.
+                _timed_send_failed(f"RAMSES ESP refused a setting with an end time ({e})",
+                                   needs=UNTIL_NEEDS)
+        return _send_permanent(dev, value)
     if _timed_overrides_on(permanent):
         try:
             ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
@@ -353,19 +409,38 @@ def send_setpoint(dev, value, permanent=False, until=None):
                     "setpoint": f"{float(value):.2f}",
                     "minutes":  str(_OVERRIDE["minutes"]),
                 })
+                _timed_send_worked()
                 return _accepted(dev, value, reply)
-            reason = "the RAMSES ESP plugin is not enabled"
+            reason = "the RAMSES ESP plugin is not enabled"   # stopped since the check above
         except Exception as e:
             reason = f"RAMSES ESP refused it ({e})"
-        _OVERRIDE["broken"] = True
-        if not _OVERRIDE_WARNED.get(reason):
-            _OVERRIDE_WARNED[reason] = True
-            _log(f"Could not send a timed setpoint - {reason}. Sending permanent ones "
-                 f"instead; timed ones need RAMSES ESP 1.12.0 or later. Save the settings "
-                 f"to try again.", level="WARNING")
+        _timed_send_failed(reason)
+    return _send_permanent(dev, value)
+
+
+def _send_permanent(dev, value):
+    """Indigo's own thermostat command, which RAMSES ESP sends as a permanent setting."""
     indigo.thermostat.setHeatSetpoint(dev, value=value)
+    try:
+        _REFUSED.pop(int(dev.id), None)
+    except (TypeError, ValueError, AttributeError):
+        pass
     note_sent(dev, value)
     return True
+
+
+def _ramses_running():
+    """False only when Indigo says the RAMSES ESP plugin is missing or not enabled. When
+    that cannot be asked (an error from getPlugin itself), carry on and send as before:
+    a failed check must not stop the heating."""
+    try:
+        ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
+    except Exception:
+        return True
+    try:
+        return ramses is not None and bool(ramses.isEnabled())
+    except Exception:
+        return True
 
 
 # {device id: reason} for the last command RAMSES ESP refused, until one is accepted.
@@ -501,16 +576,46 @@ def manual_hold_until(dev, hours, now=None):
             return None
     elif mode == "permanent override":
         return "permanent"
-    hour_start = changed.replace(minute=0, second=0, microsecond=0)
-    end = None
-    for step in range(1, 25):
-        candidate = hour_start + timedelta(hours=step)
-        if candidate.hour == 0 or hours[candidate.hour] != hours[(candidate.hour - 1) % 24]:
-            end = candidate
-            break
-    if end is None or (now or dt.now()) >= end:
+    # Walk REAL hours from the moment of the change, as next_plan_change does (1.25.6,
+    # review finding 7). The walk used to step through local wall-clock times, so on the
+    # night the clocks change a hold could end an hour early or late, and "now" was
+    # compared as a local time that repeats an hour in October.
+    now_epoch = _now_epoch(now)
+    end_epoch = _hold_end_epoch(_changed_epoch(states, changed, now_epoch), hours)
+    if end_epoch is None or now_epoch >= end_epoch:
         return None
-    return end
+    # Returned as a house-time clock reading (naive), as before, for the log wording.
+    return dt.fromtimestamp(end_epoch, HOUSE_TZ).replace(tzinfo=None)
+
+
+def _changed_epoch(states, changed, now_epoch):
+    """When the setpoint changed, in seconds since the epoch: RAMSES ESP's own
+    setpointChangedAtEpoch where it gives one, else the local text. A text in the hour
+    that happens twice in October is read as whichever of its two moments is not in the
+    future and is nearer now, as zone reading ages are."""
+    try:
+        epoch = float(states.get("setpointChangedAtEpoch") or 0)
+    except (TypeError, ValueError):
+        epoch = 0.0
+    if epoch > 0:
+        return epoch
+    return now_epoch - _local_text_age_minutes(changed, now_epoch) * 60.0
+
+
+def _hold_end_epoch(changed_epoch, hours):
+    """The first whole hour after the change at which the plan moves or the day ends
+    (house midnight), in seconds since the epoch; None if none within 26 real hours.
+    The UK's offsets are whole hours, so real hour edges are local hour edges. Each hour
+    is compared with the one actually in force before it: after the spring change 02:00
+    follows 00:00, and in October 01:00 GMT follows 01:00 BST, which is no change."""
+    edge = (int(changed_epoch) // 3600 + 1) * 3600
+    for step in range(26):
+        candidate = edge + step * 3600
+        local     = dt.fromtimestamp(candidate, HOUSE_TZ)
+        before    = dt.fromtimestamp(candidate - 3600, HOUSE_TZ)
+        if local.hour == 0 or hours[local.hour] != hours[before.hour]:
+            return candidate
+    return None
 
 
 def check_manual_hold(room, dev, hours, now=None, log_buffer=None):
