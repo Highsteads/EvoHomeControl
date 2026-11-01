@@ -5,11 +5,11 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6; Codex GPT-6 (1.8)
 # Date:        01-11-2026 UK
-# Version:     1.11
+# Version:     1.12
 
 import logging
 import time
-from datetime import datetime as dt, timedelta
+from datetime import datetime as dt
 from zoneinfo import ZoneInfo
 
 import indigo  # noqa — available in plugin context
@@ -568,16 +568,46 @@ def manual_hold_until(dev, hours, now=None):
             return None
     elif mode == "permanent override":
         return "permanent"
-    hour_start = changed.replace(minute=0, second=0, microsecond=0)
-    end = None
-    for step in range(1, 25):
-        candidate = hour_start + timedelta(hours=step)
-        if candidate.hour == 0 or hours[candidate.hour] != hours[(candidate.hour - 1) % 24]:
-            end = candidate
-            break
-    if end is None or (now or dt.now()) >= end:
+    # Walk REAL hours from the moment of the change, as next_plan_change does (1.25.6,
+    # review finding 7). The walk used to step through local wall-clock times, so on the
+    # night the clocks change a hold could end an hour early or late, and "now" was
+    # compared as a local time that repeats an hour in October.
+    now_epoch = _now_epoch(now)
+    end_epoch = _hold_end_epoch(_changed_epoch(states, changed, now_epoch), hours)
+    if end_epoch is None or now_epoch >= end_epoch:
         return None
-    return end
+    # Returned as a house-time clock reading (naive), as before, for the log wording.
+    return dt.fromtimestamp(end_epoch, HOUSE_TZ).replace(tzinfo=None)
+
+
+def _changed_epoch(states, changed, now_epoch):
+    """When the setpoint changed, in seconds since the epoch: RAMSES ESP's own
+    setpointChangedAtEpoch where it gives one, else the local text. A text in the hour
+    that happens twice in October is read as whichever of its two moments is not in the
+    future and is nearer now, as zone reading ages are."""
+    try:
+        epoch = float(states.get("setpointChangedAtEpoch") or 0)
+    except (TypeError, ValueError):
+        epoch = 0.0
+    if epoch > 0:
+        return epoch
+    return now_epoch - _local_text_age_minutes(changed, now_epoch) * 60.0
+
+
+def _hold_end_epoch(changed_epoch, hours):
+    """The first whole hour after the change at which the plan moves or the day ends
+    (house midnight), in seconds since the epoch; None if none within 26 real hours.
+    The UK's offsets are whole hours, so real hour edges are local hour edges. Each hour
+    is compared with the one actually in force before it: after the spring change 02:00
+    follows 00:00, and in October 01:00 GMT follows 01:00 BST, which is no change."""
+    edge = (int(changed_epoch) // 3600 + 1) * 3600
+    for step in range(26):
+        candidate = edge + step * 3600
+        local     = dt.fromtimestamp(candidate, HOUSE_TZ)
+        before    = dt.fromtimestamp(candidate - 3600, HOUSE_TZ)
+        if local.hour == 0 or hours[local.hour] != hours[before.hour]:
+            return candidate
+    return None
 
 
 def check_manual_hold(room, dev, hours, now=None, log_buffer=None):

@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.6 - 1 November 2026
+
+- **Hand-set temperatures and the clocks changing.** A temperature set by hand is left alone until the room's plan next changes, or midnight at the latest. That was worked out on the clock face, so on the nights the clocks change it could end at an hour that never happened in March, or be judged against the wrong one of October's two 1 o'clocks. It is now worked out in real time, using the exact moment RAMSES ESP records for the change where it gives one.
+
 ## 1.25.5 - 1 November 2026
 
 - **A damaged setpoint cache is reported.** The plugin keeps a small file, setpoint_cache.json, recording what it last set each room to. That is how it tells its own changes from a temperature somebody set by hand through Indigo or the Home app. If the file was damaged, the plugin ignored it without a word and forgot what it had sent, so for a while a change made by hand could be put back at the next heating check. Now it says once that the file could not be read and what that means, keeps a copy as setpoint_cache.json.unreadable, and starts afresh. A missing file, as on a first install, is still a quiet fresh start.

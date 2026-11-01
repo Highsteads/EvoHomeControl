@@ -5,7 +5,11 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.5
+# Version:     1.25.6
+#
+# v1.25.6 (01-11-2026): heating_logic.manual_hold_until works out when a hold made by hand ends in real
+#   hours (seconds since the epoch, setpointChangedAtEpoch where RAMSES ESP gives it), so the clocks
+#   changing no longer end it early or late (review of 01-11-2026, finding 7).
 #
 # v1.25.5 (01-11-2026): an unreadable setpoint_cache.json (corrupt, or not laid out as written) is no
 #   longer ignored without a word: _load_setpoint_cache warns once, keeps a copy as
@@ -530,7 +534,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.5"
+PLUGIN_VERSION  = "1.25.6"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
