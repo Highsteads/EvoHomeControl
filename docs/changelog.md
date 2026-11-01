@@ -7,6 +7,11 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.1 - 1 November 2026
+
+- **One failed radiator command no longer leaves the whole house on permanent settings.** If RAMSES ESP could not take a timed setting once (while it was restarting, for example), every room was sent permanent settings from then on, until the settings were saved or the plugin restarted. Then, if Indigo stopped, the radiators would stay where they were instead of going back to the Evohome timetable. The plugin now tries a timed setting again every 15 minutes and says when they are getting through again.
+- **A second failure is reported too.** After saving the settings, a repeat of the same failure used to switch to permanent settings without a word. It now warns again.
+
 ## 1.25.0 - 24 October 2026
 
 Fixes from a review of this plugin and RAMSES ESP together.

@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.25.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.25.1 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.25.1** - One failed radiator command (RAMSES ESP restarting, say) no longer leaves every room on permanent settings until a restart; timed settings are tried again every 15 minutes, and a second failure is reported too.
 
 **v1.25.0** - Fixes from a joint review with RAMSES ESP. A setting the gateway could not send is no longer counted as sent, an overheating radiator stays turned down for at least 45 minutes, a room still too warm after being turned down now sends an alert (a stuck valve looks the same as sun), the alert quotes the right numbers, the clocks going back no longer confuse it, and the morning timetable check names what it could not check and tries again.
 

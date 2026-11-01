@@ -4,8 +4,8 @@
 # Description: Core heating logic — room processing, overheat detection, special rules
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6; Codex GPT-6 (1.8)
-# Date:        20-10-2026 UK
-# Version:     1.8
+# Date:        01-11-2026 UK
+# Version:     1.9
 
 import logging
 import time
@@ -256,19 +256,31 @@ EN_SUITE_DRYING_END_HOUR   = 10
 # the old behaviour; the plugin sets the length from its settings at startup.
 RAMSES_PLUGIN_ID       = "uk.co.clives.ramses.esp"
 OVERRIDE_RENEW_MINUTES = 60
-_OVERRIDE = {"minutes": 0, "broken": False}
+# After a timed send fails, settings are sent permanent for this long, then a timed one
+# is tried again (1.25.1). Until 1.25.1 one failure - RAMSES ESP restarting, say - kept
+# EVERY room on permanent settings until the settings were saved or the plugin restarted,
+# so a stopped Indigo would no longer hand the house back to the Evohome timetable.
+# One retry costs one extra command per OVERRIDE_RETRY_SECS while RAMSES ESP stays broken.
+OVERRIDE_RETRY_SECS    = 900
+# "broken_until": seconds since the epoch until which timed sends are not tried; 0 = not broken.
+_OVERRIDE = {"minutes": 0, "broken": False, "broken_until": 0.0}
+# {reason: True} for the fallback warnings already given in the CURRENT outage. Cleared when
+# a timed send gets through and when the settings are saved, so the next outage is reported.
 _OVERRIDE_WARNED = {}
 
 
 def set_override_minutes(minutes):
     """Set how long each setpoint holds; 0 means permanent. Also clears a fallback
-    left by an earlier failed send, so a fixed RAMSES ESP is tried again."""
+    left by an earlier failed send, so a fixed RAMSES ESP is tried again, and forgets
+    the warnings already given, so a failure after this is reported again (1.25.1)."""
     try:
         minutes = int(minutes)
     except (ValueError, TypeError):
         minutes = 0
-    _OVERRIDE["minutes"] = max(0, minutes)
-    _OVERRIDE["broken"]  = False
+    _OVERRIDE["minutes"]      = max(0, minutes)
+    _OVERRIDE["broken"]       = False
+    _OVERRIDE["broken_until"] = 0.0
+    _OVERRIDE_WARNED.clear()
 
 
 def override_renew_minutes():
@@ -279,7 +291,29 @@ def override_renew_minutes():
 
 
 def _timed_overrides_on(permanent=False):
+    """True when a setting should be sent timed. A fallback left by a failed send lasts
+    OVERRIDE_RETRY_SECS, then timed sends are tried again (1.25.1)."""
+    if _OVERRIDE["broken"] and time.time() >= _OVERRIDE["broken_until"]:
+        _OVERRIDE["broken"] = False
     return (not permanent) and _OVERRIDE["minutes"] > 0 and not _OVERRIDE["broken"]
+
+
+def _timed_send_failed(reason):
+    """Send permanent settings for OVERRIDE_RETRY_SECS, and say so once per outage."""
+    _OVERRIDE["broken"]       = True
+    _OVERRIDE["broken_until"] = time.time() + OVERRIDE_RETRY_SECS
+    if not _OVERRIDE_WARNED.get(reason):
+        _OVERRIDE_WARNED[reason] = True
+        _log(f"Could not send a timed setpoint - {reason}. Sending permanent ones "
+             f"instead and trying a timed one again every {OVERRIDE_RETRY_SECS // 60} "
+             f"minutes; timed ones need RAMSES ESP 1.12.0 or later.", level="WARNING")
+
+
+def _timed_send_worked():
+    """A timed send got through: if a fallback was reported, say it has ended."""
+    if _OVERRIDE_WARNED:
+        _OVERRIDE_WARNED.clear()
+        _log("Timed setpoints are reaching RAMSES ESP again.")
 
 
 # RAMSES ESP versions that accept an explicit end time ("until") on its timed action.
@@ -353,16 +387,12 @@ def send_setpoint(dev, value, permanent=False, until=None):
                     "setpoint": f"{float(value):.2f}",
                     "minutes":  str(_OVERRIDE["minutes"]),
                 })
+                _timed_send_worked()
                 return _accepted(dev, value, reply)
             reason = "the RAMSES ESP plugin is not enabled"
         except Exception as e:
             reason = f"RAMSES ESP refused it ({e})"
-        _OVERRIDE["broken"] = True
-        if not _OVERRIDE_WARNED.get(reason):
-            _OVERRIDE_WARNED[reason] = True
-            _log(f"Could not send a timed setpoint - {reason}. Sending permanent ones "
-                 f"instead; timed ones need RAMSES ESP 1.12.0 or later. Save the settings "
-                 f"to try again.", level="WARNING")
+        _timed_send_failed(reason)
     indigo.thermostat.setHeatSetpoint(dev, value=value)
     note_sent(dev, value)
     return True

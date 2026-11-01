@@ -4,10 +4,11 @@
 # Description: Small, hardware-free checks of heating_logic's own rules: the outdoor
 #              offset, the summer window, plan-change times across the October clock
 #              change, reading ages, window contacts, cancel-hold validation and the
-#              timed-to-permanent fallback in send_setpoint.
+#              timed-to-permanent fallback in send_setpoint
+#              and its retry (1.25.1).
 # Author:      CliveS & Claude Opus 5.5
 # Date:        01-11-2026
-# Version:     1.0
+# Version:     1.1
 
 import types
 from datetime import date, datetime
@@ -182,11 +183,6 @@ def test_a_disabled_ramses_falls_back_to_permanent_and_says_so(hl, wire):
     assert any("Could not send a timed setpoint" in m for m, _ in wire.lines)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: set_override_minutes() clears _OVERRIDE['broken'] but not _OVERRIDE_WARNED, so "
-    "after the user saves the settings to retry, the same failure falls back to permanent "
-    "overrides again WITHOUT any warning (heating_logic.py set_override_minutes / "
-    "send_setpoint)."))
 def test_a_second_fallback_after_saving_the_settings_is_warned_again(hl, wire):
     hl.set_override_minutes(120)
     wire.ramses.enabled = False
@@ -197,17 +193,52 @@ def test_a_second_fallback_after_saving_the_settings_is_warned_again(hl, wire):
     assert any("Could not send a timed setpoint" in m for m, _ in wire.lines)
 
 
-def test_one_failure_latches_every_later_send_to_permanent(hl, wire):
-    """Documents current behaviour (by design, but see the review): a single failed timed
-    send makes EVERY later send permanent until the settings are saved or the plugin
-    restarts, even once RAMSES ESP is healthy again."""
+def test_after_a_failure_sends_stay_permanent_until_the_retry_time(hl, wire, monkeypatch):
+    """1.25.1: a failed timed send makes later sends permanent only for
+    OVERRIDE_RETRY_SECS, not until the settings are saved or the plugin restarts."""
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(hl.time, "time", lambda: clock[0])
     hl.set_override_minutes(120)
     wire.ramses.raises = RuntimeError("busy")
     hl.send_setpoint(_zone(7), 19.0)
     wire.ramses.raises = None
+    clock[0] += hl.OVERRIDE_RETRY_SECS - 1
     hl.send_setpoint(_zone(8), 19.0)
     assert wire.ramses.calls == []
     assert wire.permanent == [(7, 19.0), (8, 19.0)]
+    clock[0] += 1
+    hl.send_setpoint(_zone(9), 19.0)
+    assert wire.ramses.calls == [("setTemporarySetpoint", 9,
+                                  {"setpoint": "19.00", "minutes": "120"})]
+
+
+def test_recovery_is_announced_and_the_next_outage_is_warned_again(hl, wire, monkeypatch):
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(hl.time, "time", lambda: clock[0])
+    hl.set_override_minutes(120)
+    wire.ramses.enabled = False
+    hl.send_setpoint(_zone(7), 19.0)
+    wire.ramses.enabled = True
+    clock[0] += hl.OVERRIDE_RETRY_SECS
+    wire.lines.clear()
+    hl.send_setpoint(_zone(7), 19.0)
+    assert any("reaching RAMSES ESP again" in m for m, _ in wire.lines)
+    wire.ramses.enabled = False
+    wire.lines.clear()
+    hl.send_setpoint(_zone(7), 19.0)
+    assert any("Could not send a timed setpoint" in m for m, _ in wire.lines)
+
+
+def test_a_failure_that_lasts_is_warned_about_once(hl, wire, monkeypatch):
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(hl.time, "time", lambda: clock[0])
+    hl.set_override_minutes(120)
+    wire.ramses.enabled = False
+    for _ in range(4):
+        hl.send_setpoint(_zone(7), 19.0)
+        clock[0] += hl.OVERRIDE_RETRY_SECS
+    warnings = [m for m, _ in wire.lines if "Could not send a timed setpoint" in m]
+    assert len(warnings) == 1
 
 
 def test_wanting_permanent_means_a_timed_zone_is_resent(hl):

@@ -4,8 +4,13 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        24-10-2026 23:30 UK
-# Version:     1.25.0
+# Date:        01-11-2026 UK
+# Version:     1.25.1
+#
+# v1.25.1 (01-11-2026): a failed timed send (RAMSES ESP restarting, say) no longer keeps every room on
+#   PERMANENT settings until the settings are saved or the plugin restarts: heating_logic retries timed
+#   sends every OVERRIDE_RETRY_SECS (15 min), says when they get through again, and the warn-once record
+#   is cleared on recovery and on Save, so a second outage is reported too (review of 01-11-2026, 1 and 2).
 #
 # v1.25.0 (24-10-2026): FIXES FROM THE 17-OCT JOINT REVIEW WITH RAMSES ESP. (3) send_setpoint returns
 #   whether RAMSES ESP 1.18.0 accepted the command ({accepted, reason}); a refused one is not recorded as
@@ -505,7 +510,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.0"
+PLUGIN_VERSION  = "1.25.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
