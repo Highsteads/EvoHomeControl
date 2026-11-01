@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.8 - 1 November 2026
+
+- **The right RAMSES ESP version in the warning.** When a setting could not be sent to run for a while, the warning said such settings need RAMSES ESP 1.12.0 or later. That is true for ordinary settings, but the summer hold and the hold after Cancel Timed Boost run until a set time, which needs RAMSES ESP 1.15.0 or later. The warning now names the right one.
+
 ## 1.25.7 - 1 November 2026
 
 - **Fewer repeated warnings.** Three more of the half-minute checks (the En Suite window, the daily timetable check, and windows and doors opening or shutting) now work like the four fixed in 1.25.4. A fault that lasts is logged once, with the details needed to fix it, and the plugin says when the check works again. They used to put the same warning in the log every 30 seconds.

@@ -9,7 +9,7 @@
 #              (1.25.2), and settings with an end time (1.25.3).
 # Author:      CliveS & Claude Opus 5.5
 # Date:        01-11-2026
-# Version:     1.3
+# Version:     1.4
 
 import types
 from datetime import date, datetime
@@ -316,6 +316,24 @@ def test_an_end_time_setting_goes_through_ramses(hl, wire):
     assert hl.send_setpoint(_zone(7), 12.0, until=UNTIL) is True
     assert wire.ramses.calls == [("setTemporarySetpoint", 7,
                                   {"setpoint": "12.00", "until": UNTIL})]
+
+
+def test_the_warnings_name_the_ramses_version_each_kind_needs(hl, wire, monkeypatch):
+    """A setting with an end time needs RAMSES ESP 1.15.0; the warning said 1.12.0 (1.25.8)."""
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(hl.time, "time", lambda: clock[0])
+    hl.set_override_minutes(120)
+    wire.ramses.raises = RuntimeError("busy")
+    hl.send_setpoint(_zone(7), 12.0, until=UNTIL)
+    until_warning = [m for m, _ in wire.lines if "end time" in m]
+    assert len(until_warning) == 1
+    assert "1.15.0 or later" in until_warning[0] and "1.12.0" not in until_warning[0]
+    clock[0] += hl.OVERRIDE_RETRY_SECS
+    wire.lines.clear()
+    hl.send_setpoint(_zone(7), 19.0)
+    timed_warning = [m for m, _ in wire.lines if "Could not send a timed setpoint" in m]
+    assert len(timed_warning) == 1
+    assert "1.12.0 or later" in timed_warning[0] and "1.15.0" not in timed_warning[0]
 
 
 def test_a_failed_end_time_setting_warns_once_for_all_rooms(hl, wire, monkeypatch):

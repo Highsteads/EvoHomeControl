@@ -5,7 +5,10 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.7
+# Version:     1.25.8
+#
+# v1.25.8 (01-11-2026): the fallback warning names the RAMSES ESP version each kind of setting needs:
+#   1.12.0 for timed settings, 1.15.0 for settings with an end time. It said 1.12.0 for both.
 #
 # v1.25.7 (01-11-2026): the En Suite window interlock, the timetable check and the window/door check in
 #   _tick run through _run_guarded too, so a lasting fault in one is logged once with its traceback (and
@@ -538,7 +541,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.7"
+PLUGIN_VERSION  = "1.25.8"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

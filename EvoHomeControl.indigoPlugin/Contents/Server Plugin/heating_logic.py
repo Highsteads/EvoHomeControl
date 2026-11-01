@@ -5,7 +5,7 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6; Codex GPT-6 (1.8)
 # Date:        01-11-2026 UK
-# Version:     1.12
+# Version:     1.13
 
 import logging
 import time
@@ -298,15 +298,22 @@ def _timed_overrides_on(permanent=False):
     return (not permanent) and _OVERRIDE["minutes"] > 0 and not _OVERRIDE["broken"]
 
 
-def _timed_send_failed(reason):
-    """Send permanent settings for OVERRIDE_RETRY_SECS, and say so once per outage."""
+# The RAMSES ESP version each kind of setting needs, for the fallback warning (1.25.8).
+# The warning named 1.12.0 for both, but a setting with an end time needs 1.15.0.
+TIMED_NEEDS = "timed settings need RAMSES ESP 1.12.0 or later"
+UNTIL_NEEDS = "settings with an end time need RAMSES ESP 1.15.0 or later"
+
+
+def _timed_send_failed(reason, needs=TIMED_NEEDS):
+    """Send permanent settings for OVERRIDE_RETRY_SECS, and say so once per outage.
+    `needs` names the RAMSES ESP version this kind of setting needs."""
     _OVERRIDE["broken"]       = True
     _OVERRIDE["broken_until"] = time.time() + OVERRIDE_RETRY_SECS
     if not _OVERRIDE_WARNED.get(reason):
         _OVERRIDE_WARNED[reason] = True
         _log(f"Could not send a timed setpoint - {reason}. Sending permanent ones "
              f"instead and trying a timed one again every {OVERRIDE_RETRY_SECS // 60} "
-             f"minutes; timed ones need RAMSES ESP 1.12.0 or later.", level="WARNING")
+             f"minutes; {needs}.", level="WARNING")
 
 
 def _timed_send_worked():
@@ -391,7 +398,8 @@ def send_setpoint(dev, value, permanent=False, until=None):
                 # RAMSES ESP again each time. While the fallback lasts, _timed_overrides_on()
                 # is False, so the hold goes out permanent and needs_override_refresh() asks
                 # for a permanent one, so it is not resent every cycle either.
-                _timed_send_failed(f"RAMSES ESP refused a setting with an end time ({e})")
+                _timed_send_failed(f"RAMSES ESP refused a setting with an end time ({e})",
+                                   needs=UNTIL_NEEDS)
         return _send_permanent(dev, value)
     if _timed_overrides_on(permanent):
         try:
