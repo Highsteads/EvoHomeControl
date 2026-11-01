@@ -1,20 +1,22 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 # Filename:    test_tick_guard.py
-# Description: 1.25.4, review finding 5: a fault in one of _tick's per-poll checks (summer
-#              force-on, En Suite morning, En Suite drying, boost expiry) must not stop the
+# Description: 1.25.4, review finding 5, and 1.25.7: a fault in any of _tick's per-poll
+#              checks (the four from 1.25.4, plus the En Suite window, timetable and
+#              window/door checks since 1.25.7) must not stop the
 #              heating cycle, must be logged once rather than every 30 seconds, and its
 #              recovery must be said once.
 # Author:      CliveS & Claude Opus 5.5
 # Date:        01-11-2026
-# Version:     1.0
+# Version:     1.1
 
 import types
 
 import pytest
 
 CHECKS = ("_check_summer_force_expiry", "_check_en_suite_morning",
-          "_check_en_suite_drying", "_check_timed_boost_expiry")
+          "_check_en_suite_drying", "_check_timed_boost_expiry",
+          "_check_en_suite_window_interlock", "_check_contacts_changed")
 
 
 @pytest.fixture
@@ -26,7 +28,7 @@ def rig(plugin_mod, indigo_mod, monkeypatch):
     p = plugin_mod.Plugin.__new__(plugin_mod.Plugin)
     p.pluginPrefs = {}
     p.store = {"last_heating_cycle": 0.0, "cycle_requests": 0, "cycle_requests_served": 0}
-    for name in CHECKS + ("_check_en_suite_window_interlock", "_check_contacts_changed"):
+    for name in CHECKS:
         setattr(p, name, lambda: None)
     p._maybe_check_timetable = lambda now: None
     runs = []
@@ -73,6 +75,30 @@ def test_a_different_fault_is_logged_again(rig):
     rig.p._check_timed_boost_expiry = other
     rig.p._tick(10030.0)
     assert len([m for m, _ in rig.lines if "boost expiry check failed" in m]) == 2
+
+
+def test_the_timetable_check_is_guarded_too(rig):
+    """It takes the time as an argument, so it is not in CHECKS."""
+    def boom(now):
+        raise RuntimeError("no timetable")
+    rig.p._maybe_check_timetable = boom
+    for i in range(3):
+        rig.p._tick(10000.0 + 30 * i)
+    assert rig.runs == [True]
+    assert len([m for m, _ in rig.lines if "timetable check failed" in m]) == 1
+
+
+def test_the_morning_and_en_suite_window_faults_are_remembered_apart(rig):
+    """Before 1.25.7 both logged as [EnSuiteMorning]; one key for both would let one
+    fault hide the other."""
+    rig.p._check_en_suite_morning = _boom
+    rig.p._check_en_suite_window_interlock = _boom
+    rig.p._tick(10000.0)
+    rig.p._tick(10030.0)
+    failed = [m for m, _ in rig.lines if "failed" in m]
+    assert len(failed) == 2
+    assert any(m.startswith("[EnSuiteMorning]") for m in failed)
+    assert any(m.startswith("[EnSuiteWindow]") for m in failed)
 
 
 def test_recovery_is_said_once(rig):

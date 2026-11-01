@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.7 - 1 November 2026
+
+- **Fewer repeated warnings.** Three more of the half-minute checks (the En Suite window, the daily timetable check, and windows and doors opening or shutting) now work like the four fixed in 1.25.4. A fault that lasts is logged once, with the details needed to fix it, and the plugin says when the check works again. They used to put the same warning in the log every 30 seconds.
+
 ## 1.25.6 - 1 November 2026
 
 - **Hand-set temperatures and the clocks changing.** A temperature set by hand is left alone until the room's plan next changes, or midnight at the latest. That was worked out on the clock face, so on the nights the clocks change it could end at an hour that never happened in March, or be judged against the wrong one of October's two 1 o'clocks. It is now worked out in real time, using the exact moment RAMSES ESP records for the change where it gives one.

@@ -5,7 +5,11 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.6
+# Version:     1.25.7
+#
+# v1.25.7 (01-11-2026): the En Suite window interlock, the timetable check and the window/door check in
+#   _tick run through _run_guarded too, so a lasting fault in one is logged once with its traceback (and
+#   once when it clears) instead of a warning every 30 seconds.
 #
 # v1.25.6 (01-11-2026): heating_logic.manual_hold_until works out when a hold made by hand ends in real
 #   hours (seconds since the epoch, setpointChangedAtEpoch where RAMSES ESP gives it), so the clocks
@@ -534,7 +538,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.6"
+PLUGIN_VERSION  = "1.25.7"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1056,9 +1060,10 @@ class Plugin(indigo.PluginBase):
         run_interval_secs = self._run_interval_mins() * 60
 
         # Summer 24h force-on expiry check (every tick) — revert to shut-off.
-        # This and the three checks below each run guarded (1.25.4, review finding 5): a
-        # fault in one used to end the tick before the heating cycle, so a check failing
-        # every time stopped the heating altogether, 30 seconds at a time.
+        # Every per-tick check runs guarded: a fault in one is logged once and cannot stop
+        # the others or the heating cycle. Four of them had no guard before 1.25.4 (review
+        # finding 5); the other three had their own try but warned every 30 seconds until
+        # 1.25.7. Each has its own tag, which is also the key its fault is remembered by.
         self._run_guarded("Summer", "24-hour force-on check",
                           lambda: self._check_summer_force_expiry())
 
@@ -1067,11 +1072,9 @@ class Plugin(indigo.PluginBase):
                           lambda: self._check_en_suite_morning())
 
         # En Suite open window -> floor heating off, every tick, whatever the radiator
-        # path decided (1.18.1). Its own try: a fault here must not stop the cycle.
-        try:
-            self._check_en_suite_window_interlock()
-        except Exception as e:
-            _log(f"[EnSuiteMorning] Window check failed: {e}", level="WARNING")
+        # path decided (1.18.1).
+        self._run_guarded("EnSuiteWindow", "En Suite window check",
+                          lambda: self._check_en_suite_window_interlock())
 
         # En Suite drying run — every tick, so an opened window ends it within 30 s
         # rather than at the next 5-minute cycle.
@@ -1079,21 +1082,17 @@ class Plugin(indigo.PluginBase):
                           lambda: self._check_en_suite_drying())
 
         # Daily check that the Evohome controller's own timetable still matches the plans
-        try:
-            self._maybe_check_timetable(datetime.now())
-        except Exception as e:
-            _log(f"[Timetable] Check failed: {e}", level="WARNING")
+        self._run_guarded("Timetable", "timetable check",
+                          lambda: self._maybe_check_timetable(datetime.now()))
 
         # Timed boost expiry check (every tick)
         self._run_guarded("TimedBoost", "boost expiry check",
                           lambda: self._check_timed_boost_expiry())
 
         # A window or door opening or shutting gets a heating cycle at once (1.22.0),
-        # not up to five minutes later. Its own try, like the interlock above.
-        try:
-            self._check_contacts_changed()
-        except Exception as e:
-            _log(f"[Windows] Check failed: {e}", level="WARNING")
+        # not up to five minutes later.
+        self._run_guarded("Windows", "window and door check",
+                          lambda: self._check_contacts_changed())
 
         # Main heating cycle (time-delta dispatch), or sooner when one was asked for.
         # The request count is read BEFORE the cycle, so a request that arrives while
