@@ -5,10 +5,11 @@
 #              offset, the summer window, plan-change times across the October clock
 #              change, reading ages, window contacts, cancel-hold validation and the
 #              timed-to-permanent fallback in send_setpoint
-#              and its retry (1.25.1).
+#              and its retry (1.25.1), and the refusal when RAMSES ESP is not running
+#              (1.25.2).
 # Author:      CliveS & Claude Opus 5.5
 # Date:        01-11-2026
-# Version:     1.1
+# Version:     1.2
 
 import types
 from datetime import date, datetime
@@ -175,17 +176,77 @@ def test_permanent_when_override_minutes_is_zero(hl, wire):
     assert wire.permanent == [(7, 19.0)] and wire.ramses.calls == []
 
 
-def test_a_disabled_ramses_falls_back_to_permanent_and_says_so(hl, wire):
+def test_an_error_from_ramses_falls_back_to_permanent_and_says_so(hl, wire):
     hl.set_override_minutes(120)
-    wire.ramses.enabled = False
-    hl.send_setpoint(_zone(7), 19.0)
+    wire.ramses.raises = RuntimeError("busy")
+    assert hl.send_setpoint(_zone(7), 19.0) is True
     assert wire.permanent == [(7, 19.0)]
     assert any("Could not send a timed setpoint" in m for m, _ in wire.lines)
 
 
-def test_a_second_fallback_after_saving_the_settings_is_warned_again(hl, wire):
+# ------------------------------------- RAMSES ESP not running (1.25.2, finding 3)
+
+@pytest.mark.parametrize("minutes, until", [(120, None), (0, None), (120, "2026-11-02 07:00")])
+def test_with_ramses_not_enabled_nothing_is_sent_or_recorded(hl, wire, minutes, until):
+    """Every radiator is a RAMSES ESP device, so a permanent setting cannot reach it
+    either. It used to be "sent", recorded and reported as a success."""
+    hl.set_override_minutes(minutes)
+    wire.ramses.enabled = False
+    zone = _zone(7)
+    assert hl.send_setpoint(zone, 19.0, until=until) is False
+    assert wire.permanent == [] and wire.ramses.calls == []
+    assert 7 not in hl._SENT
+    assert hl.last_refusal(zone) == "the RAMSES ESP plugin is not running"
+
+
+def test_ramses_missing_altogether_is_refused_too(hl, wire, indigo_mod, monkeypatch):
+    monkeypatch.setattr(indigo_mod.server, "getPlugin", lambda pid: None)
+    assert hl.send_setpoint(_zone(7), 19.0) is False
+
+
+def test_not_running_does_not_switch_later_sends_to_permanent(hl, wire):
     hl.set_override_minutes(120)
     wire.ramses.enabled = False
+    hl.send_setpoint(_zone(7), 19.0)
+    wire.ramses.enabled = True
+    assert hl.send_setpoint(_zone(7), 19.0) is True
+    assert len(wire.ramses.calls) == 1 and wire.permanent == []
+    assert hl.last_refusal(_zone(7)) is None
+
+
+def test_a_permanent_send_clears_an_old_refusal(hl, wire):
+    hl.set_override_minutes(0)
+    wire.ramses.enabled = False
+    hl.send_setpoint(_zone(7), 19.0)
+    wire.ramses.enabled = True
+    hl.send_setpoint(_zone(7), 19.0)
+    assert hl.last_refusal(_zone(7)) is None and wire.permanent == [(7, 19.0)]
+
+
+def test_if_indigo_cannot_be_asked_the_send_goes_ahead(hl, wire, indigo_mod, monkeypatch):
+    """A failed check must not stop the heating: behave as before."""
+    def boom(pid):
+        raise RuntimeError("no answer")
+    monkeypatch.setattr(indigo_mod.server, "getPlugin", boom)
+    hl.set_override_minutes(0)
+    assert hl.send_setpoint(_zone(7), 19.0) is True and wire.permanent == [(7, 19.0)]
+
+
+def test_the_cycle_keeps_its_cache_and_warns_once_while_ramses_is_off(hl, wire):
+    hl.set_override_minutes(120)
+    wire.ramses.enabled = False
+    cache, msgs = {"Bedroom 2": 16.0}, {}
+    zone = _zone(7, setpointHeat="16.0", zoneMode="temporary override")
+    for _ in range(3):
+        hl.update_radiator_setpoint(zone, 19.0, 11, "Bedroom 2", cache, msgs, [], [])
+    assert cache == {"Bedroom 2": 16.0}
+    warned = [m for m, _ in wire.lines if "not reaching Evohome" in m]
+    assert len(warned) == 1 and "not running" in warned[0]
+
+
+def test_a_second_fallback_after_saving_the_settings_is_warned_again(hl, wire):
+    hl.set_override_minutes(120)
+    wire.ramses.raises = RuntimeError("busy")
     hl.send_setpoint(_zone(7), 19.0)
     wire.lines.clear()
     hl.set_override_minutes(120)          # what closedPrefsConfigUi does on Save
@@ -216,14 +277,14 @@ def test_recovery_is_announced_and_the_next_outage_is_warned_again(hl, wire, mon
     clock = [1_800_000_000.0]
     monkeypatch.setattr(hl.time, "time", lambda: clock[0])
     hl.set_override_minutes(120)
-    wire.ramses.enabled = False
+    wire.ramses.raises = RuntimeError("busy")
     hl.send_setpoint(_zone(7), 19.0)
-    wire.ramses.enabled = True
+    wire.ramses.raises = None
     clock[0] += hl.OVERRIDE_RETRY_SECS
     wire.lines.clear()
     hl.send_setpoint(_zone(7), 19.0)
     assert any("reaching RAMSES ESP again" in m for m, _ in wire.lines)
-    wire.ramses.enabled = False
+    wire.ramses.raises = RuntimeError("busy")
     wire.lines.clear()
     hl.send_setpoint(_zone(7), 19.0)
     assert any("Could not send a timed setpoint" in m for m, _ in wire.lines)
@@ -233,7 +294,7 @@ def test_a_failure_that_lasts_is_warned_about_once(hl, wire, monkeypatch):
     clock = [1_800_000_000.0]
     monkeypatch.setattr(hl.time, "time", lambda: clock[0])
     hl.set_override_minutes(120)
-    wire.ramses.enabled = False
+    wire.ramses.raises = RuntimeError("busy")
     for _ in range(4):
         hl.send_setpoint(_zone(7), 19.0)
         clock[0] += hl.OVERRIDE_RETRY_SECS

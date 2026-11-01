@@ -7,6 +7,11 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.2 - 1 November 2026
+
+- **Nothing is counted as sent while RAMSES ESP is stopped.** With the RAMSES ESP plugin disabled or not installed, the plugin still "sent" each radiator a permanent setting, recorded it and carried on as if it had worked, although every radiator is a RAMSES ESP device and nothing could reach it. Now it says once that radiator settings are not reaching Evohome because RAMSES ESP is not running, keeps what it knew about each room, and tries again every cycle. Once RAMSES ESP is back, settings go out as normal, timed as before.
+- During the summer shut-off the same problem is reported once, not for every radiator every five minutes.
+
 ## 1.25.1 - 1 November 2026
 
 - **One failed radiator command no longer leaves the whole house on permanent settings.** If RAMSES ESP could not take a timed setting once (while it was restarting, for example), every room was sent permanent settings from then on, until the settings were saved or the plugin restarted. Then, if Indigo stopped, the radiators would stay where they were instead of going back to the Evohome timetable. The plugin now tries a timed setting again every 15 minutes and says when they are getting through again.

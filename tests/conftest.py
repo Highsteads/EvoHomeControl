@@ -11,7 +11,7 @@
 #              Only names plugin code actually touches, and only real Indigo names.
 # Author:      CliveS & Claude Opus 5.5
 # Date:        01-11-2026
-# Version:     1.0
+# Version:     1.1
 
 import glob
 import os
@@ -41,7 +41,10 @@ class _FakeServer:
         return "/tmp/evohome-test"
 
     def getPlugin(self, plugin_id):
-        return None
+        """Every plugin asked about is installed and enabled - the normal state, and what
+        test_en_suite_drying.py's stand-in answers. heating_logic refuses to send when
+        RAMSES ESP is not enabled (1.25.2), so answering None here would stop every send."""
+        return types.SimpleNamespace(isEnabled=lambda: True)
 
 
 class _FakePluginBase:

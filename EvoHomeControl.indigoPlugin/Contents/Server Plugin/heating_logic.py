@@ -5,7 +5,7 @@
 #              Ported from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Sonnet 4.6; Codex GPT-6 (1.8)
 # Date:        01-11-2026 UK
-# Version:     1.9
+# Version:     1.10
 
 import logging
 import time
@@ -366,6 +366,16 @@ def send_setpoint(dev, value, permanent=False, until=None):
     Returns True when the command was handed on, False when RAMSES ESP said it could not
     send it (1.25.0, review finding 3). Only a command handed on is recorded as sent;
     last_refusal() gives the reason for a False."""
+    # Every radiator is a RAMSES ESP device, so Indigo's own thermostat command reaches it
+    # only through that plugin too. With RAMSES ESP not running, nothing can be sent at all:
+    # report a refusal rather than "sending" a permanent setting that goes nowhere and
+    # recording it as sent (1.25.2, review finding 3). The caller says so and tries again.
+    if not _ramses_running():
+        try:
+            _REFUSED[int(dev.id)] = "the RAMSES ESP plugin is not running"
+        except (TypeError, ValueError, AttributeError):
+            pass
+        return False
     if until is not None:
         if _timed_overrides_on() and _ramses_takes_until():
             try:
@@ -376,9 +386,7 @@ def send_setpoint(dev, value, permanent=False, until=None):
             except Exception as e:
                 _log(f"Could not send a setting ending {until} to {dev.name}: {e}. "
                      f"Sending a permanent one instead.", level="WARNING")
-        indigo.thermostat.setHeatSetpoint(dev, value=value)
-        note_sent(dev, value)
-        return True
+        return _send_permanent(dev, value)
     if _timed_overrides_on(permanent):
         try:
             ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
@@ -389,13 +397,36 @@ def send_setpoint(dev, value, permanent=False, until=None):
                 })
                 _timed_send_worked()
                 return _accepted(dev, value, reply)
-            reason = "the RAMSES ESP plugin is not enabled"
+            reason = "the RAMSES ESP plugin is not enabled"   # stopped since the check above
         except Exception as e:
             reason = f"RAMSES ESP refused it ({e})"
         _timed_send_failed(reason)
+    return _send_permanent(dev, value)
+
+
+def _send_permanent(dev, value):
+    """Indigo's own thermostat command, which RAMSES ESP sends as a permanent setting."""
     indigo.thermostat.setHeatSetpoint(dev, value=value)
+    try:
+        _REFUSED.pop(int(dev.id), None)
+    except (TypeError, ValueError, AttributeError):
+        pass
     note_sent(dev, value)
     return True
+
+
+def _ramses_running():
+    """False only when Indigo says the RAMSES ESP plugin is missing or not enabled. When
+    that cannot be asked (an error from getPlugin itself), carry on and send as before:
+    a failed check must not stop the heating."""
+    try:
+        ramses = indigo.server.getPlugin(RAMSES_PLUGIN_ID)
+    except Exception:
+        return True
+    try:
+        return ramses is not None and bool(ramses.isEnabled())
+    except Exception:
+        return True
 
 
 # {device id: reason} for the last command RAMSES ESP refused, until one is accepted.

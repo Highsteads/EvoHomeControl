@@ -5,7 +5,12 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.1
+# Version:     1.25.2
+#
+# v1.25.2 (01-11-2026): with the RAMSES ESP plugin missing or not enabled, heating_logic.send_setpoint
+#   now returns False (refused) instead of sending Indigo's thermostat command to a RAMSES device that
+#   cannot act on it and recording it as sent (review of 01-11-2026, finding 3). It does not switch later
+#   sends to permanent. The summer hold's refusal warning is said once per reason, not per radiator per cycle.
 #
 # v1.25.1 (01-11-2026): a failed timed send (RAMSES ESP restarting, say) no longer keeps every room on
 #   PERMANENT settings until the settings are saved or the plugin restarts: heating_logic retries timed
@@ -510,7 +515,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.1"
+PLUGIN_VERSION  = "1.25.2"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1654,10 +1659,17 @@ class Plugin(indigo.PluginBase):
             if changed or heating_logic.needs_override_refresh(dev, until=until):
                 sent_any = True
                 try:
-                    if not heating_logic.send_setpoint(dev, target, until=until):
-                        _log(f"[Summer] {dev.name} was not set to {target:.0f} degrees: "
-                             f"{heating_logic.last_refusal(dev)}. It is tried again next cycle.",
-                             level="WARNING")
+                    if heating_logic.send_setpoint(dev, target, until=until):
+                        self.store.pop("summer_refusal_logged", None)
+                    else:
+                        # Said once per reason, not for every radiator every cycle: with
+                        # RAMSES ESP stopped that was 12 lines each five minutes (1.25.2).
+                        why = heating_logic.last_refusal(dev)
+                        if self.store.get("summer_refusal_logged") != why:
+                            self.store["summer_refusal_logged"] = why
+                            _log(f"[Summer] {dev.name} was not set to {target:.0f} degrees: "
+                                 f"{why}. Every radiator is tried again each cycle.",
+                                 level="WARNING")
                 except Exception as e:
                     _log(f"[Summer] Could not set radiator {dev.name} to "
                          f"{target:.0f}degC: {e}", level="WARNING")
