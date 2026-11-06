@@ -5,7 +5,11 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        01-11-2026 UK
-# Version:     1.25.8
+# Version:     1.25.9
+#
+# v1.25.9 (06-11-2026): a room that is too warm with its radiator already turned down no longer sends a
+#   Pushover, email, trigger event or all-clear (overheat_monitor 1.5, ALERT_WHEN_RADIATOR_DOWN = False).
+#   It was the room cooling slowly, and CliveS did not want telling. The log line and the status menu stay.
 #
 # v1.25.8 (01-11-2026): the fallback warning names the RAMSES ESP version each kind of setting needs:
 #   1.12.0 for timed settings, 1.15.0 for settings with an end time. It said 1.12.0 for both.
@@ -541,7 +545,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.8"
+PLUGIN_VERSION  = "1.25.9"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

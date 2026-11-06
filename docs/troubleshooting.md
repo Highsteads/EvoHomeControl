@@ -83,6 +83,8 @@ The plugin cannot be sure the En Suite window is shut — its sensor is missing,
 
 ## An overheating alert did not reach my phone
 
+Since 1.25.9 the plugin sends no overheating alerts at all unless `ALERT_WHEN_RADIATOR_DOWN` is set to `True` in `overheat_monitor.py` (see [How it works](how-it-works.md)). If you have switched them on, read on.
+
 - Check the Pushover plugin is installed and enabled. If it is not, the Event Log says **Pushover plugin not available**.
 - Alerts go to the **Pushover user key** in the settings, or to the user set up in the Pushover plugin when that is blank. Check the key is the one on your Pushover account page.
 - No alert is sent when it is above 12 degrees outside.

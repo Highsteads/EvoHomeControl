@@ -160,6 +160,10 @@ class TestOverheatAlertDelivery(unittest.TestCase):
         self.mail_ok = False
         self.attempts = 0
         self.events = []
+        # These tests are about the alert when it is switched on (06-11-2026).
+        _on = mock.patch.object(om, "ALERT_WHEN_RADIATOR_DOWN", True)
+        _on.start()
+        self.addCleanup(_on.stop)
 
         def push(*a, **k):
             self.attempts += 1

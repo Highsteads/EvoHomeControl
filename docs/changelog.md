@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.9 - 6 November 2026
+
+- **No more messages about a room that is only cooling down.** A room can stay warm for hours after its radiator is turned down, from the sun or from the heat in the walls. The plugin used to send a Pushover message and an email, then an all-clear. It now writes one line to the log and sends nothing. The overheat status in the plugin menu still lists the room. If you want the messages back, set `ALERT_WHEN_RADIATOR_DOWN = True` in `overheat_monitor.py`.
+
 ## 1.25.8 - 1 November 2026
 
 - **The right RAMSES ESP version in the warning.** When a setting could not be sent to run for a while, the warning said such settings need RAMSES ESP 1.12.0 or later. That is true for ordinary settings, but the summer hold and the hold after Cancel Timed Boost run until a set time, which needs RAMSES ESP 1.15.0 or later. The warning now names the right one.

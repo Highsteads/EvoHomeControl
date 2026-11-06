@@ -3,8 +3,8 @@
 # Filename:    overheat_monitor.py
 # Description: OverheatMonitor — tracks per-room overheat history, sends Pushover + email alerts
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        30-04-2026
-# Version:     1.4
+# Date:        06-11-2026
+# Version:     1.5
 
 import os
 import json
@@ -49,6 +49,15 @@ HISTORY_MAX_AGE_SECS   = 3600
 # A critical alert that no channel accepted is tried again after this long, until one
 # does. Before 1.18.0 a failed send was recorded as sent and never tried again.
 ALERT_RETRY_SECS       = 1800
+
+# A room counts as overheating only after the heating has turned its radiator down, so
+# every alert this monitor could send says "too warm, radiator already down". Nearly always
+# that is the room cooling slowly (sun on the Conservatory, heat in the walls), and CliveS
+# does not want telling (06-11-2026). False: log it, keep the status menu, send nothing and
+# no all-clear. True restores the 1.25.0 behaviour: a Pushover and email alert, and an
+# all-clear. Nothing can prove a valve stuck open, so with this False that fault is only
+# visible in the log and in Plugins -> Evohome Control -> overheat status.
+ALERT_WHEN_RADIATOR_DOWN = False
 
 
 def _duration_text(hours):
@@ -254,6 +263,16 @@ class OverheatMonitor:
                 alert_type   = "CRITICAL_PERSISTENT"
 
             if should_alert and not room_data["alert_sent"]:
+                if not ALERT_WHEN_RADIATOR_DOWN:
+                    _slog(
+                        f"[OverheatMonitor] {room_name} is {overheat_amount:.1f} degrees over "
+                        f"its target with its radiator already turned down - no alert sent, "
+                        f"the room is cooling."
+                    )
+                    room_data["alert_sent"]     = True
+                    room_data["alert_type"]     = "PASSIVE_GAIN"
+                    room_data["all_clear_sent"] = False
+                    return
                 # A room that stays too warm after its radiator has been turned down used to
                 # be called passive warmth and get no alert at all. Nothing proves the valve
                 # closed - no zone reports its valve position - so a valve stuck open looked

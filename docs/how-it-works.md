@@ -70,9 +70,11 @@ A radiator is still warm for a while after its valve shuts, so a room that is he
 
 It turns the radiator back up once the room has stopped warming and settled back near its target, and only after it has been turned down for at least 45 minutes, so a valve is not opened and shut every few minutes. If the room falls a whole degree below its target before then, it turns the radiator back up at once.
 
-If a room stays warm after its radiator has been turned down for three checks in a row, the warmth is probably coming from the sun or from inside the house. The plugin's log calls that **Above Target (solar gain)** rather than **Overheat**. Nothing tells the plugin whether the valve really closed, though, so it still warns you if the room stays too warm (see below).
+If a room stays warm after its radiator has been turned down for three checks in a row, the warmth is probably coming from the sun or from inside the house. The plugin's log calls that **Above Target (solar gain)** rather than **Overheat**. Nothing tells the plugin whether the valve really closed, though. Since 1.25.9 it writes that to the log and the overheat status, and sends no message (see below).
 
 ### Overheating alerts
+
+Since 1.25.9 these are switched off. A room is only counted as overheating after its radiator has been turned down, and it can stay warm for hours after that, so the messages were almost always about a room that was cooling. The plugin now logs one line and shows the room in the overheat status, and sends no Pushover message, email or all-clear. To switch them back on, set `ALERT_WHEN_RADIATOR_DOWN = True` in `overheat_monitor.py`. The rest of this section describes what happens when they are on.
 
 If a room is six degrees or more above its target, or four degrees or more above it for six hours, the plugin sends a Pushover message and an email to warn that a radiator valve may be stuck. The message gives the target the room was judged against, including a boost, and the setting the radiator was actually turned down to. When the radiator has already been turned down for a while, the message says the warmth may be the sun or a valve stuck open, and goes at normal priority rather than high. It does not send one when it is above 12 degrees outside. If neither the Pushover message nor the email gets through, the plugin logs an error and tries again every 30 minutes until one does, or until the room settles. Once the room has been back to normal for 30 minutes, an all-clear follows.
 

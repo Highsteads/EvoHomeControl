@@ -150,6 +150,10 @@ class TestOverheatAlerts(unittest.TestCase):
         self.pushes = []
         self.mon._send_pushover = lambda t, m, priority=0: self.pushes.append((t, m, priority)) or True
         self.mon._send_email = lambda t, m: False
+        # These tests are about the alert when it is switched on (06-11-2026).
+        _on = mock.patch.object(om, "ALERT_WHEN_RADIATOR_DOWN", True)
+        _on.start()
+        self.addCleanup(_on.stop)
 
     def _overheat_for_hours(self, passive, reduced=14.0, target=20.0):
         room = "Living Room Front"
