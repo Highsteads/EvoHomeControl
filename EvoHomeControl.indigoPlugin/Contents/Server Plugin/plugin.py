@@ -5,7 +5,12 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        09-11-2026 15:31 UK
-# Version:     1.25.10
+# Version:     1.26.0
+#
+# v1.26.0 (09-11-2026): after each heating check during a timed boost, plugin_state.json carries
+#   timed_boost_outcome: per boost room the target, the temperature asked for and, when that is
+#   lower, why (boost_outcome() + BOOST_HELD_REASONS, from the room's message code). Cleared on
+#   start, cancel and expiry. Dashboards 3.70.0 shows it room by room on the Heating page.
 #
 # v1.25.10 (09-11-2026): Boost acts at once. Starting a timed boost asks for a heating cycle and
 #   the worker wakes within a second (it used to wait for the five-minute cycle, 3m47s and 4m08s
@@ -537,6 +542,43 @@ def _room_plans():
     )
 
 
+# Why a boosted room was given less than its boost target, by the message code
+# process_room_temperature() recorded for it, in words the Heating page can show
+# (1.26.0). An unknown code falls back to a plain "the heating rules".
+BOOST_HELD_REASONS = {
+    1: "a window is open", 2: "a window is open", 20: "a window is open",
+    3: "an outside door is open", 4: "a window and a door are open", 21: "an outside door is open",
+    5: "its sliding door is shut",
+    7: "it is warm outside",
+    8: "away mode is on", 15: "away mode is on",
+    17: "it is already warmer than its boost target",
+    23: "it is already warm from the sun or the rest of the house",
+}
+
+
+def boost_outcome(rooms, last_setpoints, last_messages, targets, at):
+    """Per-room result of the latest heating check while a timed boost runs.
+
+    rooms: (dev_id, room_name) pairs. Returns {str(dev_id): {...}} with the room,
+    its boost target, the temperature this plugin last asked for, and a reason
+    when that is below the target ("" when the room got its boost). A room the
+    cycle has not reached yet has requested None. Pure, so it can be tested.
+    """
+    out = {}
+    for dev_id, room in rooms:
+        if room not in targets:
+            continue
+        target = float(targets[room])
+        sp = last_setpoints.get(room)
+        requested = round(float(sp), 1) if sp is not None else None
+        held = ""
+        if requested is not None and requested < target - 0.05:
+            held = BOOST_HELD_REASONS.get(last_messages.get(room), "the heating rules")
+        out[str(dev_id)] = {"room": room, "target": target, "requested": requested,
+                            "held": held, "at": at}
+    return out
+
+
 # RAMSES ESP reads the controller's timetables at 03:15; the check runs after that.
 TIMETABLE_CHECK_MINUTE = 4 * 60
 # A reading older than this means RAMSES ESP has stopped reading them.
@@ -551,7 +593,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.10"
+PLUGIN_VERSION  = "1.26.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1259,6 +1301,7 @@ class Plugin(indigo.PluginBase):
         run_interval = self._run_interval_mins()
         self._process_all_rooms(hour, minute, temp_offset, outdoor_temp, run_interval,
                                 force_hourly=do_hourly)
+        self._record_boost_outcome()
 
         # Save state
         self.overheat.save_history()
@@ -1463,6 +1506,22 @@ class Plugin(indigo.PluginBase):
         except Exception as e:
             _log(f"[Events] Could not fire {event_id}: {e}", level="WARNING")
 
+    def _record_boost_outcome(self):
+        """After a heating check, save what each timed-boost room was asked for, and
+        why a room got less, so the Heating page can say so (1.26.0). Cleared when no
+        boost is running, so an old boost's result is never shown for a new one."""
+        if not self.store.get("timed_boost_active"):
+            if self.store.get("timed_boost_outcome"):
+                self.store["timed_boost_outcome"] = {}
+                self._save_state()
+            return
+        rooms = [(dev_id, room) for dev_id, room, _plan in _room_plans()
+                 if room in schedules.TIMED_BOOST_ROOMS]
+        self.store["timed_boost_outcome"] = boost_outcome(
+            rooms, self.store.get("last_setpoints", {}), self.store.get("last_messages", {}),
+            schedules.BOOST_TARGETS, _now_aware().isoformat())
+        self._save_state()
+
     def _start_timed_boost(self, hours):
         """Activate timed boost for 1 or 2 hours on TIMED_BOOST_ROOMS."""
         if self._summer_lockout_active():
@@ -1475,6 +1534,7 @@ class Plugin(indigo.PluginBase):
         self.store["timed_boost_active"] = True
         self.store["timed_boost_expiry"] = expiry
         self.store["timed_boost_hours"]  = hours
+        self.store["timed_boost_outcome"] = {}
         rooms  = ", ".join(sorted(schedules.TIMED_BOOST_ROOMS))
         _log(f"[TimedBoost] {hours}h boost started — "
              f"expires at {_local_clock(expiry)} — rooms: {rooms}")
@@ -1490,6 +1550,7 @@ class Plugin(indigo.PluginBase):
             self.store["timed_boost_active"] = False
             self.store["timed_boost_expiry"] = None
             self.store["timed_boost_hours"] = 0
+            self.store["timed_boost_outcome"] = {}
             if manual:
                 now = time.time()
                 holds = {}
@@ -3147,6 +3208,7 @@ class Plugin(indigo.PluginBase):
             "timed_boost_active":           self.store["timed_boost_active"],
             "timed_boost_expiry":           expiry.isoformat() if expiry else None,
             "timed_boost_hours":            self.store.get("timed_boost_hours", 0),
+            "timed_boost_outcome":          self.store.get("timed_boost_outcome", {}),
             "summer_force_active":          self.store.get("summer_force_active", False),
             "summer_force_expiry":          force_exp.isoformat() if force_exp else None,
             "en_suite_morning_active":      self.store["en_suite_morning_active"],

@@ -56,7 +56,7 @@ A timed boost heats the **Conservatory** (only while its sliding door is open), 
 - A timed boost carries on after the plugin or Indigo restarts, as long as its time has not run out.
 - It does not start during the summer shut-off. Use **Force Heating On (24 hours)** first if you need the heat.
 
-The boost starts within a second or two: the radiators are sent their new temperature straight away, a few seconds apart. A room that is already above 22 degrees, or has a window or outside door open, is not boosted. A room below 22 degrees is boosted even if its normal plan had started turning it down early to stop it overshooting, and the boost does not stack on top of the Boost variable.
+The boost starts within a second or two: the radiators are sent their new temperature straight away, a few seconds apart. A room that is already above 22 degrees, or has a window or outside door open, is not boosted. A room below 22 degrees is boosted even if its normal plan had started turning it down early to stop it overshooting. The boost does not stack on top of the Boost variable. After each heating check the plugin saves what each boosted room was asked for, and why a room got less, which the Dashboards Heating page shows room by room (1.26.0).
 
 ## Snow boost
 

@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.26.0 - 9 November 2026
+
+- **Each boosted room's result is saved.** After every heating check during a timed boost, the plugin saves what each boosted room was asked for and, when a room was given less than 22 degrees, why: an open window or door, away mode, a shut sliding door in the Conservatory, or a room already warm. Dashboards 3.70.0 reads this to show the boost room by room on its Heating page. It is cleared when the boost starts, is cancelled or runs out.
+
 ## 1.25.10 - 9 November 2026
 
 - **Boost starts at once.** Starting a timed boost used to wait for the next five-minute heating check, so the radiators could take nearly four minutes to change. The plugin now runs a heating check within a second or two of the boost starting.
