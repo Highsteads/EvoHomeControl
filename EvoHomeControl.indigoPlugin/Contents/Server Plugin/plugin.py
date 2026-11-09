@@ -4,8 +4,14 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        01-11-2026 UK
-# Version:     1.25.9
+# Date:        09-11-2026 15:31 UK
+# Version:     1.25.10
+#
+# v1.25.10 (09-11-2026): Boost acts at once. Starting a timed boost asks for a heating cycle and
+#   the worker wakes within a second (it used to wait for the five-minute cycle, 3m47s and 4m08s
+#   measured 05/06-Nov). A boosted room below its target is no longer held back by a coast or
+#   passive-warmth hold left over from its normal plan; real overheating above target, windows,
+#   doors and Away still win. Paced delivery of the commands is RAMSES ESP 1.18.1.
 #
 # v1.25.9 (06-11-2026): a room that is too warm with its radiator already turned down no longer sends a
 #   Pushover, email, trigger event or all-clear (overheat_monitor 1.5, ALERT_WHEN_RADIATOR_DOWN = False).
@@ -545,7 +551,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.25.9"
+PLUGIN_VERSION  = "1.25.10"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1058,7 +1064,13 @@ class Plugin(indigo.PluginBase):
                 # kill the 24/7 heating loop. Log and carry on to the next tick.
                 self.logger.exception(f"[Cycle] Unhandled error in heating tick — continuing: {e}")
             try:
-                self.sleep(POLL_SLEEP_SECS)
+                # Keep normal work at 30 seconds, but notice a requested cycle promptly.
+                # self.sleep keeps Indigo's shutdown cancellation intact.
+                deadline = time.monotonic() + POLL_SLEEP_SECS
+                while time.monotonic() < deadline:
+                    self.sleep(min(1, max(0, deadline - time.monotonic())))
+                    if self.store.get("cycle_requests", 0) != self.store.get("cycle_requests_served", 0):
+                        break
             except self.StopThread:
                 raise
 
@@ -1467,6 +1479,7 @@ class Plugin(indigo.PluginBase):
         _log(f"[TimedBoost] {hours}h boost started — "
              f"expires at {_local_clock(expiry)} — rooms: {rooms}")
         self._save_state()
+        self._request_cycle()
         self._fire_event("timedBoostStarted")
 
     def _cancel_timed_boost(self, reason="expired"):

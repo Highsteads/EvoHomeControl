@@ -969,7 +969,7 @@ def floor_heat_off(reason="", log_buffer=None, now=None):
 # ---------------------------------------------------------------------------
 
 def check_overheating(current_temp, target_temp, room_name,
-                      overheat_monitor, run_interval_mins=5):
+                      overheat_monitor, run_interval_mins=5, boost=False):
     """
     Three-tier overheat detection system.
 
@@ -998,6 +998,16 @@ def check_overheating(current_temp, target_temp, room_name,
         if overheat_amount > OVERHEAT_TRIGGER_THRESHOLD:
             adjusted = max(OVERHEAT_MIN_SETPOINT, target_temp - OVERHEAT_BACKOFF)
             return True, adjusted, overheat_amount
+        return False, target_temp, 0.0
+
+    # An explicit boost asks for its target, not an early coast below it. Retire
+    # the previous schedule's hold while below target. At/above target the existing
+    # overheat protection still applies, as do all window/away/weather interlocks.
+    if boost and current_temp < target_temp:
+        room_data["is_coasting"] = False
+        room_data["off_since_cycle"] = 0
+        room_data["consecutive_cycles"] = 0
+        room_data["temp_history"] = [current_temp]
         return False, target_temp, 0.0
 
     # Update temperature history (3-point moving average)
@@ -1716,7 +1726,8 @@ def process_room_temperature(
         if boost_applies:
             overheat_target = schedules.BOOST_TARGETS[room_name]
         is_overheating, adjusted_temp, overheat_amt = check_overheating(
-            dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins
+            dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins,
+            boost=boost_applies
         )
         is_passive = False
         if is_overheating:

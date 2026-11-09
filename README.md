@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.25.9 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.25.10 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.25.10** - Boost now starts within a second or two instead of waiting up to five minutes for the next heating check. A boosted room that is still below 22 degrees is no longer held back by the coasting from its normal plan. A room that is genuinely too warm, has a window open or is in away mode is still not boosted.
 
 **v1.25.9** - A room that is too warm with its radiator already turned down no longer sends a Pushover message, an email or an all-clear. It is logged and still shows in the overheat status.
 

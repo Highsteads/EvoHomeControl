@@ -14,3 +14,6 @@ CLAUDE.md
 
 # Test runner artefacts
 .pytest_cache/
+
+# Local cross-assistant notes
+AGENTS.md

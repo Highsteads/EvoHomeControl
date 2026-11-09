@@ -7,6 +7,12 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.25.10 - 9 November 2026
+
+- **Boost starts at once.** Starting a timed boost used to wait for the next five-minute heating check, so the radiators could take nearly four minutes to change. The plugin now runs a heating check within a second or two of the boost starting.
+- **A boosted room is not held back while it warms up.** The plugin turns a radiator down a little before a room reaches its target, so it does not overshoot. A room boosted from its normal plan could carry that hold into the boost and stay at 16 degrees. A boosted room below 22 degrees now gets 22. Once it reaches 22 the usual overheating checks apply again, and open windows, doors and away mode still win.
+- Needs RAMSES ESP 1.18.1, which sends the commands to the radiators a few seconds apart so the controller takes them all.
+
 ## 1.25.9 - 6 November 2026
 
 - **No more messages about a room that is only cooling down.** A room can stay warm for hours after its radiator is turned down, from the sun or from the heat in the walls. The plugin used to send a Pushover message and an email, then an all-clear. It now writes one line to the log and sends nothing. The overheat status in the plugin menu still lists the room. If you want the messages back, set `ALERT_WHEN_RADIATOR_DOWN = True` in `overheat_monitor.py`.
