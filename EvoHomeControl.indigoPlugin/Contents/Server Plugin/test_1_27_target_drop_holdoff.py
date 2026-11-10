@@ -132,9 +132,11 @@ class TestHoldOffAfterAStepDown(_Base):
         self.assertIn(ROOM, self.mon.get_overheating_rooms())
 
     def test_held_time_does_not_count_towards_too_warm_for_six_hours(self):
-        """4.5 over is only an alert after six hours of it. 90 held minutes are not it."""
+        """4.5 over is only an alert after six hours of it. 90 held minutes are not it.
+        The room is above its earlier 17 (so it is not just cooling) but by under four
+        degrees, so the wait holds it."""
         six_hours = self.mon.critical_duration_cycles
-        self._cycle(19.5, 19.5)
+        self._cycle(19.5, 17.0)
         self._cycle(19.5, 15.0)                   # the step down, cycle 1 of the hold
         for _ in range(six_hours - 1):            # six hours since the drop in all
             self._cycle(19.5, 15.0)
@@ -150,15 +152,94 @@ class TestHoldOffAfterAStepDown(_Base):
             self._cycle(21.5, 17.0)
         self.assertEqual(self.sent, [])
         for _ in range(18):                       # 17 -> 15, and 90 held minutes
-            self._cycle(21.5, 15.0)
+            self._cycle(20.5, 15.0)               # 3.5 over the earlier 17: held
         self.assertEqual(self.sent, [])
+        self.assertEqual(self.mon.history[ROOM]["judged_cycles"], 60)
         self.mon.critical_overheat_temp = 99.0    # leave only the six-hour rule
+        for _ in range(11):
+            self._cycle(20.5, 15.0)
+        self.assertEqual(self.sent, [])
+        self._cycle(20.5, 15.0)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("too warm for about 6 hours", self.sent[0][1])
+
+    # -- judged against the earlier target during the wait (review, 10-11-2026) --------
+
+    def test_a_room_climbing_through_the_set_back_is_not_kept_quiet(self):
+        """24 and rising when the target falls from 21 to 15: a fault whatever the
+        timetable did. It alerts once it is six over the EARLIER target, inside the wait."""
+        self._cycle(24.0, 21.0)
+        self._cycle(24.5, 15.0)                   # the step down
+        for temp in (25.0, 25.5, 26.0, 26.5):
+            self._cycle(temp, 15.0)
+        self.assertEqual(self.sent, [])           # under six over the earlier 21
+        self._cycle(27.0, 15.0)                   # 30 minutes after the drop
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.mon.in_target_drop_holdoff(ROOM, self.now))
+        self.assertIn("Its target came down from 21 to 15 degrees at 8:10pm, but the "
+                      "room is warmer than that earlier setting too.", self.sent[0][1])
+        self.assertNotIn("cooling from its earlier setting", self.sent[0][1])
+
+    def test_a_room_well_over_its_earlier_target_keeps_counting_through_the_wait(self):
+        """4.5 over the earlier 17 as well as the new 15: the six-hour count runs on."""
+        for _ in range(60):
+            self._cycle(21.5, 17.0)
         for _ in range(11):
             self._cycle(21.5, 15.0)
         self.assertEqual(self.sent, [])
-        self._cycle(21.5, 15.0)
+        self._cycle(21.5, 15.0)                   # six hours in all, one into the wait
         self.assertEqual(len(self.sent), 1)
         self.assertIn("too warm for about 6 hours", self.sent[0][1])
+        self.assertIn("but the room is warmer than that earlier setting too.",
+                      self.sent[0][1])
+
+    def test_a_second_step_down_does_not_start_the_wait_again(self):
+        """21, 19, 17 an hour apart: one wait from the first step, compared with 21."""
+        self._cycle(21.0, 21.0)
+        self._cycle(21.0, 19.0)
+        first = self.mon.history[ROOM]["target_dropped_at"]
+        self._cycle(21.0, 17.0, minutes=60)
+        data = self.mon.history[ROOM]
+        self.assertEqual(data["target_dropped_at"], first)
+        self.assertEqual(data["target_dropped_from"], 21.0)
+        self.assertEqual(data["target_dropped_to"], 17.0)
+        self._cycle(21.0, 17.0, minutes=25)       # 85 minutes after the FIRST step
+        self.assertTrue(self.mon.in_target_drop_holdoff(ROOM, self.now))
+        self._cycle(21.0, 17.0)                   # 90 minutes: the wait is over
+        self.assertFalse(self.mon.in_target_drop_holdoff(ROOM, self.now))
+
+    def test_a_step_down_after_the_wait_has_ended_starts_a_new_one(self):
+        self._cycle(21.0, 21.0)
+        self._cycle(21.0, 19.0)
+        first = self.mon.history[ROOM]["target_dropped_at"]
+        self._cycle(19.0, 17.0, minutes=120)
+        data = self.mon.history[ROOM]
+        self.assertGreater(data["target_dropped_at"], first)
+        self.assertEqual(data["target_dropped_from"], 19.0)
+
+    def test_a_room_that_has_only_not_cooled_gets_no_six_hour_alert_at_3am(self):
+        """Heated to 21, target 15 from 8pm, holding 19.5 overnight: it is not above
+        where it was heated to, so the six-hour rule waits half a day."""
+        self._cycle(21.0, 21.0)
+        self._cycle(21.0, 15.0)                   # the drop, seen at 8:10pm
+        dropped = self.mon.history[ROOM]["target_dropped_at"]
+        while self.now + 300 < dropped + om.TARGET_DROP_COOLING_SECS:
+            self._cycle(19.5, 15.0)
+        self.assertEqual(self.sent, [])
+        self.assertGreater(self.mon.history[ROOM]["judged_cycles"],
+                           self.mon.critical_duration_cycles)
+        self._cycle(19.5, 15.0)                   # half a day after the drop
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("Its target came down from 21 to 15 degrees at 8:10pm yesterday, "
+                      "so some of this is the room cooling from its earlier setting.",
+                      self.sent[0][1])
+
+    def test_the_six_hour_rule_still_speaks_for_a_room_above_its_earlier_target(self):
+        self._cycle(17.0, 17.0)
+        self._cycle(19.5, 15.0)
+        for _ in range(18 + self.mon.critical_duration_cycles - 1):
+            self._cycle(19.5, 15.0)
+        self.assertEqual(len(self.sent), 1)
 
     def test_the_worst_figure_leaves_out_the_hold_off(self):
         self._evening_set_back()
@@ -238,6 +319,25 @@ class TestWordingIsTrueWhenSent(_Base):
         self.assertIn("Its target came down from 21 to 15 degrees at 8:10pm, so some of "
                       "this is the room cooling from its earlier setting.", self.sent[0][1])
 
+    def test_cooling_is_only_claimed_for_a_room_no_warmer_than_its_earlier_setting(self):
+        self._cycle(17.0, 17.0)
+        self._cycle(21.0, 15.0)
+        for _ in range(18):
+            self._cycle(25.0, 15.0)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("Its target came down from 17 to 15 degrees at 8:10pm, but the "
+                      "room is warmer than that earlier setting too.", self.sent[0][1])
+        self.assertNotIn("cooling from its earlier setting", self.sent[0][1])
+
+    def test_just_is_not_said_of_a_room_judged_too_warm_for_hours(self):
+        """The heating's own count starts again when a coast ends."""
+        for _ in range(self.mon.critical_duration_cycles):
+            self._cycle(19.5, 15.0, off_cycles=0)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("The heating has turned its radiator down to 12 degrees.",
+                      self.sent[0][1])
+        self.assertNotIn("just", self.sent[0][1])
+
     def test_no_step_down_no_sentence_about_one(self):
         _title, message, _p = self._alert()
         self.assertNotIn("came down", message)
@@ -298,6 +398,11 @@ class TestHelpers(unittest.TestCase):
             with self.subTest(want=want):
                 self.assertEqual(
                     om._clock_text(datetime(2026, 11, 10, h, m).timestamp()), want)
+
+    def test_a_time_from_the_day_before_says_yesterday(self):
+        now = datetime(2026, 10, 31, 8, 10).timestamp()
+        self.assertEqual(om._clock_day_text(EIGHT_PM + 600, now), "8:10pm yesterday")
+        self.assertEqual(om._clock_day_text(EIGHT_PM + 600, EIGHT_PM + 7200), "8:10pm")
 
     def test_durations_as_a_person_says_them(self):
         self.assertEqual(om._duration_text(0.25), "about 15 minutes")

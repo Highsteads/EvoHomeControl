@@ -33,7 +33,7 @@ All three can be kept in the shared settings file instead, as described below.
 |---|---|
 | **Pushover user key** | The Pushover user or group key the overheating alerts go to. Leave it blank and they go to the user set up in the Pushover plugin. `PUSHOVER_USER_TOKEN` in the shared settings file is used first. The Pushover plugin needs to be installed and enabled. |
 | **Overheat alert email** | The address the overheating alerts and all-clears are emailed to, using the email account set up in Indigo. If neither this nor the shared settings file has an address, the plugin logs an error each time it starts. |
-| **Wait after a room's target drops (minutes)** | How long the plugin waits before it judges a room as overheating after its target steps down by a degree or more, such as at the evening set-back or when a boost ends. The room is still at the temperature it was heated to, so "too warm" then only means it has not cooled yet. 90 to start with, from 0 (no wait) to 720. A blank box, or one that does not hold a number, gives 90. The radiator is turned down as usual either way. |
+| **Wait after a room's target drops (minutes)** | How long the plugin goes on comparing a room with its earlier target after the target steps down by a degree or more, such as at the evening set-back or when a boost ends. The room is still at the temperature it was heated to, so "too warm" against the new target only means it has not cooled yet. A room well above its earlier target as well is still judged as overheating. 90 to start with, from 0 (no wait) to 720. A blank box, or one that does not hold a number, gives 90. The radiator is turned down as usual either way. |
 
 ## HEATING CYCLE
 

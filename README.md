@@ -15,7 +15,7 @@ This plugin lets [Indigo](https://www.indigodomo.com) run the heating in a house
 - **Heats each room to its own plan,** with a temperature for every hour of the day, and guest plans for when you have visitors.
 - **Follows the weather,** taking a degree or two off as it gets milder outside, turning radiators down above 14 degrees, and adding a little heat when snow is forecast. It reads an Ecowitt weather station if you have one, and OpenWeatherMap if not.
 - **Turns a radiator down when its window or door is open,** and back up when it shuts.
-- **Stops rooms overheating,** turning a radiator down before the room overshoots, and can send a Pushover message and an email if a room stays well above where it should be. Those messages are switched off unless you turn them on.
+- **Stops rooms overheating,** turning a radiator down before the room overshoots, and can send a Pushover message and an email if a room stays well above where it should be. Those messages are switched off in this version.
 - **Boosts the living areas** by two degrees for one or two hours, then puts them back.
 - **Away and both out modes,** switched by Indigo variables, hold the house at a safe, cheaper temperature.
 - **Shuts the heating off for summer** between dates you choose, with a menu item to have it back for 24 hours.
@@ -48,7 +48,7 @@ The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each
 
 ## What's new
 
-**v1.27.0** - A room is not judged as overheating for the first 90 minutes after its target steps down, such as at the evening set-back, because it is still at the temperature it was heated to. A new setting changes the wait. The overheating alerts, which are still switched off, now say how long the radiator has really been turned down.
+**v1.27.0** - For the first 90 minutes after a room's target steps down, such as at the evening set-back, the room is compared with the target it had before, because it is still at the temperature it was heated to. A new setting changes the wait. The overheating alerts, which are still switched off, now say how long the radiator has really been turned down.
 
 **v1.26.0** - During a timed boost the plugin records, after each heating check, what each boosted room was asked for and why a room got less. Dashboards 3.70.0 shows this on its Heating page.
 

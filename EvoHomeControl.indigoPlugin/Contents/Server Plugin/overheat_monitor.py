@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # Filename:    overheat_monitor.py
 # Description: OverheatMonitor — tracks per-room overheat history, sends Pushover + email alerts
-# Author:      CliveS & Claude Sonnet 4.6
+# Author:      CliveS & Claude Fable 5.2
 # Date:        10-11-2026
 # Version:     1.6
 
@@ -73,8 +73,15 @@ TARGET_DROP_MIN        = 1.0
 TARGET_DROP_HOLDOFF_MINS     = 90
 TARGET_DROP_HOLDOFF_MAX_MINS = 720
 
-# The alert mentions a step-down in the target only while it is this recent.
-TARGET_DROP_MENTION_SECS = 6 * 3600
+# For this long after a step down, a room that is no warmer than the target it had before
+# is a room that has not cooled yet, so the "too warm for six hours" rule does not speak.
+# Without it a set-back at 8pm produced that alert at 3:30am (90 minutes of hold-off and
+# six hours judged) for a room holding 19.5 against 15 that had been heated to 21.
+TARGET_DROP_COOLING_SECS = 12 * 3600
+
+# The alert names a step-down in the target while it is this recent. Longer than the
+# cooling allowance above, so the first alert after that allowance still names it.
+TARGET_DROP_MENTION_SECS = 18 * 3600
 
 
 def coerce_holdoff_mins(value, default=TARGET_DROP_HOLDOFF_MINS):
@@ -114,6 +121,17 @@ def _clock_text(epoch):
     if when.minute == 0:
         return f"{hour}{suffix}"
     return f"{hour}:{when.minute:02d}{suffix}"
+
+
+def _clock_day_text(epoch, now):
+    """'8:10pm', or '8:10pm yesterday' when that was the day before `now`."""
+    days = (dt.fromtimestamp(now).date() - dt.fromtimestamp(epoch).date()).days
+    return f"{_clock_text(epoch)} yesterday" if days == 1 else _clock_text(epoch)
+
+
+def _number(value):
+    """True for an int or float that is not a bool."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _deg(value):
@@ -277,8 +295,20 @@ class OverheatMonitor:
                 and isinstance(target_temp, (int, float))):
             return
         if previous_target - target_temp >= TARGET_DROP_MIN:
-            room_data["target_dropped_at"]   = now
-            room_data["target_dropped_from"] = previous_target
+            # A further step down while the wait from an earlier one is still running
+            # (21 to 19 to 17 an hour apart) does not start the wait again, and the room
+            # goes on being compared with the highest of those targets. Otherwise a
+            # stepped set-back could keep a room unjudged all evening.
+            dropped_at = room_data.get("target_dropped_at")
+            holdoff    = coerce_holdoff_mins(self.target_drop_holdoff_mins) * 60
+            running    = (_number(dropped_at) and _number(room_data.get("target_dropped_from"))
+                          and 0 <= now - dropped_at < holdoff)
+            if running:
+                room_data["target_dropped_from"] = max(room_data["target_dropped_from"],
+                                                       previous_target)
+            else:
+                room_data["target_dropped_at"]   = now
+                room_data["target_dropped_from"] = previous_target
             room_data["target_dropped_to"]   = target_temp
         elif target_temp - previous_target >= TARGET_DROP_MIN:
             # Raised again (a boost, the morning plan): the room is judged against the
@@ -351,13 +381,23 @@ class OverheatMonitor:
 
             # The target has only just stepped down, so the room is "too warm" because
             # it is still at the temperature it was heated to. The radiator is turned
-            # down as usual and the status menu lists the room, but nothing is judged:
-            # no alert, no log line, and this time does not count towards "too warm for
-            # six hours" or the worst figure an all-clear quotes. The count is paused,
-            # not cleared: hours of real overheating before the step down still stand.
+            # down as usual and the status menu lists the room. For the hold-off the room
+            # is judged against the target it had BEFORE the step down, not left unjudged:
+            # a room climbing through the set-back (27 against an earlier 21) is a fault
+            # whatever the timetable did, and must not wait 90 minutes to be said. A room
+            # under the thresholds against that earlier target is only cooling: no alert,
+            # no log line, and the time does not count towards "too warm for six hours" or
+            # the worst figure an all-clear quotes. The count is paused, not cleared:
+            # hours of real overheating before the step down still stand.
+            judge_amount = overheat_amount
+            dropped_from = room_data.get("target_dropped_from")
             if self.in_target_drop_holdoff(room_name, now):
-                room_data["judged_cycles"] = judged_before
-                return
+                over_earlier = (current_temp - dropped_from
+                                if _number(current_temp) and _number(dropped_from) else None)
+                if over_earlier is None or over_earlier < min(persistent_temp, critical_temp):
+                    room_data["judged_cycles"] = judged_before
+                    return
+                judge_amount = over_earlier
             room_data["judged_cycles"] = judged_before + 1
 
             if overheat_amount > room_data["max_overheat"]:
@@ -366,10 +406,19 @@ class OverheatMonitor:
             should_alert = False
             alert_type   = None
 
-            if overheat_amount >= critical_temp:
+            # For half a day after a step down, a room no warmer than its earlier target
+            # has simply not cooled: the six-hour rule waits. A room above that earlier
+            # target, or any room once the half day is up, is judged as usual.
+            dropped_at   = room_data.get("target_dropped_at")
+            still_cooling = (_number(dropped_at) and _number(dropped_from)
+                             and _number(current_temp)
+                             and 0 <= now - dropped_at < TARGET_DROP_COOLING_SECS
+                             and current_temp <= dropped_from)
+
+            if judge_amount >= critical_temp:
                 should_alert = True
                 alert_type   = "CRITICAL_IMMEDIATE"
-            elif (overheat_amount >= persistent_temp and
+            elif (judge_amount >= persistent_temp and not still_cooling and
                   room_data["judged_cycles"] >= self.critical_duration_cycles):
                 should_alert = True
                 alert_type   = "CRITICAL_PERSISTENT"
@@ -485,25 +534,33 @@ class OverheatMonitor:
             outside = f" It is {_degrees(outdoor_temp)} outside."
         else:
             outside = ""
-        # A recent step down in the target is said, because part of "too warm" is then
-        # the room still cooling from where it was heated to.
+        # A recent step down in the target is said. "Cooling from its earlier setting"
+        # is only claimed for a room that is no warmer than that setting; a room above
+        # it is told so, because the step down does not explain it.
         stepped    = ""
+        now        = time.time()
         dropped_at = room_data.get("target_dropped_at")
         dropped_from = room_data.get("target_dropped_from")
         dropped_to   = room_data.get("target_dropped_to")
-        if (isinstance(dropped_at, (int, float)) and not isinstance(dropped_at, bool)
-                and isinstance(dropped_from, (int, float))
-                and isinstance(dropped_to, (int, float))
-                and 0 <= time.time() - dropped_at < TARGET_DROP_MENTION_SECS):
+        if (_number(dropped_at) and _number(dropped_from) and _number(dropped_to)
+                and 0 <= now - dropped_at < TARGET_DROP_MENTION_SECS):
             stepped = (f" Its target came down from {_deg(dropped_from)} to "
-                       f"{_degrees(dropped_to)} at {_clock_text(dropped_at)}, so some of "
-                       f"this is the room cooling from its earlier setting.")
+                       f"{_degrees(dropped_to)} at {_clock_day_text(dropped_at, now)}")
+            if _number(current_temp) and current_temp <= dropped_from + 0.5:
+                stepped += ", so some of this is the room cooling from its earlier setting."
+            else:
+                stepped += ", but the room is warmer than that earlier setting too."
         # Said as it stands when the message goes: how long the radiator has really been
         # turned down. Before 1.27.0 this read "for a while" three minutes after the
-        # target had dropped.
+        # target had dropped. The heating's own count starts again when a coast ends with
+        # the radiator still down, so "just" is only said when the room has not already
+        # been judged too warm for ten minutes or more.
         if off_cycles * self.run_interval_mins >= 10:
             turned_down = (f" The heating has had its radiator turned down for "
                            f"{_duration_text(down_hours)}, now to {_degrees(reduced_temp)}")
+        elif judged * self.run_interval_mins >= 10:
+            turned_down = (f" The heating has turned its radiator down to "
+                           f"{_degrees(reduced_temp)}")
         else:
             turned_down = (f" The heating has just turned its radiator down to "
                            f"{_degrees(reduced_temp)}")

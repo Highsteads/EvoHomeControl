@@ -55,7 +55,7 @@
         <Label>Wait after a room's target drops (minutes):</Label>
     </Field>
     <Field id="lbl_holdoff_info" type="label">
-        <Label>When a room's target steps down (the evening set-back, a boost ending) the room is still at the temperature it was heated to. For this long it is not judged as overheating. 90 is the usual value; 0 means no wait. The radiator is turned down as usual either way.</Label>
+        <Label>When a room's target steps down (the evening set-back, a boost ending) the room is still at the temperature it was heated to. For this long it is compared with its earlier target instead, so only a room well above that counts as overheating. 90 is the usual value; 0 means no wait. The radiator is turned down as usual either way.</Label>
     </Field>
 
     <Field id="sep_timing" type="separator"/>
