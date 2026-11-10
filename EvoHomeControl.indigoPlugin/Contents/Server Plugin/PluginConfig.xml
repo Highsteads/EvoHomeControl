@@ -51,6 +51,12 @@
     <Field id="alertEmailAddress" type="textfield" defaultValue="">
         <Label>Overheat alert email (fallback if OVERHEAT_ALERT_EMAIL not in IndigoSecrets):</Label>
     </Field>
+    <Field id="overheatHoldOffMins" type="textfield" defaultValue="90">
+        <Label>Wait after a room's target drops (minutes):</Label>
+    </Field>
+    <Field id="lbl_holdoff_info" type="label">
+        <Label>When a room's target steps down (the evening set-back, a boost ending) the room is still at the temperature it was heated to. For this long it is not judged as overheating. 90 is the usual value; 0 means no wait. The radiator is turned down as usual either way.</Label>
+    </Field>
 
     <Field id="sep_timing" type="separator"/>
     <Field id="lbl_timing" type="label">

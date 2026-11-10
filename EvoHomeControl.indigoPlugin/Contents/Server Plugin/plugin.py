@@ -4,8 +4,17 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        09-11-2026 15:31 UK
-# Version:     1.26.0
+# Date:        10-11-2026 UK
+# Version:     1.27.0
+#
+# v1.27.0 (10-11-2026): no overheat judgement for 90 minutes after a room's target steps down by a
+#   degree or more (overheat_monitor 1.6; setting overheatHoldOffMins, 0 to 720, blank or not a number
+#   gives 90, 0 = no wait). Seven of the sixteen alerts of 27-Oct to 05-Nov fired within minutes of the
+#   8pm or 10pm set-back. The radiator is turned down exactly as before and the status menu still lists
+#   the room; only the alert/log judgement waits, and the wait does not count towards "too warm for six
+#   hours". Alert wording made true when sent: how long the radiator has really been turned down (it
+#   said "for a while"), a recent step down named with its time, "1 degree", "about 4 days". Alerts
+#   remain switched off (ALERT_WHEN_RADIATOR_DOWN = False, 1.25.9), so none of this sends anything today.
 #
 # v1.26.0 (09-11-2026): after each heating check during a timed boost, plugin_state.json carries
 #   timed_boost_outcome: per boost room the target, the temperature asked for and, when that is
@@ -481,7 +490,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 import log_stamp
 from weather          import WeatherData
-from overheat_monitor import OverheatMonitor
+from overheat_monitor import OverheatMonitor, coerce_holdoff_mins, TARGET_DROP_HOLDOFF_MINS
 from heating_logic    import (
     process_room_temperature,
     validate_configuration,
@@ -593,7 +602,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.26.0"
+PLUGIN_VERSION  = "1.27.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -976,6 +985,7 @@ class Plugin(indigo.PluginBase):
             run_interval_mins = run_interval,
         )
         self.overheat.pushover_user_key = pushover_key
+        self.overheat.target_drop_holdoff_mins = self._overheat_holdoff_mins(self.pluginPrefs)
         self.overheat.email_address     = (
             _SECRETS_OVERHEAT_EMAIL or self.pluginPrefs.get("alertEmailAddress", "")
         )
@@ -1059,6 +1069,12 @@ class Plugin(indigo.PluginBase):
         minutes = _safe_int(prefs.get("overrideMinutes", 120), 120)
         return minutes if minutes in (0, 60, 120, 240) else 120
 
+    @staticmethod
+    def _overheat_holdoff_mins(prefs):
+        """Minutes with no overheat judgement after a room's target steps down. 90 when
+        the box is blank, never saved or not a number; 0 switches the wait off."""
+        return coerce_holdoff_mins(prefs.get("overheatHoldOffMins", TARGET_DROP_HOLDOFF_MINS))
+
     def closedPrefsConfigUi(self, values_dict, user_cancelled):
         if not user_cancelled:
             self.debug = str(values_dict.get("showDebugInfo", "false")).lower() == "true"
@@ -1081,6 +1097,7 @@ class Plugin(indigo.PluginBase):
                 self.overheat.email_address = (
                     _SECRETS_OVERHEAT_EMAIL or values_dict.get("alertEmailAddress", "")
                 )
+                self.overheat.target_drop_holdoff_mins = self._overheat_holdoff_mins(values_dict)
                 run_interval = max(1, _safe_int(values_dict.get("runIntervalMins", 5), 5))
                 self.overheat.run_interval_mins        = run_interval
                 self.overheat.critical_duration_cycles = (6 * 60) // run_interval

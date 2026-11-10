@@ -159,6 +159,9 @@ class TestOverheatAlerts(unittest.TestCase):
         room = "Living Room Front"
         self.mon.initialize_room(room)
         self.mon.history[room]["consecutive_cycles"] = self.mon.critical_duration_cycles
+        # 1.27.0: "too warm for six hours" counts judged cycles, which leave out the
+        # hold-off after a step down in the target.
+        self.mon.history[room]["judged_cycles"]      = self.mon.critical_duration_cycles
         self.mon.update_room(room, True, self.mon.persistent_overheat_temp + 0.1,
                              target + self.mon.persistent_overheat_temp + 0.1, target, 5.0,
                              is_passive=passive, reduced_temp=reduced)

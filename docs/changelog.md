@@ -7,6 +7,13 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.27.0 - 10 November 2026
+
+- **A wait after a room's target steps down.** At the evening set-back a room's target can fall by six degrees in one step, while the room is still at the temperature it was heated to. The plugin used to judge that as overheating within minutes, and with the alerts switched on it warned of a stuck radiator valve when the room was only cooling. Seven of the sixteen alerts sent between 27 October and 5 November were of this kind. It now waits 90 minutes after a target falls by a degree or more before it judges the room. The radiator is still turned down straight away, and the overheat status still lists the room. The waiting time does not count towards "too warm for six hours". If the target is raised again, by a boost for example, the wait ends.
+- **A new setting, Wait after a room's target drops,** under OVERHEAT ALERTS. It is 90 minutes to start with, and 0 means no wait. A blank box, or one that does not hold a number, gives 90.
+- **Alert wording that is true when it is sent.** The message said the radiator "has been turned down for a while" even when that had happened three minutes earlier. It now says how long the radiator has really been turned down, or that it has just been turned down. If the target stepped down in the last six hours it says so, with the time. It writes "1 degree" rather than "1 degrees", and an all-clear that comes days later says "about 4 days ago" rather than "about 85 hours ago".
+- The overheating alerts are still switched off, as they have been since 1.25.9, so nothing new is sent. These changes apply if you switch them back on.
+
 ## 1.26.0 - 9 November 2026
 
 - **Each boosted room's result is saved.** After every heating check during a timed boost, the plugin saves what each boosted room was asked for and, when a room was given less than 22 degrees, why: an open window or door, away mode, a shut sliding door in the Conservatory, or a room already warm. Dashboards 3.70.0 reads this to show the boost room by room on its Heating page. It is cleared when the boost starts, is cancelled or runs out.

@@ -3,8 +3,8 @@
 # Filename:    overheat_monitor.py
 # Description: OverheatMonitor — tracks per-room overheat history, sends Pushover + email alerts
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        06-11-2026
-# Version:     1.5
+# Date:        10-11-2026
+# Version:     1.6
 
 import os
 import json
@@ -60,18 +60,72 @@ ALERT_RETRY_SECS       = 1800
 ALERT_WHEN_RADIATOR_DOWN = False
 
 
+# A room's target that falls by this much or more in one step (the evening set-back, a
+# boost ending, the En Suite morning finishing) starts the hold-off below.
+TARGET_DROP_MIN        = 1.0
+
+# No overheat judgement for this long after a room's target steps down. At 8pm the Dining
+# Room's target falls from 21 to 15 while the room is still at the 21 it was heated to:
+# six degrees "too warm" within one cycle, and an alert about a stuck valve that was only
+# a room cooling (seven of sixteen alerts, 27-10 to 05-11-2026). The radiator is still
+# turned down as before; this only delays the judgement. Set by the "overheatHoldOffMins"
+# setting; 0 switches the hold-off off.
+TARGET_DROP_HOLDOFF_MINS     = 90
+TARGET_DROP_HOLDOFF_MAX_MINS = 720
+
+# The alert mentions a step-down in the target only while it is this recent.
+TARGET_DROP_MENTION_SECS = 6 * 3600
+
+
+def coerce_holdoff_mins(value, default=TARGET_DROP_HOLDOFF_MINS):
+    """The hold-off setting as whole minutes, 0 to TARGET_DROP_HOLDOFF_MAX_MINS.
+
+    A Configure textfield comes back as a string and can be blank or not a number;
+    anything unreadable gives the default, never an exception. bool is refused because
+    int(True) is 1."""
+    if isinstance(value, bool):
+        return default
+    try:
+        minutes = int(float(str(value).strip()))
+    except (ValueError, TypeError, OverflowError):
+        return default
+    return max(0, min(TARGET_DROP_HOLDOFF_MAX_MINS, minutes))
+
+
 def _duration_text(hours):
-    """'about 40 minutes', 'about an hour', 'about 3 hours' - as a person says it."""
+    """'about 40 minutes', 'about an hour', 'about 3 hours', 'about 4 days' - as a
+    person says it."""
     minutes = int(round(hours * 60))
     if minutes < 55:
         return f"about {max(5, 5 * round(minutes / 5))} minutes"
     whole = int(round(hours))
-    return "about an hour" if whole <= 1 else f"about {whole} hours"
+    if whole <= 1:
+        return "about an hour"
+    if whole < 36:
+        return f"about {whole} hours"
+    return f"about {int(round(hours / 24.0))} days"
+
+
+def _clock_text(epoch):
+    """'8pm', '8:02pm', '11:41am' - the time as a person says it."""
+    when   = dt.fromtimestamp(epoch)
+    hour   = when.hour % 12 or 12
+    suffix = "am" if when.hour < 12 else "pm"
+    if when.minute == 0:
+        return f"{hour}{suffix}"
+    return f"{hour}:{when.minute:02d}{suffix}"
 
 
 def _deg(value):
     """12.0 -> '12', 12.5 -> '12.5'."""
-    return f"{value:.1f}".rstrip("0").rstrip(".")
+    text = f"{value:.1f}".rstrip("0").rstrip(".")
+    return "0" if text == "-0" else text
+
+
+def _degrees(value):
+    """'12 degrees', '12.5 degrees', but '1 degree' and '-1 degree'."""
+    text = _deg(value)
+    return f"{text} degree" if text in ("1", "-1") else f"{text} degrees"
 
 
 class OverheatMonitor:
@@ -103,6 +157,9 @@ class OverheatMonitor:
         self.persistent_overheat_temp = ALERT_PERSISTENT_TEMP
         self.all_clear_cycles         = max(2, 30 // run_interval_mins)  # 30 min stable
         self.outdoor_suppress_temp    = 12.0  # Suppress alerts if outdoor > 12°C
+        # Minutes with no overheat judgement after a room's target steps down. plugin.py
+        # sets it from the "overheatHoldOffMins" setting through coerce_holdoff_mins().
+        self.target_drop_holdoff_mins = TARGET_DROP_HOLDOFF_MINS
 
         # Credentials set by plugin.py after construction (from PluginConfig)
         self.pushover_user_key = ""
@@ -208,7 +265,40 @@ class OverheatMonitor:
                 "off_since_cycle":     0,
                 "temp_history":        [],
                 "is_coasting":         False,
+                "judged_cycles":       0,
+                "target_dropped_at":   None,
+                "target_dropped_from": None,
+                "target_dropped_to":   None,
             }
+
+    def _note_target_change(self, room_data, previous_target, target_temp, now):
+        """Record a step down in the room's target, or forget one when it rises again."""
+        if not (isinstance(previous_target, (int, float))
+                and isinstance(target_temp, (int, float))):
+            return
+        if previous_target - target_temp >= TARGET_DROP_MIN:
+            room_data["target_dropped_at"]   = now
+            room_data["target_dropped_from"] = previous_target
+            room_data["target_dropped_to"]   = target_temp
+        elif target_temp - previous_target >= TARGET_DROP_MIN:
+            # Raised again (a boost, the morning plan): the room is judged against the
+            # higher target straight away.
+            room_data["target_dropped_at"]   = None
+            room_data["target_dropped_from"] = None
+            room_data["target_dropped_to"]   = None
+
+    def in_target_drop_holdoff(self, room_name, now=None):
+        """True while the room's target stepped down less than the hold-off ago.
+
+        A drop time in the future (the clock was put back) holds nothing off: a wrong
+        clock must not silence the judgement for longer than the hold-off."""
+        room_data  = self.history.get(room_name) or {}
+        dropped_at = room_data.get("target_dropped_at")
+        if not isinstance(dropped_at, (int, float)) or isinstance(dropped_at, bool):
+            return False
+        holdoff = coerce_holdoff_mins(self.target_drop_holdoff_mins) * 60
+        age     = (time.time() if now is None else now) - dropped_at
+        return 0 <= age < holdoff
 
     def update_room(self, room_name, is_overheating, overheat_amount,
                     current_temp, target_temp, outdoor_temp, is_passive=False,
@@ -223,6 +313,11 @@ class OverheatMonitor:
         self.initialize_room(room_name)
         room_data = self.history[room_name]
 
+        # A step down in the target starts the hold-off (1.27.0). Read before the new
+        # target is stored below.
+        now = time.time()
+        self._note_target_change(room_data, room_data.get("target_temp"), target_temp, now)
+
         # Store current conditions for alert messages
         room_data["current_temp"]  = current_temp
         room_data["target_temp"]   = target_temp
@@ -236,6 +331,7 @@ class OverheatMonitor:
             room_config = self.room_specific_thresholds[room_name]
             if not room_config.get("monitor_enabled", True):
                 room_data["consecutive_cycles"] = 0
+                room_data["judged_cycles"]      = 0
                 room_data["stable_cycles"]      = 0
                 return
             critical_temp   = room_config.get("critical_overheat_temp",   self.critical_overheat_temp)
@@ -245,8 +341,24 @@ class OverheatMonitor:
             persistent_temp = self.persistent_overheat_temp
 
         if is_overheating:
+            # A history file saved before 1.27.0 has no judged_cycles: carry on from
+            # the count it does have.
+            judged_before = room_data.get("judged_cycles")
+            if not isinstance(judged_before, int) or isinstance(judged_before, bool):
+                judged_before = room_data["consecutive_cycles"]
             room_data["consecutive_cycles"] += 1
             room_data["stable_cycles"]       = 0
+
+            # The target has only just stepped down, so the room is "too warm" because
+            # it is still at the temperature it was heated to. The radiator is turned
+            # down as usual and the status menu lists the room, but nothing is judged:
+            # no alert, no log line, and this time does not count towards "too warm for
+            # six hours" or the worst figure an all-clear quotes. The count is paused,
+            # not cleared: hours of real overheating before the step down still stand.
+            if self.in_target_drop_holdoff(room_name, now):
+                room_data["judged_cycles"] = judged_before
+                return
+            room_data["judged_cycles"] = judged_before + 1
 
             if overheat_amount > room_data["max_overheat"]:
                 room_data["max_overheat"] = overheat_amount
@@ -258,7 +370,7 @@ class OverheatMonitor:
                 should_alert = True
                 alert_type   = "CRITICAL_IMMEDIATE"
             elif (overheat_amount >= persistent_temp and
-                  room_data["consecutive_cycles"] >= self.critical_duration_cycles):
+                  room_data["judged_cycles"] >= self.critical_duration_cycles):
                 should_alert = True
                 alert_type   = "CRITICAL_PERSISTENT"
 
@@ -305,6 +417,7 @@ class OverheatMonitor:
 
         else:
             room_data["consecutive_cycles"] = 0
+            room_data["judged_cycles"]      = 0
             room_data["stable_cycles"]     += 1
             # An alert still waiting to be delivered is dropped once the room is fine.
             room_data["alert_retry_at"]     = None
@@ -347,31 +460,61 @@ class OverheatMonitor:
         reduced_temp = room_data.get("reduced_temp")
         if not isinstance(reduced_temp, (int, float)):
             reduced_temp = max(12.0, target_temp - 6.0)
-        hours        = (room_data["consecutive_cycles"] * self.run_interval_mins) / 60.0
+        # How long the room has been JUDGED too warm: the hold-off after a step down in
+        # its target is left out, so "too warm for about 6 hours" is six hours of it.
+        judged = room_data.get("judged_cycles")
+        if not isinstance(judged, int) or isinstance(judged, bool):
+            judged = room_data["consecutive_cycles"]
+        hours        = (judged * self.run_interval_mins) / 60.0
         passive      = bool(room_data.get("passive"))
+        # How long the heating has had this radiator turned down, by its own count.
+        off_cycles = room_data.get("off_since_cycle", 0)
+        if not isinstance(off_cycles, int) or isinstance(off_cycles, bool):
+            off_cycles = 0
+        down_hours   = (off_cycles * self.run_interval_mins) / 60.0
 
-        title = f"The {room_name} is {_deg(overheat_amount)} degrees too warm"
+        title = f"The {room_name} is {_degrees(overheat_amount)} too warm"
         if alert_type == "CRITICAL_IMMEDIATE":
-            opening = (f"The {room_name} is at {_deg(current_temp)} degrees, "
+            opening = (f"The {room_name} is at {_degrees(current_temp)}, "
                        f"{_deg(overheat_amount)} more than the {_deg(target_temp)} it should be.")
         else:
             opening = (f"The {room_name} has been too warm for {_duration_text(hours)}. It is "
-                       f"at {_deg(current_temp)} degrees against the {_deg(target_temp)} it "
+                       f"at {_degrees(current_temp)} against the {_deg(target_temp)} it "
                        f"should be.")
-        if isinstance(outdoor_temp, (int, float)):
-            outside = f" It is {_deg(outdoor_temp)} degrees outside."
+        if isinstance(outdoor_temp, (int, float)) and not isinstance(outdoor_temp, bool):
+            outside = f" It is {_degrees(outdoor_temp)} outside."
         else:
             outside = ""
-        if passive:
-            advice = (f" The radiator has been turned down to {_deg(reduced_temp)} degrees for "
-                      f"a while and the room is still too warm. Sun or other heat can do that, "
-                      f"but a valve stuck open or with flat batteries looks the same, so please "
-                      f"check it.")
+        # A recent step down in the target is said, because part of "too warm" is then
+        # the room still cooling from where it was heated to.
+        stepped    = ""
+        dropped_at = room_data.get("target_dropped_at")
+        dropped_from = room_data.get("target_dropped_from")
+        dropped_to   = room_data.get("target_dropped_to")
+        if (isinstance(dropped_at, (int, float)) and not isinstance(dropped_at, bool)
+                and isinstance(dropped_from, (int, float))
+                and isinstance(dropped_to, (int, float))
+                and 0 <= time.time() - dropped_at < TARGET_DROP_MENTION_SECS):
+            stepped = (f" Its target came down from {_deg(dropped_from)} to "
+                       f"{_degrees(dropped_to)} at {_clock_text(dropped_at)}, so some of "
+                       f"this is the room cooling from its earlier setting.")
+        # Said as it stands when the message goes: how long the radiator has really been
+        # turned down. Before 1.27.0 this read "for a while" three minutes after the
+        # target had dropped.
+        if off_cycles * self.run_interval_mins >= 10:
+            turned_down = (f" The heating has had its radiator turned down for "
+                           f"{_duration_text(down_hours)}, now to {_degrees(reduced_temp)}")
         else:
-            advice = (f" The heating has turned its radiator down to {_deg(reduced_temp)} "
-                      f"degrees. A room this far over usually means the radiator valve is "
-                      f"stuck open or its batteries are flat, so please check it.")
-        message = f"{opening}{outside}{advice}"
+            turned_down = (f" The heating has just turned its radiator down to "
+                           f"{_degrees(reduced_temp)}")
+        if passive:
+            advice = (f"{turned_down}, and the room is still too warm. Sun or other heat "
+                      f"can do that, but a valve stuck open or with flat batteries looks "
+                      f"the same, so please check it.")
+        else:
+            advice = (f"{turned_down}. A room this far over usually means the radiator "
+                      f"valve is stuck open or its batteries are flat, so please check it.")
+        message = f"{opening}{outside}{stepped}{advice}"
 
         pushed  = self._send_pushover(title, message, priority=0 if passive else 1)
         emailed = self._send_email(title, message)
@@ -413,9 +556,9 @@ class OverheatMonitor:
 
         title = f"The {room_name} is back to normal"
         message = (
-            f"The {room_name} is at {_deg(current_temp)} degrees against the "
+            f"The {room_name} is at {_degrees(current_temp)} against the "
             f"{_deg(target_temp)} it should be, so it has settled.{when} At its worst it was "
-            f"{_deg(room_data['max_overheat'])} degrees too warm. Nothing needs doing."
+            f"{_degrees(room_data['max_overheat'])} too warm. Nothing needs doing."
         )
 
         self._send_pushover(title, message, priority=-1)
