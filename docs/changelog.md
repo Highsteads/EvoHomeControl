@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.27.1 - 24 November 2026
+
+- **"Reaching Evohome again" means it.** After the plugin has said that radiator settings are not reaching Evohome, it used to say they were reaching it again as soon as RAMSES ESP accepted the next setting to send. On 24 November that line appeared twice while my gateway could not hear the controller at all. The plugin now waits until the controller has taken a setting: the room shows the temperature that was sent, and the controller has reported on the room since. If that does not happen within ten minutes the plugin says nothing and carries on trying, as before.
+
 ## 1.27.0 - 10 November 2026
 
 - **A wait after a room's target steps down.** At the evening set-back a room's target can fall by six degrees in one step, while the room is still at the temperature it was heated to. The plugin used to judge that as overheating within minutes, and with the alerts switched on it warned of a stuck radiator valve when the room was only cooling. Seven of the sixteen alerts sent between 27 October and 5 November were of this kind. For 90 minutes after a target falls by a degree or more, the room is now compared with the target it had before. A room that is only cooling is left alone, and that time does not count towards "too warm for six hours". A room that is six degrees over its earlier target as well, or climbing, is still reported straight away. The radiator is still turned down at once, and the overheat status still lists the room. If the target is raised again, by a boost for example, the wait ends. A second step down during the wait does not start it again.

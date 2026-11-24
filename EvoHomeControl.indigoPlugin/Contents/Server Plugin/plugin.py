@@ -3,9 +3,16 @@
 # Filename:    plugin.py
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
-# Author:      CliveS & Claude Opus 5, Claude Opus 5.5 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        10-11-2026 UK
-# Version:     1.27.0
+# Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
+# Date:        24-11-2026 UK
+# Version:     1.27.1
+#
+# v1.27.1 (24-11-2026): "Radiator settings are reaching Evohome again" waits for the controller. It was
+#   logged as soon as RAMSES ESP accepted a command to send, twice on 24-Nov while the controller could
+#   not be heard at all. heating_logic now keeps the accepted command in _REFUSAL_ANNOUNCED["await"] and
+#   calls the outage over only when that zone shows the temperature sent and a controller report
+#   (lastSeen) no older than the command. Not taken up in RECOVERY_WAIT_SECS (600): forgotten, outage
+#   stays open. A fresh refusal cancels the wait.
 #
 # v1.27.0 (10-11-2026): no overheat judgement for 90 minutes after a room's target steps down by a
 #   degree or more (overheat_monitor 1.6; setting overheatHoldOffMins, 0 to 720, blank or not a number
@@ -602,7 +609,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.27.0"
+PLUGIN_VERSION  = "1.27.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

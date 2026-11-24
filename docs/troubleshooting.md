@@ -44,7 +44,7 @@ The rooms named have no timetable reading from the last 30 hours, so they could 
 
 ## The log says radiator settings are not reaching Evohome
 
-RAMSES ESP could not send the plugin's settings, and the line gives its reason, such as *the gateway is offline*. Nothing was sent, so the plugin does not treat the rooms as changed, and it tries every room again each cycle. It says this once, and once more when settings are getting through again. Check the RAMSES ESP plugin and its gateway.
+RAMSES ESP could not send the plugin's settings, and the line gives its reason, such as *the gateway is offline* or *the gateway is not hearing the Evohome controller*. Nothing was sent, so the plugin does not treat the rooms as changed, and it tries every room again each cycle. It says this once, and once more when the Evohome controller has taken a setting again, which it judges from the room showing the temperature that was sent. Check the RAMSES ESP plugin and its gateway.
 
 ## Every radiator is at 8 degrees
 

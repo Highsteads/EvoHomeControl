@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.27.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.27.1 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.27.1** - The log line *Radiator settings are reaching Evohome again* now waits until the Evohome controller has taken a setting. It used to appear as soon as RAMSES ESP accepted one to send, which could be while the controller still could not be reached.
 
 **v1.27.0** - For the first 90 minutes after a room's target steps down, such as at the evening set-back, the room is compared with the target it had before, because it is still at the temperature it was heated to. A new setting changes the wait. The overheating alerts, which are still switched off, now say how long the radiator has really been turned down.
 

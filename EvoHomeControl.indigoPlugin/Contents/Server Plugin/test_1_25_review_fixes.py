@@ -86,7 +86,54 @@ class TestARefusedCommandIsNotRecorded(_Base):
         with mock.patch.object(hl, "_log", lambda msg, **k: lines.append(msg)):
             hl.update_radiator_setpoint(zone, 19.0, 11, "Bedroom 2", cache, {}, [], [])
         self.assertEqual(cache["Bedroom 2"], 19.0)
-        self.assertTrue(any("reaching Evohome again" in l for l in lines))
+        # Accepted is not taken (1.27.1): nothing is claimed until the controller shows it.
+        self.assertFalse(any("reaching Evohome again" in l for l in lines),
+                         "said the outage was over on a command that had only been accepted")
+        with mock.patch.object(hl, "_log", lambda msg, **k: lines.append(msg)):
+            hl.update_radiator_setpoint(zone, 19.0, 11, "Bedroom 2", cache, {}, [], [])
+        self.assertFalse(any("reaching Evohome again" in l for l in lines),
+                         "the zone still shows the old temperature")
+        zone.states["setpointHeat"] = "19.0"
+        zone.states["lastSeen"] = (datetime.now() + timedelta(seconds=2)).strftime("%Y-%m-%d %H:%M:%S")
+        with mock.patch.object(hl, "_log", lambda msg, **k: lines.append(msg)):
+            for _ in range(2):
+                hl.update_radiator_setpoint(zone, 19.0, 11, "Bedroom 2", cache, {}, [], [])
+        self.assertEqual(sum("reaching Evohome again" in l for l in lines), 1, "said once")
+        self.assertEqual(hl._REFUSAL_ANNOUNCED, {})
+
+    def _refused_then_accepted(self, zone, cache, lines):
+        self.ramses = AnsweringRamses({"accepted": False, "reason": "the gateway is offline"})
+        with mock.patch.object(hl, "_log", lambda msg, **k: lines.append(msg)):
+            hl.update_radiator_setpoint(zone, 19.0, 11, "Bedroom 2", cache, {}, [], [])
+        self.ramses.answer = {"accepted": True, "reason": ""}
+        with mock.patch.object(hl, "_log", lambda msg, **k: lines.append(msg)):
+            hl.update_radiator_setpoint(zone, 19.0, 11, "Bedroom 2", cache, {}, [], [])
+
+    def test_a_report_from_before_the_command_is_not_a_confirmation(self):
+        zone, lines = FakeZone(setpoint="16.0"), []
+        self._refused_then_accepted(zone, {"Bedroom 2": 16.0}, lines)
+        zone.states["setpointHeat"] = "19.0"
+        zone.states["lastSeen"] = (datetime.now() - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        self.assertFalse(hl._recovery_confirmed(zone))
+        zone.states.pop("lastSeen")
+        self.assertFalse(hl._recovery_confirmed(zone), "an absent state is never a match")
+
+    def test_a_command_never_taken_up_is_forgotten_and_the_outage_stays_open(self):
+        zone, lines = FakeZone(setpoint="16.0"), []
+        self._refused_then_accepted(zone, {"Bedroom 2": 16.0}, lines)
+        later = datetime.now() + timedelta(seconds=hl.RECOVERY_WAIT_SECS + 5)
+        self.assertFalse(hl._recovery_confirmed(zone, now=later))
+        self.assertEqual(hl._REFUSAL_ANNOUNCED.get("await"), {})
+        self.assertEqual(hl._REFUSAL_ANNOUNCED.get("reason"), "the gateway is offline")
+
+    def test_a_fresh_refusal_cancels_the_wait(self):
+        zone, lines = FakeZone(setpoint="16.0"), []
+        self._refused_then_accepted(zone, {"Bedroom 2": 16.0}, lines)
+        self.ramses.answer = {"accepted": False, "reason": "the gateway is offline"}
+        with mock.patch.object(hl, "_log", lambda msg, **k: lines.append(msg)):
+            hl.update_radiator_setpoint(zone, 19.0, 11, "Bedroom 2", {"Bedroom 2": 16.0}, {}, [], [])
+        self.assertEqual(hl._REFUSAL_ANNOUNCED.get("await"), {})
+        self.assertEqual(sum("not reaching Evohome" in l for l in lines), 1)
 
 
 # ===========================================================================

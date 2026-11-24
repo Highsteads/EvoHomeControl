@@ -489,7 +489,57 @@ def last_refusal(dev):
 _MANUAL_ANNOUNCED = {}
 
 # {"reason": text} while radiator commands are being refused, so it is said once (1.25.0).
+# After a refusal, a command RAMSES ESP accepts is only on its way: "await" holds
+# {device id: (temperature, when)} until the controller is seen to have taken one of them,
+# and only then is the outage called over (1.27.1). On 24-Nov-2026 "reaching Evohome again"
+# was logged twice while the controller could not be heard at all.
 _REFUSAL_ANNOUNCED = {}
+RECOVERY_WAIT_SECS = 600      # an accepted command not taken up in this long is forgotten
+
+
+def _parse_seen(text):
+    """RAMSES ESP's lastSeen ("YYYY-MM-DD HH:MM:SS", house time) as a datetime, or None."""
+    try:
+        return dt.strptime(str(text).strip(), "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+
+
+def _note_accepted_after_refusal(dev, value, now=None):
+    """A command was accepted while an outage is still announced: wait for the controller
+    to take it before saying the outage is over."""
+    if "reason" not in _REFUSAL_ANNOUNCED:
+        return
+    try:
+        _REFUSAL_ANNOUNCED.setdefault("await", {})[int(dev.id)] = (float(value), now or dt.now())
+    except (TypeError, ValueError, AttributeError):
+        pass
+
+
+def _recovery_confirmed(dev, now=None):
+    """True once the controller has taken a command accepted after a refusal: the zone
+    shows the temperature we sent, and the controller has reported on the zone since.
+    An absent or unreadable state is never a match."""
+    waiting = _REFUSAL_ANNOUNCED.get("await") or {}
+    try:
+        entry = waiting.get(int(dev.id))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    if entry is None:
+        return False
+    value, when = entry
+    now = now or dt.now()
+    if (now - when).total_seconds() > RECOVERY_WAIT_SECS:
+        waiting.pop(int(dev.id), None)      # never taken up; a later send starts again
+        return False
+    try:
+        shown = float(dev.states.get("setpointHeat"))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    seen = _parse_seen(dev.states.get("lastSeen"))
+    if seen is None:
+        return False
+    return abs(shown - value) <= TEMP_CHANGE_TOLERANCE and seen >= when.replace(microsecond=0)
 
 # {device id: (temperature, when, epoch)} - the last setpoint this plugin sent each zone,
 # with the moment as seconds since the epoch too (1.25.0). Saved with the setpoint cache,
@@ -1237,13 +1287,22 @@ def update_radiator_setpoint(dev_radiator, new_temp, message, room_name,
                 # try again; logging "set to" here would claim a change that never left
                 # (1.25.0, review finding 3).
                 reason = last_refusal(dev_radiator) or "RAMSES ESP could not send it"
+                try:
+                    (_REFUSAL_ANNOUNCED.get("await") or {}).pop(int(dev_radiator.id), None)
+                except (TypeError, ValueError, AttributeError):
+                    pass
                 if _REFUSAL_ANNOUNCED.get("reason") != reason:
                     _REFUSAL_ANNOUNCED["reason"] = reason
                     _log(f"Radiator settings are not reaching Evohome: {reason}. Each room is "
                          f"tried again every cycle.", level="WARNING", log_buffer=log_buffer)
                 return
-            if _REFUSAL_ANNOUNCED.pop("reason", None) is not None:
-                _log("Radiator settings are reaching Evohome again.", log_buffer=log_buffer)
+            _note_accepted_after_refusal(dev_radiator, new_temp)
+
+        # An outage is over when the controller has taken a command, not when RAMSES ESP
+        # has merely accepted one to send. Checked every cycle for every room.
+        if _REFUSAL_ANNOUNCED.get("await") and _recovery_confirmed(dev_radiator):
+            _REFUSAL_ANNOUNCED.clear()
+            _log("Radiator settings are reaching Evohome again.", log_buffer=log_buffer)
 
         # Change detection uses our own cache (not RAMSES device state)
         last_calc      = last_setpoints.get(room_name)
