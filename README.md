@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.28.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.29.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.29.0** - The plugin now records which rooms it is leaving alone because somebody set them by hand, and until when, so that my Dashboards plugin (3.72.0 or later) can show it on each radiator tile.
 
 **v1.28.0** - A temperature you set from the Indigo client, the Home app or a dashboard is now held for an hour and then the room goes back to its plan. It used to be held until the plan next changed, which could be two minutes or most of a day. A new setting, **Hold a temperature set through Indigo for**, changes the length, and 0 brings back the old rule.
 

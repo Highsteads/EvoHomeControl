@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.29.0 - 24 November 2026
+
+- **Held rooms are recorded for the dashboard.** Twice a minute the plugin notes which rooms it is leaving alone because somebody set them by hand, and until when. My Dashboards plugin, 3.72.0 or later, shows this on each radiator tile, for example *set by hand, held until 2:05pm*. Nothing else about the heating changes.
+
 ## 1.28.0 - 24 November 2026
 
 - **A temperature set through Indigo is held for an hour.** Set a room from the Indigo client, the Home app or a dashboard and the plugin used to leave it alone until the room's plan next changed. That could be almost no time at all: I set the En Suite to 24 at 9:58 one morning, the plan changed at 10, and the plugin turned the radiator down four minutes later. The same rule held another room until midnight. The plugin now holds the temperature for an hour from the moment you set it, through any plan change and past midnight, and then puts the room back on its plan. Change it again and the hour starts again.

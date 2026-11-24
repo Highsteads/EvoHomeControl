@@ -16,7 +16,8 @@ import pytest
 
 CHECKS = ("_check_summer_force_expiry", "_check_en_suite_morning",
           "_check_en_suite_drying", "_check_timed_boost_expiry",
-          "_check_en_suite_window_interlock", "_check_contacts_changed")
+          "_check_en_suite_window_interlock", "_check_contacts_changed",
+          "_record_hand_holds")
 
 
 @pytest.fixture

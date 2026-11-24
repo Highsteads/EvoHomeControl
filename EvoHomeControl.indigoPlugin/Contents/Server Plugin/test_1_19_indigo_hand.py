@@ -102,6 +102,31 @@ class TestTellingThemApart(unittest.TestCase):
         self.assertEqual(lines, ["En Suite was set to 22 degrees by hand through Indigo, so the "
                                  "heating plugin leaves it alone until 2:05pm."])
 
+    # ---- 1.29.0: the holds are published for the Heating page ----
+
+    def test_held_rooms_are_listed_with_their_end_in_seconds(self):
+        held, ours, fixed = FakeZone(dev_id=1), FakeZone(dev_id=2), FakeZone(dev_id=3)
+        made = datetime.now().replace(microsecond=0) - timedelta(minutes=10)
+        hl.note_sent(held, 8.0, when=made - timedelta(minutes=5))
+        _through_indigo(held, made, setpoint="22.0")
+        fixed.states.update({"setpointSource": "manual", "zoneMode": "permanent override",
+                             "setpointHeat": "20.0", "setpointChangedAt": made.strftime(_STAMP)})
+        rooms = ((1, "En Suite", PLAN), (2, "Hall", PLAN), (3, "Bathroom", PLAN), (4, "Gone", PLAN))
+        out = hl.hand_holds(rooms, {1: held, 2: ours, 3: fixed})
+        self.assertEqual(set(out), {"1", "3"}, "a room not held, and one that cannot be read, are left out")
+        self.assertEqual(out["1"]["room"], "En Suite")
+        self.assertAlmostEqual(out["1"]["until"], (made + timedelta(minutes=60)).timestamp(), delta=1)
+        self.assertEqual(out["3"], {"room": "Bathroom", "until": None})
+        import json
+        json.dumps(out)      # it goes into plugin_state.json as it is
+
+    def test_a_hold_that_has_run_out_is_not_listed(self):
+        dev = FakeZone(dev_id=1)
+        made = datetime.now() - timedelta(minutes=61)
+        hl.note_sent(dev, 8.0, when=made - timedelta(minutes=5))
+        _through_indigo(dev, made, setpoint="22.0")
+        self.assertEqual(hl.hand_holds(((1, "En Suite", PLAN),), {1: dev}), {})
+
     # ---- with the setting at 0, the rule from 1.19.0 ----
 
     def test_a_person_changing_it_after_us_is_held_until_the_plan_moves(self):

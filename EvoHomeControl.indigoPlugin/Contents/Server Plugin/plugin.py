@@ -5,7 +5,13 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        24-11-2026 UK
-# Version:     1.28.0
+# Version:     1.29.0
+#
+# v1.29.0 (24-11-2026): plugin_state.json carries hand_holds: {device id: {room, until}} for every room
+#   being left alone because somebody set it by hand, until in seconds since the epoch or null for a
+#   permanent setting made at the controller. Recorded every tick by _record_hand_holds (guarded, saved
+#   only when it changes) from heating_logic.hand_holds / manual_hold_end_epoch. Dashboards 3.72.0 shows
+#   it on each radiator tile.
 #
 # v1.28.0 (24-11-2026): a temperature set through Indigo (the client, the Home app, a dashboard) is held
 #   for a set time, 60 minutes unless changed (setting handHoldMinutes, 0 to 720; blank or not a number
@@ -617,7 +623,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.28.0"
+PLUGIN_VERSION  = "1.29.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1190,6 +1196,11 @@ class Plugin(indigo.PluginBase):
         # not up to five minutes later.
         self._run_guarded("Windows", "window and door check",
                           lambda: self._check_contacts_changed())
+
+        # Rooms held by hand, for the Heating page (1.29.0): every tick, so a tile shows
+        # "held until" within half a minute of the change being confirmed.
+        self._run_guarded("HandHolds", "hand-hold record",
+                          lambda: self._record_hand_holds())
 
         # Main heating cycle (time-delta dispatch), or sooner when one was asked for.
         # The request count is read BEFORE the cycle, so a request that arrives while
@@ -1781,6 +1792,15 @@ class Plugin(indigo.PluginBase):
             return
         _log("[Summer] Summer shut-off ENDED - normal heating resumed.")
         self.store["summer_lockout_logged"] = None
+
+    def _record_hand_holds(self):
+        """Save which rooms are being left alone because somebody set them by hand, and
+        until when, so the Heating page can say so on each tile (1.29.0). Written only
+        when it changes: this runs every tick."""
+        holds = heating_logic.hand_holds(_room_plans(), indigo.devices)
+        if holds != self.store.get("hand_holds", {}):
+            self.store["hand_holds"] = holds
+            self._save_state()
 
     def _apply_summer_off(self):
         """Hold every radiator at RADIATORS_OFF_TEMP and turn the En Suite floor
@@ -3245,6 +3265,7 @@ class Plugin(indigo.PluginBase):
             "timed_boost_expiry":           expiry.isoformat() if expiry else None,
             "timed_boost_hours":            self.store.get("timed_boost_hours", 0),
             "timed_boost_outcome":          self.store.get("timed_boost_outcome", {}),
+            "hand_holds":                   self.store.get("hand_holds", {}),
             "summer_force_active":          self.store.get("summer_force_active", False),
             "summer_force_expiry":          force_exp.isoformat() if force_exp else None,
             "en_suite_morning_active":      self.store["en_suite_morning_active"],

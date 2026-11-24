@@ -641,6 +641,16 @@ def _changed_through_indigo(dev, changed):
 def manual_hold_until(dev, hours, now=None):
     """None when the room is not held; otherwise when the hold ends (a datetime), or
     the string "permanent" while it stays on a permanent setting made by hand."""
+    end = manual_hold_end_epoch(dev, hours, now)
+    if end is None or end == "permanent":
+        return end
+    # A house-time clock reading (naive), as before, for the log wording.
+    return dt.fromtimestamp(end, HOUSE_TZ).replace(tzinfo=None)
+
+
+def manual_hold_end_epoch(dev, hours, now=None):
+    """The same answer in seconds since the epoch, which a dashboard can show in its
+    own clock (1.29.0): None, "permanent", or the moment the hold ends."""
     states = dev.states
     source = states.get("setpointSource")
     if source not in ("manual", "indigo"):
@@ -671,8 +681,26 @@ def manual_hold_until(dev, hours, now=None):
         end_epoch = _hold_end_epoch(changed_epoch, hours)
     if end_epoch is None or now_epoch >= end_epoch:
         return None
-    # Returned as a house-time clock reading (naive), as before, for the log wording.
-    return dt.fromtimestamp(end_epoch, HOUSE_TZ).replace(tzinfo=None)
+    return float(end_epoch)
+
+
+def hand_holds(rooms, devices, now=None):
+    """{device id as text: {"room", "until"}} for every room held by hand now, for
+    plugin_state.json and the Heating page (1.29.0). "until" is seconds since the epoch,
+    or None for a permanent setting made at the controller. `rooms` is (device id, room,
+    plan hours); `devices` maps an id to its device. A room whose device cannot be read
+    is left out, never guessed."""
+    out = {}
+    for dev_id, room, hours in rooms:
+        try:
+            end = manual_hold_end_epoch(devices[dev_id], hours, now)
+        except Exception:
+            continue
+        if end is None:
+            continue
+        out[str(int(dev_id))] = {"room": str(room),
+                                 "until": None if end == "permanent" else round(float(end), 1)}
+    return out
 
 
 def _changed_epoch(states, changed, now_epoch):
