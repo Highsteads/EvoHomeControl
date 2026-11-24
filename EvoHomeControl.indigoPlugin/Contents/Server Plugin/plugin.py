@@ -5,7 +5,15 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        24-11-2026 UK
-# Version:     1.27.1
+# Version:     1.28.0
+#
+# v1.28.0 (24-11-2026): a temperature set through Indigo (the client, the Home app, a dashboard) is held
+#   for a set time, 60 minutes unless changed (setting handHoldMinutes, 0 to 720; blank or not a number
+#   gives 60), and then the room goes back to its plan. It was held until the plan next changed, which
+#   on 24-Nov gave an En Suite 24 two minutes and a Bedroom 1 change fourteen hours. The hold runs from
+#   setpointChangedAtEpoch in real seconds, through a plan change and past midnight. 0 keeps the old
+#   rule. A change at the controller, on a valve or in the Evohome app is unchanged. An open window
+#   still beats it. heating_logic: _HAND_HOLD, coerce_hand_hold_mins, set_hand_hold_minutes.
 #
 # v1.27.1 (24-11-2026): "Radiator settings are reaching Evohome again" waits for the controller. It was
 #   logged as soon as RAMSES ESP accepted a command to send, twice on 24-Nov while the controller could
@@ -609,7 +617,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.27.1"
+PLUGIN_VERSION  = "1.28.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -960,6 +968,8 @@ class Plugin(indigo.PluginBase):
 
         run_interval = self._run_interval_mins()
         heating_logic.set_override_minutes(self._override_minutes(self.pluginPrefs))
+        heating_logic.set_hand_hold_minutes(self.pluginPrefs.get(
+            "handHoldMinutes", heating_logic.HAND_HOLD_DEFAULT_MINS))
         self._remove_orphan_prefs()
 
         # OWM API key: IndigoSecrets.py wins over PluginConfig
@@ -1110,6 +1120,8 @@ class Plugin(indigo.PluginBase):
                 self.overheat.critical_duration_cycles = (6 * 60) // run_interval
                 self.overheat.all_clear_cycles         = max(2, 30 // run_interval)
             heating_logic.set_override_minutes(self._override_minutes(values_dict))
+            heating_logic.set_hand_hold_minutes(values_dict.get(
+                "handHoldMinutes", heating_logic.HAND_HOLD_DEFAULT_MINS))
             # Force an immediate cycle so any change (interval, sources, alerts)
             # takes effect now rather than at the next scheduled cycle.
             self._request_cycle()

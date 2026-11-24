@@ -95,8 +95,10 @@ def hl():
     for d in (heating_logic._SENT, heating_logic._REFUSED, heating_logic._OVERRIDE_WARNED,
               heating_logic._REFUSAL_ANNOUNCED):
         d.clear()
+    heating_logic.set_hand_hold_minutes(heating_logic.HAND_HOLD_DEFAULT_MINS)
     yield heating_logic
     heating_logic.set_override_minutes(0)
+    heating_logic.set_hand_hold_minutes(heating_logic.HAND_HOLD_DEFAULT_MINS)
     for d in (heating_logic._SENT, heating_logic._REFUSED, heating_logic._OVERRIDE_WARNED,
               heating_logic._REFUSAL_ANNOUNCED):
         d.clear()

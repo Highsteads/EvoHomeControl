@@ -82,6 +82,12 @@
     <Field id="lbl_override" type="label" fontSize="small" alignWithControl="true">
         <Label>Each setting is sent to Evohome for this long and renewed about once an hour, so if Indigo or the plugin stops the house goes back to the timetable on the Evohome controller. Needs RAMSES ESP 1.12.0 or later. The summer 8 degree hold is always permanent.</Label>
     </Field>
+    <Field id="handHoldMinutes" type="textfield" defaultValue="60">
+        <Label>Hold a temperature set through Indigo for (minutes):</Label>
+    </Field>
+    <Field id="lbl_hand_hold" type="label" fontSize="small" alignWithControl="true">
+        <Label>When you set a room from the Indigo client, the Home app or a dashboard, the plugin leaves it alone for this long and then puts the room back on its plan. 60 is the usual value. 0 means until the room's plan next changes, or midnight if that is sooner. A room changed at the Evohome controller, on a valve or in the Evohome app is not affected.</Label>
+    </Field>
 
     <Field id="sep_snow" type="separator"/>
     <Field id="lbl_snow" type="label">

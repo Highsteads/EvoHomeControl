@@ -7,6 +7,12 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.28.0 - 24 November 2026
+
+- **A temperature set through Indigo is held for an hour.** Set a room from the Indigo client, the Home app or a dashboard and the plugin used to leave it alone until the room's plan next changed. That could be almost no time at all: I set the En Suite to 24 at 9:58 one morning, the plan changed at 10, and the plugin turned the radiator down four minutes later. The same rule held another room until midnight. The plugin now holds the temperature for an hour from the moment you set it, through any plan change and past midnight, and then puts the room back on its plan. Change it again and the hour starts again.
+- **A new setting, Hold a temperature set through Indigo for,** under HEATING CYCLE. It is 60 minutes to start with and can be anything up to 720. 0 means until the room's plan next changes, as before. A blank box, or one that does not hold a number, gives 60.
+- **What has not changed.** A room changed at the Evohome controller, on a valve's wheel or in the Evohome app is still left alone until its plan next changes, or for as long as it is set permanently. An open window or outside door still turns the radiator down whatever was set by hand.
+
 ## 1.27.1 - 24 November 2026
 
 - **"Reaching Evohome again" means it.** After the plugin has said that radiator settings are not reaching Evohome, it used to say they were reaching it again as soon as RAMSES ESP accepted the next setting to send. On 24 November that line appeared twice while my gateway could not hear the controller at all. The plugin now waits until the controller has taken a setting: the room shows the temperature that was sent, and the controller has reported on the room since. If that does not happen within ten minutes the plugin says nothing and carries on trying, as before.

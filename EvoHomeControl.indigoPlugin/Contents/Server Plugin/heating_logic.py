@@ -488,6 +488,37 @@ def last_refusal(dev):
 # as permanent, so the person never chose "for good".
 _MANUAL_ANNOUNCED = {}
 
+# A FIXED HOLD FOR A CHANGE MADE THROUGH INDIGO (1.28.0). "Until the plan next changes"
+# gave a hold of anything from seconds to a day: on 24-Nov-2026 an En Suite 24 set at
+# 09:58 was handed back at the 10am plan change and turned down four minutes later, while
+# a Bedroom 1 change the same minute was held until midnight. A change made through Indigo
+# (the client, the Home app, a dashboard) is now held for this many minutes from the moment
+# it was made, whatever the plan does meanwhile, and then the room goes back to its plan.
+# 0 keeps the old rule. A change made at the controller, on a valve or in the Evohome app
+# is unchanged: it carries its own end time, or stays for as long as it is permanent.
+HAND_HOLD_DEFAULT_MINS = 60
+HAND_HOLD_MAX_MINS     = 720
+_HAND_HOLD = {"minutes": HAND_HOLD_DEFAULT_MINS}
+
+
+def coerce_hand_hold_mins(value, default=HAND_HOLD_DEFAULT_MINS):
+    """The hold setting as whole minutes, 0 to HAND_HOLD_MAX_MINS. A Configure textfield
+    comes back as a string and can be blank or not a number: anything unreadable gives
+    the default, never an exception. bool is refused because int(True) is 1."""
+    if isinstance(value, bool):
+        return default
+    try:
+        minutes = int(float(str(value).strip()))
+    except (ValueError, TypeError, OverflowError):
+        return default
+    return max(0, min(HAND_HOLD_MAX_MINS, minutes))
+
+
+def set_hand_hold_minutes(value):
+    """Set how long a change made through Indigo is held; 0 = until the plan next changes."""
+    _HAND_HOLD["minutes"] = coerce_hand_hold_mins(value)
+    return _HAND_HOLD["minutes"]
+
 # {"reason": text} while radiator commands are being refused, so it is said once (1.25.0).
 # After a refusal, a command RAMSES ESP accepts is only on its way: "await" holds
 # {device id: (temperature, when)} until the controller is seen to have taken one of them,
@@ -631,7 +662,13 @@ def manual_hold_until(dev, hours, now=None):
     # night the clocks change a hold could end an hour early or late, and "now" was
     # compared as a local time that repeats an hour in October.
     now_epoch = _now_epoch(now)
-    end_epoch = _hold_end_epoch(_changed_epoch(states, changed, now_epoch), hours)
+    changed_epoch = _changed_epoch(states, changed, now_epoch)
+    if source == "indigo" and _HAND_HOLD["minutes"] > 0:
+        # A set length from the moment of the change (1.28.0); real seconds, so the
+        # clocks changing cannot shorten or lengthen it.
+        end_epoch = changed_epoch + _HAND_HOLD["minutes"] * 60
+    else:
+        end_epoch = _hold_end_epoch(changed_epoch, hours)
     if end_epoch is None or now_epoch >= end_epoch:
         return None
     # Returned as a house-time clock reading (naive), as before, for the log wording.

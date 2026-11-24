@@ -34,11 +34,78 @@ class TestTellingThemApart(unittest.TestCase):
     def setUp(self):
         hl._MANUAL_ANNOUNCED.clear()
         hl._SENT.clear()
+        hl.set_hand_hold_minutes(hl.HAND_HOLD_DEFAULT_MINS)
 
     def tearDown(self):
         hl._SENT.clear()
+        hl.set_hand_hold_minutes(hl.HAND_HOLD_DEFAULT_MINS)
+
+    # ---- 1.28.0: a change through Indigo is held for a set time ----
+
+    def test_a_change_through_indigo_is_held_for_an_hour_from_when_it_was_made(self):
+        dev = FakeZone()
+        hl.note_sent(dev, 8.0, when=datetime(2026, 10, 9, 7, 47, 18))
+        _through_indigo(dev, datetime(2026, 10, 9, 7, 52, 50))
+        self.assertEqual(hl.manual_hold_until(dev, PLAN, now=datetime(2026, 10, 9, 8, 0)),
+                         datetime(2026, 10, 9, 8, 52, 50))
+        self.assertIsNone(hl.manual_hold_until(dev, PLAN, now=datetime(2026, 10, 9, 8, 52, 50)))
+
+    def test_the_hour_runs_through_a_plan_change(self):
+        # 24-Nov-2026: an En Suite 24 set at 09:58 was handed back at the 10am change.
+        plan = [19] * 7 + [20] * 3 + [18] * 14
+        dev = FakeZone()
+        hl.note_sent(dev, 20.0, when=datetime(2026, 11, 24, 9, 55))
+        _through_indigo(dev, datetime(2026, 11, 24, 9, 58, 30), setpoint="24.0")
+        self.assertEqual(hl.manual_hold_until(dev, plan, now=datetime(2026, 11, 24, 10, 4)),
+                         datetime(2026, 11, 24, 10, 58, 30))
+
+    def test_the_hour_runs_past_midnight(self):
+        dev = FakeZone()
+        hl.note_sent(dev, 8.0, when=datetime(2026, 10, 9, 21, 0))
+        _through_indigo(dev, datetime(2026, 10, 9, 23, 30))
+        self.assertEqual(hl.manual_hold_until(dev, PLAN, now=datetime(2026, 10, 10, 0, 10)),
+                         datetime(2026, 10, 10, 0, 30))
+
+    def test_the_length_is_the_setting(self):
+        dev = FakeZone()
+        hl.note_sent(dev, 8.0, when=datetime(2026, 10, 9, 7, 47))
+        _through_indigo(dev, datetime(2026, 10, 9, 8, 0))
+        hl.set_hand_hold_minutes("90")
+        self.assertEqual(hl.manual_hold_until(dev, PLAN, now=datetime(2026, 10, 9, 8, 5)),
+                         datetime(2026, 10, 9, 9, 30))
+
+    def test_a_change_at_the_controller_keeps_the_old_rule(self):
+        dev = FakeZone()
+        dev.states.update({"setpointSource": "manual", "zoneMode": "temporary override",
+                           "setpointHeat": "22.0",
+                           "setpointChangedAt": datetime(2026, 10, 9, 8, 15).strftime(_STAMP)})
+        self.assertEqual(hl.manual_hold_until(dev, PLAN, now=datetime(2026, 10, 9, 12, 0)),
+                         datetime(2026, 10, 9, 22, 0))
+
+    def test_the_setting_is_read_safely(self):
+        c = hl.coerce_hand_hold_mins
+        self.assertEqual([c("60"), c(" 45 "), c("90.0"), c(0), c("0")], [60, 45, 90, 0, 0])
+        self.assertEqual([c(""), c(None), c("an hour"), c(True)], [60, 60, 60, 60])
+        self.assertEqual([c("-5"), c("100000")], [0, hl.HAND_HOLD_MAX_MINS])
+
+    def test_the_log_gives_the_end_to_the_minute(self):
+        dev = FakeZone()
+        hl.note_sent(dev, 8.0, when=datetime(2026, 10, 9, 13, 0))
+        _through_indigo(dev, datetime(2026, 10, 9, 13, 5), setpoint="22.0")
+        lines = []
+        orig = hl._log
+        hl._log = lambda msg, **k: lines.append(msg)
+        try:
+            hl.check_manual_hold("En Suite", dev, PLAN, now=datetime(2026, 10, 9, 13, 6))
+        finally:
+            hl._log = orig
+        self.assertEqual(lines, ["En Suite was set to 22 degrees by hand through Indigo, so the "
+                                 "heating plugin leaves it alone until 2:05pm."])
+
+    # ---- with the setting at 0, the rule from 1.19.0 ----
 
     def test_a_person_changing_it_after_us_is_held_until_the_plan_moves(self):
+        hl.set_hand_hold_minutes(0)
         dev = FakeZone()
         hl.note_sent(dev, 8.0, when=datetime(2026, 10, 9, 7, 47, 18))
         _through_indigo(dev, datetime(2026, 10, 9, 7, 52, 50))
@@ -47,6 +114,7 @@ class TestTellingThemApart(unittest.TestCase):
 
     def test_a_permanent_setting_through_indigo_is_not_held_for_good(self):
         # RAMSES sends Indigo's own thermostat command as permanent; nobody chose that.
+        hl.set_hand_hold_minutes(0)
         dev = FakeZone()
         hl.note_sent(dev, 8.0, when=datetime(2026, 10, 9, 21, 0))
         _through_indigo(dev, datetime(2026, 10, 9, 22, 30))
