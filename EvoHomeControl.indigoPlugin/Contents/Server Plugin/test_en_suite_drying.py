@@ -39,6 +39,24 @@ if _HERE not in sys.path:
 # runner imports first installs one, and the modules under test bind to it at
 # THEIR import, so swapping the object would leave them reading a stale stub.
 # ---------------------------------------------------------------------------
+# Scratch files go under the system temp folder for this user (TMPDIR), never /tmp: a file
+# left in /private/tmp fails Woad's exit runs (24-11-2026).
+_SCRATCH_DIR = None
+
+
+def _scratch(name):
+    global _SCRATCH_DIR
+    if _SCRATCH_DIR is None:
+        import atexit
+        import shutil
+        import tempfile
+        _SCRATCH_DIR = tempfile.mkdtemp(prefix="evohome-test-")
+        atexit.register(shutil.rmtree, _SCRATCH_DIR, ignore_errors=True)
+    import os as _os_scratch
+    return _os_scratch.path.join(_SCRATCH_DIR, name)
+
+
+
 class _ServerStub:
     @staticmethod
     def log(msg, level=None, isError=False, **kwargs):
@@ -1297,7 +1315,7 @@ class TestMeasuredOutdoorReading(unittest.TestCase):
         _indigo.devices.update(self._saved)
 
     def _weather(self, **kw):
-        return self.wx.WeatherData(api_key="", cache_path="/tmp/_evo_wx_measured.json", **kw)
+        return self.wx.WeatherData(api_key="", cache_path=_scratch("_evo_wx_measured.json"), **kw)
 
     def test_nothing_at_all_is_none_not_the_fallback(self):
         w = self._weather(bypass_temp=6.0)

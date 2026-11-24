@@ -26,6 +26,24 @@ from unittest import mock
 _indigo = sys.modules.get("indigo") or types.ModuleType("indigo")
 
 
+# Scratch files go under the system temp folder for this user (TMPDIR), never /tmp: a file
+# left in /private/tmp fails Woad's exit runs (24-11-2026).
+_SCRATCH_DIR = None
+
+
+def _scratch(name):
+    global _SCRATCH_DIR
+    if _SCRATCH_DIR is None:
+        import atexit
+        import shutil
+        import tempfile
+        _SCRATCH_DIR = tempfile.mkdtemp(prefix="evohome-test-")
+        atexit.register(shutil.rmtree, _SCRATCH_DIR, ignore_errors=True)
+    import os as _os_scratch
+    return _os_scratch.path.join(_SCRATCH_DIR, name)
+
+
+
 class _ServerStub:
     @staticmethod
     def log(msg, level="INFO", isError=False, **kwargs):
@@ -283,7 +301,7 @@ class TestOverheatIntervalClamp(unittest.TestCase):
     def _make(self, interval):
         import overheat_monitor as om
         # history_path in a throwaway temp location; load_history tolerates absence
-        return om.OverheatMonitor("/tmp/_evohome_test_overheat_history.json", run_interval_mins=interval)
+        return om.OverheatMonitor(_scratch("_evohome_test_overheat_history.json"), run_interval_mins=interval)
 
     def test_zero_interval_does_not_crash(self):
         m = self._make(0)
@@ -330,7 +348,7 @@ class TestCriticalAlertNoneOutdoor(unittest.TestCase):
 
     def test_none_outdoor_does_not_crash(self):
         import overheat_monitor as om
-        m = om.OverheatMonitor("/tmp/_evohome_test_overheat_hist2.json", run_interval_mins=5)
+        m = om.OverheatMonitor(_scratch("_evohome_test_overheat_hist2.json"), run_interval_mins=5)
         sent = {}
         m._send_pushover = lambda *a, **k: sent.setdefault("push", True)
         m._send_email    = lambda *a, **k: sent.setdefault("mail", True)
@@ -377,7 +395,7 @@ class TestWeatherUrlRebuild(unittest.TestCase):
 
     def test_set_credentials_rebuilds_url(self):
         import weather as wx
-        w = wx.WeatherData(api_key="OLDKEY", cache_path="/tmp/_evo_wx.json", lat=1.0, lon=2.0)
+        w = wx.WeatherData(api_key="OLDKEY", cache_path=_scratch("_evo_wx.json"), lat=1.0, lon=2.0)
         self.assertIn("appid=OLDKEY", w.api_url)
         self.assertIn("lat=1.0", w.api_url)
         w.set_credentials("NEWKEY", 54.9, -1.8)
@@ -395,7 +413,7 @@ class TestOverheatResetAllTracking(unittest.TestCase):
 
     def test_reset_clears_alert_state(self):
         import overheat_monitor as om
-        m = om.OverheatMonitor("/tmp/_evo_oh_reset.json", run_interval_mins=5)
+        m = om.OverheatMonitor(_scratch("_evo_oh_reset.json"), run_interval_mins=5)
         m.history["Bathroom"] = {
             "consecutive_cycles": 8, "stable_cycles": 1, "alert_sent": True,
             "all_clear_sent": False, "alert_type": "CRITICAL_IMMEDIATE",
@@ -644,7 +662,7 @@ class TestPushoverUserKey(unittest.TestCase):
             _indigo.server.getPlugin = self._saved
 
     def _monitor(self, key):
-        m = self.om.OverheatMonitor("/tmp/_evo_pushover_key.json", run_interval_mins=5)
+        m = self.om.OverheatMonitor(_scratch("_evo_pushover_key.json"), run_interval_mins=5)
         m.pushover_user_key = key
         return m
 
