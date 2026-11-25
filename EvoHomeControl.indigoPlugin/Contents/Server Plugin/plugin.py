@@ -4,8 +4,18 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        24-11-2026 UK
-# Version:     1.29.0
+# Date:        25-11-2026 UK
+# Version:     1.30.0
+#
+# v1.30.0 (25-11-2026): a timed boost holds its rooms at the boost temperature for the whole time.
+#   heating_logic.timed_boost_wins(room, active, rooms, is_away) is the one answer: where it is True the
+#   overheat and passive-warmth holds, the mild-weather cut-off and both-out no longer lower the room, and
+#   a setting made by hand BEFORE the boost started (store timed_boost_started, epoch seconds, saved and
+#   restored) is replaced by it (hand_set_before). An open window or outside door, Away and the
+#   Conservatory's shut sliding door still beat a boost, and a setting made by hand during it is still held.
+#   timed_boost_outcome: a room held by hand carries by_hand True, until, and the radiator's OWN setpoint as
+#   requested (last_setpoints is out of date for a room the check skips: on 25-Nov the Heating page said
+#   'kept at 20' and 'kept at 14' for two rooms that were at 22 by hand); blocked names Away or the shut door.
 #
 # v1.29.0 (24-11-2026): plugin_state.json carries hand_holds: {device id: {room, until}} for every room
 #   being left alone because somebody set it by hand, until in seconds since the epoch or null for a
@@ -586,15 +596,38 @@ BOOST_HELD_REASONS = {
 }
 
 
-def boost_outcome(rooms, last_setpoints, last_messages, targets, at):
+def _boost_started(saved, expiry, hours):
+    """When a restored timed boost started, seconds since the epoch: the saved moment,
+    or for a state file written before 1.30.0 the expiry less the boost's length."""
+    try:
+        if saved is not None and not isinstance(saved, bool) and float(saved) > 0:
+            return float(saved)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return expiry.timestamp() - float(hours) * 3600.0
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def boost_outcome(rooms, last_setpoints, last_messages, targets, at, hand=None, blocked=None):
     """Per-room result of the latest heating check while a timed boost runs.
 
     rooms: (dev_id, room_name) pairs. Returns {str(dev_id): {...}} with the room,
     its boost target, the temperature this plugin last asked for, and a reason
     when that is below the target ("" when the room got its boost). A room the
     cycle has not reached yet has requested None. Pure, so it can be tested.
+
+    hand (1.30.0): {str(dev_id): {"setpoint", "until"}} for a room somebody set by hand
+    after the boost started. The heating check leaves such a room alone, so what this
+    plugin last asked for is out of date: the entry carries the radiator's own setting,
+    by_hand True and when the hold ends. blocked: {room: reason} for a room the boost
+    cannot reach (Away, the Conservatory's shut door), which names the reason whatever
+    message the check recorded.
     """
     out = {}
+    hand = hand or {}
+    blocked = blocked or {}
     for dev_id, room in rooms:
         if room not in targets:
             continue
@@ -602,10 +635,22 @@ def boost_outcome(rooms, last_setpoints, last_messages, targets, at):
         sp = last_setpoints.get(room)
         requested = round(float(sp), 1) if sp is not None else None
         held = ""
-        if requested is not None and requested < target - 0.05:
-            held = BOOST_HELD_REASONS.get(last_messages.get(room), "the heating rules")
-        out[str(dev_id)] = {"room": room, "target": target, "requested": requested,
-                            "held": held, "at": at}
+        entry = {"room": room, "target": target, "at": at, "by_hand": False}
+        mine = hand.get(str(dev_id))
+        if mine is not None:
+            try:
+                requested = round(float(mine.get("setpoint")), 1)
+            except (TypeError, ValueError):
+                requested = None
+            held = "it was set by hand"
+            entry["by_hand"] = True
+            entry["until"] = mine.get("until")
+        elif requested is not None and requested < target - 0.05:
+            held = blocked.get(room) or BOOST_HELD_REASONS.get(
+                last_messages.get(room), "the heating rules")
+        entry["requested"] = requested
+        entry["held"] = held
+        out[str(dev_id)] = entry
     return out
 
 
@@ -623,7 +668,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.29.0"
+PLUGIN_VERSION  = "1.30.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -879,6 +924,7 @@ class Plugin(indigo.PluginBase):
         self.store["timed_boost_active"]  = False
         self.store["timed_boost_expiry"]  = None   # datetime object or None
         self.store["timed_boost_hours"]   = 0      # 1 or 2
+        self.store["timed_boost_started"] = None   # seconds since the epoch, or None
 
         # Whole-house summer shut-off: 24h force-on override state.
         # When active, the seasonal lockout yields and normal heating resumes
@@ -1404,6 +1450,7 @@ class Plugin(indigo.PluginBase):
             run_interval_mins    = run_interval,
             timed_boost_active   = self.store["timed_boost_active"],
             timed_boost_rooms    = schedules.TIMED_BOOST_ROOMS,
+            timed_boost_since    = self.store.get("timed_boost_started"),
             cancel_boost_holds   = self.store.setdefault("cancel_boost_holds", {}),
             force_log_override   = force_hourly,
             # Quiet by default: the hourly table still goes to the plugin's own
@@ -1564,10 +1611,37 @@ class Plugin(indigo.PluginBase):
             return
         rooms = [(dev_id, room) for dev_id, room, _plan in _room_plans()
                  if room in schedules.TIMED_BOOST_ROOMS]
+        hand, blocked = {}, {}
+        holds = self._current_hand_holds()
+        for dev_id, room in rooms:
+            if self.store.get("is_away"):
+                blocked[room] = "away mode is on"
+            elif not heating_logic.timed_boost_wins(room, True, schedules.TIMED_BOOST_ROOMS, False):
+                blocked[room] = "its sliding door is shut"
+            held = holds.get(str(int(dev_id)))
+            if held is not None:
+                try:
+                    setpoint = float(indigo.devices[dev_id].states.get("setpointHeat"))
+                except Exception:
+                    setpoint = None
+                hand[str(dev_id)] = {"setpoint": setpoint, "until": held.get("until")}
         self.store["timed_boost_outcome"] = boost_outcome(
             rooms, self.store.get("last_setpoints", {}), self.store.get("last_messages", {}),
-            schedules.BOOST_TARGETS, _now_aware().isoformat())
+            schedules.BOOST_TARGETS, _now_aware().isoformat(), hand=hand, blocked=blocked)
         self._save_state()
+
+    def _current_hand_holds(self):
+        """Rooms held by hand now. A setting made before a running timed boost started
+        is not a hold where the boost decides the room: the boost has replaced it."""
+        since, winners = None, ()
+        if self.store.get("timed_boost_active"):
+            since = self.store.get("timed_boost_started")
+            winners = {room for room in schedules.TIMED_BOOST_ROOMS
+                       if heating_logic.timed_boost_wins(
+                           room, True, schedules.TIMED_BOOST_ROOMS,
+                           bool(self.store.get("is_away")))}
+        return heating_logic.hand_holds(_room_plans(), indigo.devices,
+                                        boost_since=since, boost_rooms=winners)
 
     def _start_timed_boost(self, hours):
         """Activate timed boost for 1 or 2 hours on TIMED_BOOST_ROOMS."""
@@ -1581,6 +1655,7 @@ class Plugin(indigo.PluginBase):
         self.store["timed_boost_active"] = True
         self.store["timed_boost_expiry"] = expiry
         self.store["timed_boost_hours"]  = hours
+        self.store["timed_boost_started"] = time.time()
         self.store["timed_boost_outcome"] = {}
         rooms  = ", ".join(sorted(schedules.TIMED_BOOST_ROOMS))
         _log(f"[TimedBoost] {hours}h boost started — "
@@ -1597,6 +1672,7 @@ class Plugin(indigo.PluginBase):
             self.store["timed_boost_active"] = False
             self.store["timed_boost_expiry"] = None
             self.store["timed_boost_hours"] = 0
+            self.store["timed_boost_started"] = None
             self.store["timed_boost_outcome"] = {}
             if manual:
                 now = time.time()
@@ -1797,7 +1873,7 @@ class Plugin(indigo.PluginBase):
         """Save which rooms are being left alone because somebody set them by hand, and
         until when, so the Heating page can say so on each tile (1.29.0). Written only
         when it changes: this runs every tick."""
-        holds = heating_logic.hand_holds(_room_plans(), indigo.devices)
+        holds = self._current_hand_holds()
         if holds != self.store.get("hand_holds", {}):
             self.store["hand_holds"] = holds
             self._save_state()
@@ -3141,6 +3217,9 @@ class Plugin(indigo.PluginBase):
                         self.store["timed_boost_active"] = True
                         self.store["timed_boost_expiry"] = expiry
                         self.store["timed_boost_hours"]  = st.get("timed_boost_hours", 1)
+                        self.store["timed_boost_started"] = _boost_started(
+                            st.get("timed_boost_started"), expiry,
+                            self.store["timed_boost_hours"])
                         _log(f"[TimedBoost] Restored from state — expires {_local_clock(expiry)}")
                 except (ValueError, TypeError):
                     # Malformed/legacy value, or a tz-aware string compared to a
@@ -3264,6 +3343,7 @@ class Plugin(indigo.PluginBase):
             "timed_boost_active":           self.store["timed_boost_active"],
             "timed_boost_expiry":           expiry.isoformat() if expiry else None,
             "timed_boost_hours":            self.store.get("timed_boost_hours", 0),
+            "timed_boost_started":          self.store.get("timed_boost_started"),
             "timed_boost_outcome":          self.store.get("timed_boost_outcome", {}),
             "hand_holds":                   self.store.get("hand_holds", {}),
             "summer_force_active":          self.store.get("summer_force_active", False),

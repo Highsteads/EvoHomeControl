@@ -49,14 +49,20 @@ A room with a window or outside door open is not boosted either. It keeps its op
 
 ## Timed boost
 
-A timed boost heats the **Conservatory** (only while its sliding door is open), **Dining Room**, **Hall Kitchen**, **Living Room Door** and **Living Room Front** to 22 degrees for one hour or two, then ends by itself. Start it from **Plugins → EvoHome Heating Controller → Start Timed Boost (1 hour)** or **(2 hours)**, or from the actions of the same names, which you can put on a control page button.
+A timed boost sets the **Conservatory** (only while its sliding door is open), **Dining Room**, **Hall Kitchen**, **Living Room Door** and **Living Room Front** to 22 degrees for one hour or two, then ends by itself. Start it from **Plugins → EvoHome Heating Controller → Start Timed Boost (1 hour)** or **(2 hours)**, or from the actions of the same names, which you can put on a control page button.
 
 - **Cancel Timed Boost** ends it early and sets all twelve radiators to 12 degrees until each room's next scheduled temperature change. The hold survives a restart, and a new timed boost clears it. Open-window protection still wins. A room whose plan has no temperature changes resumes its plan at midnight.
 - When it ends, the Event Log lists the temperature each room goes back to.
 - A timed boost carries on after the plugin or Indigo restarts, as long as its time has not run out.
 - It does not start during the summer shut-off. Use **Force Heating On (24 hours)** first if you need the heat.
 
-The boost starts within a second or two: the radiators are sent their new temperature straight away, a few seconds apart. A room that is already above 22 degrees, or has a window or outside door open, is not boosted. A room below 22 degrees is boosted even if its normal plan had started turning it down early to stop it overshooting. The boost does not stack on top of the Boost variable. After each heating check the plugin saves what each boosted room was asked for, and why a room got less, which the Dashboards Heating page shows room by room (1.26.0).
+The boost starts within a second or two: the radiators are sent their new temperature straight away, a few seconds apart. Every boosted room is set to 22 degrees and stays there until the boost ends (1.30.0). A room that is already warm is not turned down, because its valve shuts by itself at 22 degrees, and a mild day outside or both-out mode does not lower it either.
+
+Three things stop a room being boosted: a window or outside door open in that room, away mode, and, for the Conservatory, its sliding door being shut.
+
+A temperature you set by hand before starting the boost is replaced by the boost. One you set by hand while the boost is running is left alone for its usual hold time.
+
+The boost does not stack on top of the Boost variable. After each heating check the plugin saves what each boosted room is set to, and for a room that is not boosted the reason, which the Dashboards Heating page shows room by room.
 
 ## Snow boost
 

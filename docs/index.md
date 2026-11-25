@@ -20,7 +20,7 @@ I wrote this plugin for my own house, and it shows. The twelve rooms, the window
 - **Adds a little heat when snow is forecast,** from the OpenWeatherMap forecast.
 - **Turns a radiator down when its window or door is open,** and back up when it shuts.
 - **Stops rooms overheating.** If a room is getting too warm, its radiator is turned down before it overshoots, and a Pushover message and an email can go out if one stays well above where it should be. Those messages are switched off in this version.
-- **Boosts the living areas** — the dining room, the living room and the hall kitchen — by two degrees for one or two hours from a menu item or a control page button, then puts them back.
+- **Boosts the living areas** — the dining room, the living room and the hall kitchen — to 22 degrees for one or two hours from a menu item or a control page button, then puts them back.
 - **Knows when you are away or out,** from Indigo variables, and holds the house at a safe, cheaper temperature.
 - **Shuts the heating off for summer** between dates you choose, with a one-click way to have it back for 24 hours.
 - **Looks after the En Suite** — a warm room from 6am on winter mornings with the underfloor heating on, and a morning drying run in summer to deal with wet towels.

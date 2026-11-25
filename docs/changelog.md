@@ -7,6 +7,13 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.30.0 - 25 November 2026
+
+- **A timed boost holds 22 degrees for the whole time.** Until now a boosted room that was already warm, from the sun or from the rest of the house, was turned down to 14 or 16 degrees during the boost, and a mild day outside or both-out mode could lower it as well. The valve shuts by itself at 22 degrees, so turning the setting down gained nothing and made it hard to tell what a room was set to. A boosted room is now set to 22 degrees and stays there until the boost ends.
+- **A boost replaces a temperature set by hand before it.** Pressing boost is the newer instruction, so it wins. A temperature you set by hand while the boost is running is still left alone for its hold time.
+- **Three things still stop a room being boosted:** an open window or outside door, away mode, and the Conservatory's sliding door being shut.
+- **The dashboard is told what a room is really set to.** For a room set by hand during a boost the plugin now records the radiator's own setting and when the hold ends. It used to record its own last request, which could be an hour out of date. My Dashboards plugin, 3.73.0 or later, shows it.
+
 ## 1.29.0 - 24 November 2026
 
 - **Held rooms are recorded for the dashboard.** Twice a minute the plugin notes which rooms it is leaving alone because somebody set them by hand, and until when. My Dashboards plugin, 3.72.0 or later, shows this on each radiator tile, for example *set by hand, held until 2:05pm*. Nothing else about the heating changes.

@@ -684,16 +684,54 @@ def manual_hold_end_epoch(dev, hours, now=None):
     return float(end_epoch)
 
 
-def hand_holds(rooms, devices, now=None):
+def timed_boost_wins(room_name, timed_boost_active, timed_boost_rooms, is_away):
+    """True when a running timed boost decides this room's temperature (1.30.0).
+
+    A timed boost is a person asking for the boost temperature for a set time, so it
+    beats the overheat and passive-warmth holds, the mild-weather cut-off, both-out and
+    any setting made by hand before it started. Three things still beat it: an open
+    window or outside door (handled before this is asked), Away, and the Conservatory's
+    sliding door being shut. One answer for the heating check and for the Heating page."""
+    if not timed_boost_active or room_name not in (timed_boost_rooms or ()):
+        return False
+    if room_name not in schedules.BOOST_TARGETS or is_away:
+        return False
+    return room_name != "Conservatory" or _slide_door_open()
+
+
+def hand_set_before(dev, since_epoch, now=None):
+    """True when the zone's setpoint last changed before since_epoch (seconds since the
+    epoch). A timed boost started later is the newer instruction, so it replaces that
+    setting; a change made after the boost started is the person's and is held as usual.
+    No start time, or an unreadable change time, gives False: the hold stands."""
+    try:
+        since = float(since_epoch)
+    except (TypeError, ValueError):
+        return False
+    if since <= 0:
+        return False
+    try:
+        changed = dt.strptime(str(dev.states.get("setpointChangedAt", ""))[:19],
+                              "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return False
+    return _changed_epoch(dev.states, changed, _now_epoch(now)) < since
+
+
+def hand_holds(rooms, devices, now=None, boost_since=None, boost_rooms=()):
     """{device id as text: {"room", "until"}} for every room held by hand now, for
     plugin_state.json and the Heating page (1.29.0). "until" is seconds since the epoch,
     or None for a permanent setting made at the controller. `rooms` is (device id, room,
     plan hours); `devices` maps an id to its device. A room whose device cannot be read
-    is left out, never guessed."""
+    is left out, never guessed. A room in boost_rooms whose setting was made before
+    boost_since is not held: the timed boost has replaced it (1.30.0)."""
     out = {}
     for dev_id, room, hours in rooms:
         try:
             end = manual_hold_end_epoch(devices[dev_id], hours, now)
+            if (end is not None and room in boost_rooms
+                    and hand_set_before(devices[dev_id], boost_since, now)):
+                end = None
         except Exception:
             continue
         if end is None:
@@ -1082,6 +1120,20 @@ def floor_heat_off(reason="", log_buffer=None, now=None):
 # ---------------------------------------------------------------------------
 # OVERHEAT DETECTION
 # ---------------------------------------------------------------------------
+
+def _release_overheat_hold(overheat_monitor, room_name, current_temp):
+    """Forget a coast or overheat hold left by the earlier target, so a timed boost
+    starts clean and nothing stale is carried past it. Never raises."""
+    try:
+        overheat_monitor.initialize_room(room_name)
+        room_data = overheat_monitor.history[room_name]
+        room_data["is_coasting"]        = False
+        room_data["off_since_cycle"]    = 0
+        room_data["consecutive_cycles"] = 0
+        room_data["temp_history"]       = [current_temp]
+    except Exception:
+        pass
+
 
 def check_overheating(current_temp, target_temp, room_name,
                       overheat_monitor, run_interval_mins=5, boost=False):
@@ -1653,6 +1705,9 @@ def process_room_temperature(
         overheat_monitor=None, run_interval_mins=5,
         # Timed boost
         timed_boost_active=False, timed_boost_rooms=None, cancel_boost_holds=None,
+        # When the timed boost started, seconds since the epoch (1.30.0): a setting made
+        # by hand before then is replaced by the boost.
+        timed_boost_since=None,
         # Floor heat restore guard — only True when morning schedule is active
         floor_heat_restore_enabled=False,
         # Override the temperature baseline used for overheat detection.
@@ -1676,7 +1731,11 @@ def process_room_temperature(
     Sends a W 2349 permanent-override setpoint to the RAMSES ESP thermostat
     device (ha_device_id). All state is injected; no module globals are used.
 
-    Priority order (highest wins, subject to overheat exception):
+    A timed boost (1.30.0) holds its rooms at the boost temperature for the whole time:
+    only an open window or outside door, Away and the Conservatory's shut sliding door
+    beat it. See timed_boost_wins().
+
+    Priority order otherwise (highest wins, subject to overheat exception):
       1. Overheat prevention (message 17) — always applies unless windows/doors override
       2. Special room rules (conservatory, dining room, en suite morning)
       3. Away mode (message 8 / 15 freeze protection)
@@ -1770,7 +1829,13 @@ def process_room_temperature(
 
         # Changed by hand on the controller, a valve or the app: leave it alone.
         plan_hours = guest_schedule if (is_guest and guest_schedule) else room_schedule
-        if check_manual_hold(room_name, dev_radiator, plan_hours, log_buffer=log_buffer):
+        # A timed boost started after that change is the newer instruction (1.30.0).
+        boost_wins = timed_boost_wins(room_name, timed_boost_active, timed_boost_rooms, is_away)
+        if boost_wins and hand_set_before(dev_radiator, timed_boost_since):
+            if _MANUAL_ANNOUNCED.pop(room_name, None) is not None:
+                _log(f"{room_name}: the timed boost replaces the setting made by hand.",
+                     log_buffer=log_buffer)
+        elif check_manual_hold(room_name, dev_radiator, plan_hours, log_buffer=log_buffer):
             return
 
         # An old reading is as bad as a missing one: skip the zone and leave the
@@ -1849,10 +1914,17 @@ def process_room_temperature(
         # on a 22 degC boost is not falsely suppressed.
         if boost_applies:
             overheat_target = schedules.BOOST_TARGETS[room_name]
-        is_overheating, adjusted_temp, overheat_amt = check_overheating(
-            dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins,
-            boost=boost_applies
-        )
+        if boost_wins:
+            # A timed boost asks for its temperature for the whole time (1.30.0). The
+            # valve shuts by itself at 22, so turning the setting down as well only made
+            # the Heating page show 14 or 16 in a room that had been boosted.
+            _release_overheat_hold(overheat_monitor, room_name, dev_temp)
+            is_overheating, adjusted_temp, overheat_amt = False, overheat_target, 0.0
+        else:
+            is_overheating, adjusted_temp, overheat_amt = check_overheating(
+                dev_temp, overheat_target, room_name, overheat_monitor, run_interval_mins,
+                boost=boost_applies
+            )
         is_passive = False
         if is_overheating:
             new_temp        = adjusted_temp
@@ -1919,6 +1991,7 @@ def process_room_temperature(
     # 22 (En Suite morning) is exempt too (1.20.0): the shower is every day.
     if (current_outdoor_temp is not None and
             current_outdoor_temp > OUTDOOR_TEMP_TRIGGER and
+            not boost_wins and
             message not in (17, 23, 5, 22, 25)):
         new_temp = RADIATORS_OFF_TEMP
         message  = 7
@@ -1938,7 +2011,10 @@ def process_room_temperature(
     # 12 instead of 16 in a frost. An open window's setting (1-4, 20, 21) and the
     # mild-weather cut-off (7) are decisions of their own, and relabelling them 13
     # also made the next cycle log "window closed" for a window still open.
-    if is_both_out and message not in (17, 23, 5, 25, 7, 8, 15, 1, 2, 3, 4, 20, 21):
+    # A timed boost is exempt (1.30.0): pressed from away to warm the house for coming
+    # home, it gave 18 where 22 was asked.
+    if (is_both_out and not (boost_wins and message == 12)
+            and message not in (17, 23, 5, 25, 7, 8, 15, 1, 2, 3, 4, 20, 21)):
         new_temp += BOTH_OUT_OFFSET
         message   = 13
 
