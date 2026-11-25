@@ -47,8 +47,8 @@ All three can be kept in the shared settings file instead, as described below.
 
 | Setting | What it does |
 |---|---|
-| **Switch the floor on at** | When the floor comes on each morning, from 2am to 6am. 4am to start with. 6am means with the radiator's morning schedule and no early start. |
-| **Heat the floor to (degrees)** | What the floor thermostat is set to, a whole number from 5 to 27, read by the thermostat's own floor sensor. 20 to start with. A blank box, or one that does not hold a number, gives 20. |
+| **Switch the floor on at** | When the floor comes on each morning, from 2am to 6am. 6am to start with, which means with the radiator's morning schedule. An earlier time brings the floor alone on first. |
+| **Heat the floor to (degrees)** | What the floor thermostat is set to, a whole number from 5 to 27, read by the thermostat's own floor sensor. 14 to start with, enough to take the chill off the tiles. A blank box, or one that does not hold a number, gives 14. |
 
 The floor goes off at 10am or when the window is opened. The [En Suite](en-suite.md) page explains it in full.
 

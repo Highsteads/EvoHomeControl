@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.31.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.31.1 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -19,7 +19,7 @@ This plugin lets [Indigo](https://www.indigodomo.com) run the heating in a house
 - **Boosts the living areas** by two degrees for one or two hours, then puts them back.
 - **Away and both out modes,** switched by Indigo variables, hold the house at a safe, cheaper temperature.
 - **Shuts the heating off for summer** between dates you choose, with a menu item to have it back for 24 hours.
-- **Looks after the En Suite** — a warm room from 6am on winter mornings, with the underfloor heating on from 4am, and a morning drying run on cold summer mornings to deal with wet towels.
+- **Looks after the En Suite** — a warm room from 6am on winter mornings with the underfloor heating on, and a morning drying run on cold summer mornings to deal with wet towels.
 
 ## Which houses it works with
 
@@ -48,7 +48,9 @@ The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each
 
 ## What's new
 
-**v1.31.0** - The En Suite underfloor heating now comes on at 4am, two hours before the morning schedule, and heats to 20 degrees where it used to stop at 14. From cold the floor needs about two hours to warm, and at 14 it was colder than the room. Both the start time and the temperature are settings.
+**v1.31.1** - The En Suite underfloor heating is back to 6am and 14 degrees, which is all a floor that only takes the chill off the tiles needs. The two settings from 1.31.0 stay.
+
+**v1.31.0** - The En Suite underfloor heating's start time and temperature are now settings.
 
 **v1.30.0** - A timed boost now holds its rooms at 22 degrees for the whole hour or two. A room that is already warm is no longer turned down during the boost, and a temperature set by hand before the boost started is replaced by it. Only an open window or outside door, away mode and the Conservatory's shut sliding door still stop a room being boosted.
 

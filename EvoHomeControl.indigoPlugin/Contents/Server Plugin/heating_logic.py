@@ -1040,19 +1040,18 @@ def _contact_is_open(dev_id):
 # So: ON = power on, mode Heat, setpoint FLOOR_HEAT_ON_TEMP. OFF = mode Off. The switch
 # is never turned off; with it off the thermostat has no power, so the floor is off.
 #
-# 1.31.0 (CliveS, 25-11-2026: "start the floor at 4am and lift its limit"). Measured over
-# nine mornings, 17 to 25-11-2026, 0 to 4 degC outside: the floor probe read 7 to 8 degC
-# at 6am, took two hours to reach the old 14 degC setting, and then sat there, colder than
-# the room air (about 18), so it gave the room nothing. The radiator was calling for heat
-# all night and the room still read 19 at 9:30 against a 20 target. So the floor now
-# starts at EN_SUITE_FLOOR_START_HOUR and heats to FLOOR_HEAT_ON_TEMP; both are settings
-# and these are only their defaults. 20 is a first step, not a measured answer: at 1:30pm
-# that day the probe read 9.5 with the air at 17.2, so it may read several degrees low,
-# and 20 stays under the usual 27 degC floor limit even if it reads 5 low.
-FLOOR_HEAT_ON_TEMP     = 20.0
+# 1.31.0 made the start hour and the temperature settings and moved them to 4am and 20;
+# 1.31.1 (CliveS, the same afternoon, 25-11-2026) put the defaults back to 6am and 14:
+# "I do not need the floor being changed from what it is at present, it is only to take
+# off the chill from the tiles". MEASURED that day from the En Suite Floor Heating Switch
+# (Fibaro FGS223, 22 readings on 24 and 25-11-2026): the mat draws 173 to 182 W, and a
+# 6am to 10am morning uses 0.4 to 0.6 kWh (ten days, 16 to 25-11). At 180 W it cannot
+# warm the room, only the tiles, so an earlier start or a higher setting buys nothing.
+# The settings stay for anyone whose floor is different.
+FLOOR_HEAT_ON_TEMP     = 14.0
 FLOOR_HEAT_MIN_TEMP    = 5.0
 FLOOR_HEAT_MAX_TEMP    = 27.0
-EN_SUITE_FLOOR_START_HOUR = 4    # 6 = with the morning schedule, no early start
+EN_SUITE_FLOOR_START_HOUR = 6    # 6 = with the morning schedule, no early start
 EN_SUITE_MORNING_START_HOUR = 6
 FLOOR_OFF_RESEND_SECS  = 600    # an Off the thermostat has not confirmed is resent this often
 _FLOOR = {"off_sent_at": 0.0, "on_temp": FLOOR_HEAT_ON_TEMP,

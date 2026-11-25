@@ -7,12 +7,14 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.31.1 - 25 November 2026
+
+- **The En Suite underfloor heating is back to 6am and 14 degrees.** 1.31.0 moved it to 4am and 20 degrees. The floor is there to take the chill off the tiles, not to heat the room, and at about 180 watts it could not heat the room anyway, so the earlier start and higher temperature were not wanted. The two settings stay, set to 6am and 14.
+
 ## 1.31.0 - 25 November 2026
 
-- **The En Suite underfloor heating comes on at 4am.** It used to come on at 6am with the radiator's morning schedule. From cold the floor warms about 3 degrees an hour, so on a frosty morning it was still warming up at 8am. It now has two hours' start. The radiator's 20 degrees still runs from 6am to 10am.
-- **The floor heats to 20 degrees, where it used to stop at 14.** At 14 the floor was colder than the room, so once it got there it added nothing. Over nine mornings at 0 to 4 degrees outside the room reached about 19 by 9:30am against its 20 degree target, with the radiator on all night.
-- **Both are settings.** **Switch the floor on at** offers 2am to 6am, and **Heat the floor to** takes 5 to 27 degrees. Choosing 6am gives the old timing.
-- **The same things stop it.** Away mode, an open En Suite window and the summer shut-off keep the early floor off, as they do the morning. If the morning does not start at 6am, the floor is switched off then.
+- **The En Suite underfloor heating's start time and temperature are settings.** **Switch the floor on at** offers 2am to 6am, and **Heat the floor to** takes 5 to 27 degrees. This version set them to 4am and 20; 1.31.1 put them back to 6am and 14.
+- **An early floor start stops for the same things as the morning.** Away mode, an open En Suite window and the summer shut-off keep it off. If the morning does not start at 6am, the floor is switched off then.
 
 ## 1.30.0 - 25 November 2026
 

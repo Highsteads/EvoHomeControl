@@ -5,7 +5,13 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        25-11-2026 UK
-# Version:     1.31.0
+# Version:     1.31.1
+#
+# v1.31.1 (25-11-2026): the En Suite floor is back to 6am and 14 degrees (CliveS: "I do not need the
+#   floor being changed from what it is at present, it is only to take off the chill from the tiles").
+#   Only the two defaults changed: heating_logic FLOOR_HEAT_ON_TEMP 14 and EN_SUITE_FLOOR_START_HOUR 6,
+#   and the same in PluginConfig.xml. The settings and the early-start code of 1.31.0 stay, unused at
+#   these values. Measured from the floor's switch: the mat draws about 180 W, 0.4 to 0.6 kWh a morning.
 #
 # v1.31.0 (25-11-2026): the En Suite floor starts at 4am and heats to 20 (CliveS: "start the floor at
 #   4am and lift its limit"). Measured 17 to 25-11, 0 to 4 degC outside: the floor read 7 to 8 at 6am,
@@ -678,7 +684,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.31.0"
+PLUGIN_VERSION  = "1.31.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -2596,8 +2602,8 @@ class Plugin(indigo.PluginBase):
           - Also turned OFF inside process_room_temperature() when window opens
 
         1.31.0: the floor alone starts earlier, at heating_logic.floor_start_hour()
-        (4am unless changed), because from cold it needs two hours to warm up. The
-        radiator's morning still starts at 6am. store["en_suite_floor_early"] records
+        when that setting is earlier than 6 (it is 6 unless changed, so by default
+        there is no early start). The radiator's morning always starts at 6am. store["en_suite_floor_early"] records
         that the floor was switched on ahead of the morning, so it is switched off
         again if the morning then does not start (away, a cancelled day) or the
         plugin was not running at 6am.
@@ -2746,7 +2752,7 @@ class Plugin(indigo.PluginBase):
 
     def _apply_floor_settings(self, prefs):
         """Hand the two floor settings to heating_logic; blank or wrong gives the
-        defaults (20 degrees from 4am)."""
+        defaults (14 degrees from 6am, with the morning schedule)."""
         heating_logic.set_floor_heat_temp(prefs.get(
             "enSuiteFloorTemp", heating_logic.FLOOR_HEAT_ON_TEMP))
         heating_logic.set_floor_start_hour(prefs.get(

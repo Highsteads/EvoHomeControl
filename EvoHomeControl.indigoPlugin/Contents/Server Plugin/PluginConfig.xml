@@ -93,7 +93,7 @@
     <Field id="lbl_floor" type="label">
         <Label>En Suite underfloor heating</Label>
     </Field>
-    <Field id="enSuiteFloorStartHour" type="menu" defaultValue="4">
+    <Field id="enSuiteFloorStartHour" type="menu" defaultValue="6">
         <Label>Switch the floor on at:</Label>
         <List>
             <Option value="2">2am</Option>
@@ -103,11 +103,11 @@
             <Option value="6">6am, with the morning schedule</Option>
         </List>
     </Field>
-    <Field id="enSuiteFloorTemp" type="textfield" defaultValue="20">
+    <Field id="enSuiteFloorTemp" type="textfield" defaultValue="14">
         <Label>Heat the floor to (degrees):</Label>
     </Field>
     <Field id="lbl_floor_help" type="label" fontSize="small" alignWithControl="true">
-        <Label>The floor goes off at 10am, or when the En Suite window is opened. From cold it warms about 3 degrees an hour, so an early start gives it time before the morning shower. The temperature is what the floor thermostat's own sensor reads, a whole number from 5 to 27; 20 is the usual value.</Label>
+        <Label>The floor goes off at 10am, or when the En Suite window is opened. 6am and 14 degrees are the usual values, enough to take the chill off the tiles. The temperature is what the floor thermostat's own sensor reads, a whole number from 5 to 27.</Label>
     </Field>
 
     <Field id="sep_snow" type="separator"/>
