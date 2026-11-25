@@ -216,13 +216,13 @@ class TestGlobalBoostAndOverheat(_Rooms):
 
     @mock.patch.object(hl, "_slide_door_open", return_value=True)
     @mock.patch.dict(hl.schedules.BOOST_TARGETS, {"Conservatory": 22.0})
-    def test_a_room_already_past_its_boosted_target_is_still_turned_down(self, _slide):
+    def test_a_room_already_past_its_boosted_target_stays_at_its_boost(self, _slide):
         monitor = om.OverheatMonitor(os.path.join(tempfile.mkdtemp(), "h.json"))
         monitor.initialize_room("Conservatory")
         monitor.history["Conservatory"]["temp_history"] = [22.2, 22.4]
         self._room(temp=22.6, is_boost=True, overheat_monitor=monitor)
-        # Judged against the boosted 22, so backed off from there.
-        self.assertEqual(self.written, [22.0 - hl.OVERHEAT_BACKOFF])
+        # 1.32.0: the Boost variable holds its temperature, as a timed boost does.
+        self.assertEqual(self.written, [22.0])
 
 
 # ===========================================================================

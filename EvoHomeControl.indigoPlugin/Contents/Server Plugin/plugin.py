@@ -5,7 +5,14 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        25-11-2026 UK
-# Version:     1.31.1
+# Version:     1.32.0
+#
+# v1.32.0 (25-11-2026): the Boost variable follows the timed boost's rules (CliveS: "make the global Boost
+#   variable follow the same rules"). heating_logic.boost_wins(room, is_boost, timed_active, timed_rooms,
+#   is_away) is now the one answer (timed_boost_wins is kept as a wrapper). store boost_started = when the
+#   variable went to yes (_note_boost_variable, saved and restored; unknown after a start with nothing
+#   saved, and then a hand setting stands). boost_since_for picks the later start that applies to a room.
+#   hand_holds takes replaced_before={room: epoch}.
 #
 # v1.31.1 (25-11-2026): the En Suite floor is back to 6am and 14 degrees (CliveS: "I do not need the
 #   floor being changed from what it is at present, it is only to take off the chill from the tiles").
@@ -684,7 +691,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.31.1"
+PLUGIN_VERSION  = "1.32.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -951,6 +958,8 @@ class Plugin(indigo.PluginBase):
         self.store["timed_boost_expiry"]  = None   # datetime object or None
         self.store["timed_boost_hours"]   = 0      # 1 or 2
         self.store["timed_boost_started"] = None   # seconds since the epoch, or None
+        self.store["boost_started"]       = None   # when the Boost variable went to yes
+        self.store["boost_var_read"]      = False  # True once the variable has been read
 
         # Whole-house summer shut-off: 24h force-on override state.
         # When active, the seasonal lockout yields and normal heating resumes
@@ -1482,6 +1491,7 @@ class Plugin(indigo.PluginBase):
             timed_boost_active   = self.store["timed_boost_active"],
             timed_boost_rooms    = schedules.TIMED_BOOST_ROOMS,
             timed_boost_since    = self.store.get("timed_boost_started"),
+            boost_since          = self.store.get("boost_started"),
             cancel_boost_holds   = self.store.setdefault("cancel_boost_holds", {}),
             force_log_override   = force_hourly,
             # Quiet by default: the hourly table still goes to the plugin's own
@@ -1665,15 +1675,22 @@ class Plugin(indigo.PluginBase):
     def _current_hand_holds(self):
         """Rooms held by hand now. A setting made before a running timed boost started
         is not a hold where the boost decides the room: the boost has replaced it."""
-        since, winners = None, ()
-        if self.store.get("timed_boost_active"):
-            since = self.store.get("timed_boost_started")
-            winners = {room for room in schedules.TIMED_BOOST_ROOMS
-                       if heating_logic.timed_boost_wins(
-                           room, True, schedules.TIMED_BOOST_ROOMS,
-                           bool(self.store.get("is_away")))}
+        is_boost = bool(self.store.get("is_boost"))
+        timed    = bool(self.store.get("timed_boost_active"))
+        replaced = {}
+        if is_boost or timed:
+            for room in schedules.BOOST_TARGETS:
+                if not heating_logic.boost_wins(room, is_boost, timed,
+                                                schedules.TIMED_BOOST_ROOMS,
+                                                bool(self.store.get("is_away"))):
+                    continue
+                since = heating_logic.boost_since_for(
+                    room, is_boost, self.store.get("boost_started"), timed,
+                    schedules.TIMED_BOOST_ROOMS, self.store.get("timed_boost_started"))
+                if since is not None:
+                    replaced[room] = since
         return heating_logic.hand_holds(_room_plans(), indigo.devices,
-                                        boost_since=since, boost_rooms=winners)
+                                        replaced_before=replaced)
 
     def _start_timed_boost(self, hours):
         """Activate timed boost for 1 or 2 hours on TIMED_BOOST_ROOMS."""
@@ -2884,10 +2901,27 @@ class Plugin(indigo.PluginBase):
     # Mode variable reading
     # -----------------------------------------------------------------------
 
+    def _note_boost_variable(self, was_boost):
+        """Remember when the Boost variable went to yes, so a setting made by hand before
+        then is replaced by the boost and one made after it is left alone (1.32.0). On the
+        first read after a start the moment saved in plugin_state.json is kept; with none
+        saved it stays unknown, and then a hand setting is left to stand."""
+        first = not self.store.get("boost_var_read")
+        self.store["boost_var_read"] = True
+        before = self.store.get("boost_started")
+        if not self.store["is_boost"]:
+            self.store["boost_started"] = None
+        elif not first and not was_boost:
+            self.store["boost_started"] = time.time()
+        if self.store.get("boost_started") != before:
+            self._save_state()
+
     def _read_mode_variables(self):
         """Read current mode flags from Indigo variables into self.store."""
         self.store["is_away"]     = get_variable_value(VAR_HOME_AWAY_ID,  "false").lower() == "true"
+        was_boost = bool(self.store.get("is_boost"))
         self.store["is_boost"]    = get_variable_value(VAR_BOOST_ID,      "no").lower()    == "yes"
+        self._note_boost_variable(was_boost)
         self.store["is_both_out"] = get_variable_value(VAR_BOTH_OUT_ID,   "no").lower()    == "yes"
         self.store["is_guest_2"]  = get_variable_value(VAR_GUEST_2_ID,    "false").lower() == "true"
         self.store["is_guest_3"]  = get_variable_value(VAR_GUEST_3_ID,    "false").lower() == "true"
@@ -3294,6 +3328,13 @@ class Plugin(indigo.PluginBase):
             self.store["cancel_boost_holds"] = heating_logic.valid_cancel_holds(
                 st.get("cancel_boost_holds", {}))
 
+            # When the Boost variable went to yes (1.32.0); dropped at the first read
+            # of the variable if it is no longer yes.
+            saved_boost = st.get("boost_started")
+            if (isinstance(saved_boost, (int, float)) and not isinstance(saved_boost, bool)
+                    and saved_boost > 0):
+                self.store["boost_started"] = float(saved_boost)
+
             # Restore timed boost only if expiry is still in the future
             expiry_str = st.get("timed_boost_expiry")
             if expiry_str:
@@ -3433,6 +3474,7 @@ class Plugin(indigo.PluginBase):
             "timed_boost_expiry":           expiry.isoformat() if expiry else None,
             "timed_boost_hours":            self.store.get("timed_boost_hours", 0),
             "timed_boost_started":          self.store.get("timed_boost_started"),
+            "boost_started":                self.store.get("boost_started"),
             "timed_boost_outcome":          self.store.get("timed_boost_outcome", {}),
             "hand_holds":                   self.store.get("hand_holds", {}),
             "summer_force_active":          self.store.get("summer_force_active", False),

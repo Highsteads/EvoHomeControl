@@ -7,6 +7,12 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.32.0 - 25 November 2026
+
+- **The Boost variable follows the timed boost's rules.** With Boost set to `yes`, every boosted room is set to 22 degrees and stays there until you set it back to `no`. A room that is already warm is no longer turned down to 14 or 16 degrees, and a mild day outside or both-out mode no longer lowers it.
+- **Boost replaces a temperature set by hand before it.** One you set by hand while Boost is on is still left alone for its hold time. If the plugin restarts while Boost is on and does not know when it was switched on, a hand setting is left alone.
+- **The same three things still stop a room being boosted:** an open window or outside door, away mode, and the Conservatory's sliding door being shut.
+
 ## 1.31.1 - 25 November 2026
 
 - **The En Suite underfloor heating is back to 6am and 14 degrees.** 1.31.0 moved it to 4am and 20 degrees. The floor is there to take the chill off the tiles, not to heat the room, and at about 180 watts it could not heat the room anyway, so the earlier start and higher temperature were not wanted. The two settings stay, set to 6am and 14.

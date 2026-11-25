@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.31.1 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.32.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.32.0** - The Boost variable now follows the same rules as a timed boost: every boosted room is held at 22 degrees for as long as Boost is `yes`. A room that is already warm is no longer turned down, a mild day outside or both-out mode does not lower it, and a temperature set by hand before Boost was switched on is replaced by it.
 
 **v1.31.1** - The En Suite underfloor heating is back to 6am and 14 degrees, which is all a floor that only takes the chill off the tiles needs. The two settings from 1.31.0 stay.
 

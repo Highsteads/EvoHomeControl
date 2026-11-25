@@ -43,7 +43,9 @@ The Conservatory's sliding door decides it. Shut, the Conservatory is held at 12
 
 The bedrooms, Bathroom, En Suite, Hall Bedroom and Utility Room are not boosted.
 
-A room is judged against its boosted temperature when the plugin checks whether it is overheating, so a boost is not cancelled just because the room is warming towards it. A room is not boosted while away mode is on.
+A boosted room is set to 22 degrees and stays there for as long as Boost is `yes` (1.32.0). A room that is already warm is not turned down, because its valve shuts by itself at 22 degrees, and a mild day outside or both-out mode does not lower it either. A room is not boosted while away mode is on.
+
+A temperature you set by hand before switching Boost on is replaced by the boost. One you set by hand while Boost is on is left alone for its usual hold time.
 
 A room with a window or outside door open is not boosted either. It keeps its open-window setting, so the Dining Room stays at 16 degrees with the garden door open, and goes back to its boosted temperature once everything is shut.
 
@@ -56,7 +58,7 @@ A timed boost sets the **Conservatory** (only while its sliding door is open), *
 - A timed boost carries on after the plugin or Indigo restarts, as long as its time has not run out.
 - It does not start during the summer shut-off. Use **Force Heating On (24 hours)** first if you need the heat.
 
-The boost starts within a second or two: the radiators are sent their new temperature straight away, a few seconds apart. Every boosted room is set to 22 degrees and stays there until the boost ends (1.30.0). A room that is already warm is not turned down, because its valve shuts by itself at 22 degrees, and a mild day outside or both-out mode does not lower it either.
+The boost starts within a second or two: the radiators are sent their new temperature straight away, a few seconds apart. Every boosted room is set to 22 degrees and stays there until the boost ends, by the same rules as the Boost variable above (1.30.0). A room that is already warm is not turned down, because its valve shuts by itself at 22 degrees, and a mild day outside or both-out mode does not lower it either.
 
 Three things stop a room being boosted: a window or outside door open in that room, away mode, and, for the Conservatory, its sliding door being shut.
 

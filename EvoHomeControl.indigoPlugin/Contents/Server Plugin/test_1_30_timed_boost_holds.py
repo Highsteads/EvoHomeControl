@@ -141,12 +141,77 @@ class TestATimedBoostHoldsItsTemperature(_Base):
         devices = {1: before, 2: during}
         since = time.time() - 60
         self.assertEqual(set(hl.hand_holds(rooms, devices)), {"1", "2"})
-        self.assertEqual(set(hl.hand_holds(rooms, devices, boost_since=since,
-                                           boost_rooms={"Dining Room"})), {"2"},
+        self.assertEqual(set(hl.hand_holds(rooms, devices,
+                                           replaced_before={"Dining Room": since})), {"2"},
                          "only a boost room loses its hold")
-        self.assertEqual(set(hl.hand_holds(rooms, devices, boost_since=time.time() - 3600,
-                                           boost_rooms={"Dining Room"})), {"1", "2"},
+        self.assertEqual(set(hl.hand_holds(rooms, devices,
+                                           replaced_before={"Dining Room": time.time() - 3600})),
+                         {"1", "2"},
                          "made during the boost, so still held")
+
+
+class TestTheBoostVariableFollowsTheSameRules(TestATimedBoostHoldsItsTemperature):
+    """1.32.0: every rule above, with the Boost variable in place of a timed boost."""
+
+    def _run(self, zone, room="Dining Room", monitor=None, since=None, **kw):
+        # A test that switches the timed boost off means "no boost at all".
+        boosting = kw.pop("timed_boost_active", True)
+        return super()._run(zone, room=room, monitor=monitor, since=None,
+                            timed_boost_active=False, is_boost=boosting,
+                            boost_since=since, **kw)
+
+    def test_who_the_boost_decides_for(self):
+        self.assertTrue(hl.boost_wins("Dining Room", True, False, None, False))
+        self.assertFalse(hl.boost_wins("Dining Room", False, False, None, False))
+        self.assertFalse(hl.boost_wins("Dining Room", True, False, None, True))
+        self.assertFalse(hl.boost_wins("Bedroom 1", True, False, None, False))
+
+    def test_the_later_start_that_applies_is_the_one_used(self):
+        f = hl.boost_since_for
+        self.assertEqual(f("Dining Room", True, 100.0, True, ROOMS, 200.0), 200.0)
+        self.assertEqual(f("Dining Room", True, 300.0, True, ROOMS, 200.0), 300.0)
+        self.assertEqual(f("Dining Room", False, 300.0, True, ROOMS, 200.0), 200.0)
+        self.assertEqual(f("Bedroom 1", True, 300.0, True, ROOMS, 900.0), 300.0)
+        self.assertIsNone(f("Dining Room", True, None, False, ROOMS, 200.0))
+        self.assertIsNone(f("Dining Room", True, "soon", False, ROOMS, None))
+
+
+class TestWhenTheBoostVariableWentToYes(unittest.TestCase):
+
+    def _plugin(self, **store):
+        p = plugin_mod.Plugin.__new__(plugin_mod.Plugin)
+        p.store = dict(store)
+        p.saves = 0
+        def save():
+            p.saves += 1
+        p._save_state = save
+        return p
+
+    def test_a_change_to_yes_is_timed_and_saved(self):
+        p = self._plugin(is_boost=True, boost_var_read=True, boost_started=None)
+        before = time.time()
+        p._note_boost_variable(False)
+        self.assertGreaterEqual(p.store["boost_started"], before)
+        self.assertEqual(p.saves, 1)
+        started = p.store["boost_started"]
+        p._note_boost_variable(True)
+        self.assertEqual((p.store["boost_started"], p.saves), (started, 1), "still yes: unchanged")
+
+    def test_back_to_no_forgets_it(self):
+        p = self._plugin(is_boost=False, boost_var_read=True, boost_started=123.0)
+        p._note_boost_variable(True)
+        self.assertIsNone(p.store["boost_started"])
+
+    def test_the_first_read_after_a_start_keeps_what_was_saved(self):
+        p = self._plugin(is_boost=True, boost_var_read=False, boost_started=123.0)
+        p._note_boost_variable(False)
+        self.assertEqual((p.store["boost_started"], p.saves), (123.0, 0))
+
+    def test_the_first_read_with_nothing_saved_stays_unknown(self):
+        p = self._plugin(is_boost=True, boost_var_read=False, boost_started=None)
+        p._note_boost_variable(False)
+        self.assertIsNone(p.store["boost_started"])
+        self.assertTrue(p.store["boost_var_read"])
 
 
 class TestWhatThePageIsTold(unittest.TestCase):
