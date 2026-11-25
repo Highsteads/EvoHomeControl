@@ -159,7 +159,7 @@ class TestRoomRules(_Rooms):
         switch = FakeDevice({"onOffState": True})
         switch.id = hl.DEV_EN_SUITE_FLOOR_HEAT_ID
         therm = FakeDevice({"hvacOperationModeIsHeat": True, "hvacOperationModeIsOff": False,
-                            "setpointHeat": 14.0})
+                            "setpointHeat": hl.FLOOR_HEAT_ON_TEMP})
         therm.id = hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID
         _indigo.devices[switch.id] = switch
         _indigo.devices[therm.id] = therm

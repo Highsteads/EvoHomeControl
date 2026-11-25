@@ -330,7 +330,7 @@ class TestEnSuiteFloorHeating(unittest.TestCase):
 
     def _heating(self):
         self.therm.states.update({"hvacOperationModeIsHeat": True,
-                                  "hvacOperationModeIsOff": False, "setpointHeat": 14.0})
+                                  "hvacOperationModeIsOff": False, "setpointHeat": hl.FLOOR_HEAT_ON_TEMP})
 
     # -- Away mode --------------------------------------------------------------
     def test_a_cold_morning_at_home_still_starts_the_floor_heating(self):

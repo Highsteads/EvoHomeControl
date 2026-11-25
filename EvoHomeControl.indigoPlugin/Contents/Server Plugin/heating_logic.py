@@ -1039,9 +1039,63 @@ def _contact_is_open(dev_id):
 # live that morning: Off, Heat and a setpoint each confirmed with no error.
 # So: ON = power on, mode Heat, setpoint FLOOR_HEAT_ON_TEMP. OFF = mode Off. The switch
 # is never turned off; with it off the thermostat has no power, so the floor is off.
-FLOOR_HEAT_ON_TEMP     = 14.0
+#
+# 1.31.0 (CliveS, 25-11-2026: "start the floor at 4am and lift its limit"). Measured over
+# nine mornings, 17 to 25-11-2026, 0 to 4 degC outside: the floor probe read 7 to 8 degC
+# at 6am, took two hours to reach the old 14 degC setting, and then sat there, colder than
+# the room air (about 18), so it gave the room nothing. The radiator was calling for heat
+# all night and the room still read 19 at 9:30 against a 20 target. So the floor now
+# starts at EN_SUITE_FLOOR_START_HOUR and heats to FLOOR_HEAT_ON_TEMP; both are settings
+# and these are only their defaults. 20 is a first step, not a measured answer: at 1:30pm
+# that day the probe read 9.5 with the air at 17.2, so it may read several degrees low,
+# and 20 stays under the usual 27 degC floor limit even if it reads 5 low.
+FLOOR_HEAT_ON_TEMP     = 20.0
+FLOOR_HEAT_MIN_TEMP    = 5.0
+FLOOR_HEAT_MAX_TEMP    = 27.0
+EN_SUITE_FLOOR_START_HOUR = 4    # 6 = with the morning schedule, no early start
+EN_SUITE_MORNING_START_HOUR = 6
 FLOOR_OFF_RESEND_SECS  = 600    # an Off the thermostat has not confirmed is resent this often
-_FLOOR = {"off_sent_at": 0.0}
+_FLOOR = {"off_sent_at": 0.0, "on_temp": FLOOR_HEAT_ON_TEMP,
+          "start_hour": EN_SUITE_FLOOR_START_HOUR}
+
+
+def coerce_floor_temp(value):
+    """The floor setting as a whole number of degrees between FLOOR_HEAT_MIN_TEMP and
+    FLOOR_HEAT_MAX_TEMP (Indigo's setHeatSetpoint takes whole degrees here). Blank or
+    not a number gives the default."""
+    try:
+        temp = float(round(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return FLOOR_HEAT_ON_TEMP
+    return max(FLOOR_HEAT_MIN_TEMP, min(temp, FLOOR_HEAT_MAX_TEMP))
+
+
+def set_floor_heat_temp(value):
+    _FLOOR["on_temp"] = coerce_floor_temp(value)
+    return _FLOOR["on_temp"]
+
+
+def floor_heat_temp():
+    return _FLOOR["on_temp"]
+
+
+def coerce_floor_start_hour(value):
+    """The hour the floor starts, 0 to 6. 6 means with the morning schedule. Blank or
+    not a number gives the default."""
+    try:
+        hour = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return EN_SUITE_FLOOR_START_HOUR
+    return max(0, min(hour, EN_SUITE_MORNING_START_HOUR))
+
+
+def set_floor_start_hour(value):
+    _FLOOR["start_hour"] = coerce_floor_start_hour(value)
+    return _FLOOR["start_hour"]
+
+
+def floor_start_hour():
+    return _FLOOR["start_hour"]
 
 
 def _floor_devices():
@@ -1064,14 +1118,14 @@ def floor_heat_is_heating(thermostat):
     if states.get("hvacOperationModeIsHeat") is not True:
         return False
     try:
-        return abs(float(states.get("setpointHeat")) - FLOOR_HEAT_ON_TEMP) <= TEMP_CHANGE_TOLERANCE
+        return abs(float(states.get("setpointHeat")) - floor_heat_temp()) <= TEMP_CHANGE_TOLERANCE
     except (TypeError, ValueError):
         return False
 
 
 def floor_heat_on(log_buffer=None):
     """Turn the En Suite floor on: power the thermostat if it is not, then Heat at
-    FLOOR_HEAT_ON_TEMP. A thermostat that has just been powered is not sent anything
+    floor_heat_temp(). A thermostat that has just been powered is not sent anything
     yet - it takes about 25 seconds to start (measured 09-10-2026) and would lose the
     command; the next heating check, within five minutes, finds it not heating and
     sends it. Returns True when the commands were sent."""
@@ -1088,9 +1142,9 @@ def floor_heat_on(log_buffer=None):
     if floor_heat_is_heating(thermostat):
         return True
     indigo.thermostat.setHvacMode(thermostat, value=indigo.kHvacMode.Heat)
-    indigo.thermostat.setHeatSetpoint(thermostat, value=FLOOR_HEAT_ON_TEMP)
+    indigo.thermostat.setHeatSetpoint(thermostat, value=floor_heat_temp())
     _FLOOR["off_sent_at"] = 0.0
-    _log(f"En Suite: floor heating on (thermostat set to heat to {FLOOR_HEAT_ON_TEMP:.0f} "
+    _log(f"En Suite: floor heating on (thermostat set to heat to {floor_heat_temp():.0f} "
          f"degrees)", log_buffer=log_buffer)
     return True
 

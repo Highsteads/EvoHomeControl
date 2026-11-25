@@ -43,6 +43,15 @@ All three can be kept in the shared settings file instead, as described below.
 | **If Indigo stops, radiators go back to the Evohome timetable after** | Each temperature is sent to Evohome for this long, 2 hours to start with, and renewed once less than an hour is left, or half way through with the 1 hour setting. If Indigo or the plugin stops, each radiator goes back to the timetable on your Evohome controller when its time runs out. **Never** holds the last setting indefinitely, as before 1.13.0. Needs RAMSES ESP 1.12.0 or later; without it the plugin sends permanent settings and says so once. The summer 8 degree hold is sent to run until the day heating returns instead, so a stopped Indigo in summer cannot switch the heating back on early, and cannot keep it off late. With RAMSES ESP older than 1.15.0 it is permanent. |
 | **Hold a temperature set through Indigo for (minutes)** | How long the plugin leaves a room alone after you set it from the Indigo client, the Home app or a dashboard, before putting it back on its plan. 60 to start with, up to 720. 0 means until the room's plan next changes, or midnight if that is sooner. A blank box, or one that does not hold a number, gives 60. A room changed at the Evohome controller, on a valve or in the Evohome app is not affected. |
 
+## EN SUITE UNDERFLOOR HEATING
+
+| Setting | What it does |
+|---|---|
+| **Switch the floor on at** | When the floor comes on each morning, from 2am to 6am. 4am to start with. 6am means with the radiator's morning schedule and no early start. |
+| **Heat the floor to (degrees)** | What the floor thermostat is set to, a whole number from 5 to 27, read by the thermostat's own floor sensor. 20 to start with. A blank box, or one that does not hold a number, gives 20. |
+
+The floor goes off at 10am or when the window is opened. The [En Suite](en-suite.md) page explains it in full.
+
 ## SNOW FORECAST
 
 | Setting | What it does |

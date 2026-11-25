@@ -7,6 +7,13 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.31.0 - 25 November 2026
+
+- **The En Suite underfloor heating comes on at 4am.** It used to come on at 6am with the radiator's morning schedule. From cold the floor warms about 3 degrees an hour, so on a frosty morning it was still warming up at 8am. It now has two hours' start. The radiator's 20 degrees still runs from 6am to 10am.
+- **The floor heats to 20 degrees, where it used to stop at 14.** At 14 the floor was colder than the room, so once it got there it added nothing. Over nine mornings at 0 to 4 degrees outside the room reached about 19 by 9:30am against its 20 degree target, with the radiator on all night.
+- **Both are settings.** **Switch the floor on at** offers 2am to 6am, and **Heat the floor to** takes 5 to 27 degrees. Choosing 6am gives the old timing.
+- **The same things stop it.** Away mode, an open En Suite window and the summer shut-off keep the early floor off, as they do the morning. If the morning does not start at 6am, the floor is switched off then.
+
 ## 1.30.0 - 25 November 2026
 
 - **A timed boost holds 22 degrees for the whole time.** Until now a boosted room that was already warm, from the sun or from the rest of the house, was turned down to 14 or 16 degrees during the boost, and a mild day outside or both-out mode could lower it as well. The valve shuts by itself at 22 degrees, so turning the setting down gained nothing and made it hard to tell what a room was set to. A boosted room is now set to 22 degrees and stays there until the boost ends.

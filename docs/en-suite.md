@@ -11,7 +11,8 @@ The En Suite has a radiator and electric underfloor heating, and two rules of it
 
 This runs every morning outside the [summer shut-off](summer-shut-off.md), whatever the weather.
 
-- **At 6am** the radiator is set to **20 degrees** and the underfloor heating thermostat is set to heat to 14 degrees, so the floor looks after itself for the morning. If the plugin starts later than 6am, the schedule starts then instead.
+- **At 4am** the underfloor heating thermostat is set to heat to **20 degrees**, so the floor has two hours to warm before anyone uses the room. From cold it warms about 3 degrees an hour. The time and the temperature are both [settings](settings.md). Away mode and an open window keep it off, and if the morning below does not start at 6am the floor is switched off then.
+- **At 6am** the radiator is set to **20 degrees** and the floor carries on. If the plugin starts later than 6am, the schedule starts then instead.
 - **Opening the window ends it for the day.** I take opening the window to mean the shower is over. Within 30 seconds the underfloor heating is switched off and the radiator goes down to 8 degrees, even if somebody has set it by hand. After that the room follows its normal plan. If the window is already open at 6am, the morning waits and starts once the window is shut.
 - **At 10am** it ends, and the underfloor heating thermostat is turned off. If the plugin was not running at 10am, it turns it off as soon as it starts again.
 - **Away mode** stops it. The morning does not start while away mode is on, and one already running ends within 30 seconds of away mode being switched on, with the underfloor heating switched off. If away mode is switched off before 10am, the morning starts then.
@@ -22,7 +23,7 @@ The morning runs however warm it is outside. The rule that turns every radiator 
 
 ### How the underfloor heating is switched
 
-The plugin turns the floor on and off through its thermostat, a Heatit TF021, which it sets to heat to 14 degrees for the morning and to off at all other times. The thermostat is powered through a separate switch. The plugin turns that switch on when the floor is wanted and never turns it off, because a thermostat with no power cannot be told anything. If it finds the switch off at 6am it turns it on and sets the thermostat at the next heating check, a few minutes later, once the thermostat has started up. Each heating check during the morning makes sure the thermostat really is heating, and sends the setting again if it is not.
+The plugin turns the floor on and off through its thermostat, a Heatit TF021, which it sets to heat to 20 degrees from 4am and to off at 10am and all other times. The thermostat is powered through a separate switch. The plugin turns that switch on when the floor is wanted and never turns it off, because a thermostat with no power cannot be told anything. If it finds the switch off at 6am it turns it on and sets the thermostat at the next heating check, a few minutes later, once the thermostat has started up. Each heating check during the morning makes sure the thermostat really is heating, and sends the setting again if it is not.
 
 ## The drying run
 

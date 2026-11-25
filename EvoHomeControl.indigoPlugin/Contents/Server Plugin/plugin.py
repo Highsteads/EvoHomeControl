@@ -5,7 +5,17 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        25-11-2026 UK
-# Version:     1.30.0
+# Version:     1.31.0
+#
+# v1.31.0 (25-11-2026): the En Suite floor starts at 4am and heats to 20 (CliveS: "start the floor at
+#   4am and lift its limit"). Measured 17 to 25-11, 0 to 4 degC outside: the floor read 7 to 8 at 6am,
+#   took two hours to reach the old 14 and then gave the room nothing, while the radiator, calling all
+#   night, left the room at 19 at 9:30 against 20. _check_en_suite_morning switches the floor alone on
+#   from heating_logic.floor_start_hour() (setting enSuiteFloorStartHour, 2 to 6, default 4) and marks
+#   store en_suite_floor_early (saved); at 6am the morning takes the floor over, or it is switched off
+#   if the morning does not start; away, the window interlock and the summer shut-off stop it as they
+#   stop the morning. The floor heats to heating_logic.floor_heat_temp() (setting enSuiteFloorTemp, 5
+#   to 27 whole degrees, default 20). The radiator's 6am to 10am 20 degrees is unchanged.
 #
 # v1.30.0 (25-11-2026): a timed boost holds its rooms at the boost temperature for the whole time.
 #   heating_logic.timed_boost_wins(room, active, rooms, is_away) is the one answer: where it is True the
@@ -132,7 +142,7 @@
 #   2-9 Oct) and the 6am Heat/14 went to a thermostat still starting (it answered 24 s after
 #   power-on, measured). CliveS: the switch was "a belt and braces fix originally". New
 #   heating_logic floor_heat_on / floor_heat_off / floor_heat_is_heating: ON = power on if
-#   off (and send nothing yet), mode Heat + FLOOR_HEAT_ON_TEMP 14; OFF = mode Off, never the
+#   off (and send nothing yet), mode Heat + FLOOR_HEAT_ON_TEMP (14 then, 20 from 1.31.0); OFF = mode Off, never the
 #   switch; nothing sent to an unpowered or already-Off thermostat; an unconfirmed Off resent
 #   at most every 10 min. Every floor path uses them (morning start, 10am, away, window
 #   interlock + cycle, restore, summer). The cycle's restore branch is the second chance for
@@ -668,7 +678,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.30.0"
+PLUGIN_VERSION  = "1.31.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -815,6 +825,16 @@ def _as_aware(value):
     return value if value.tzinfo is not None else value.astimezone()
 
 
+def _hour_words(hour):
+    """An hour of the day as a person says it: 4 -> "4am", 0 -> "midnight"."""
+    hour = int(hour) % 24
+    if hour == 0:
+        return "midnight"
+    if hour == 12:
+        return "midday"
+    return f"{hour}am" if hour < 12 else f"{hour - 12}pm"
+
+
 def _local_clock(value, fmt="%H:%M"):
     """Format an expiry in the CURRENT local time, whichever side of a clock change
     it was set on."""
@@ -945,6 +965,9 @@ class Plugin(indigo.PluginBase):
         self.store["en_suite_morning_active"]           = False
         self.store["en_suite_morning_cancelled_date"]   = None  # "YYYY-MM-DD"
         self.store["en_suite_morning_cancelled_reason"] = None
+        # The floor was switched on ahead of the morning (1.31.0), so that a morning
+        # which then does not start still gets its floor switched off.
+        self.store["en_suite_floor_early"] = False
 
         # En Suite drying run — radiator only, independent of the morning schedule
         # above and of the floor heating. Runs inside the summer shut-off, which is
@@ -1022,6 +1045,7 @@ class Plugin(indigo.PluginBase):
         heating_logic.set_override_minutes(self._override_minutes(self.pluginPrefs))
         heating_logic.set_hand_hold_minutes(self.pluginPrefs.get(
             "handHoldMinutes", heating_logic.HAND_HOLD_DEFAULT_MINS))
+        self._apply_floor_settings(self.pluginPrefs)
         self._remove_orphan_prefs()
 
         # OWM API key: IndigoSecrets.py wins over PluginConfig
@@ -1174,6 +1198,7 @@ class Plugin(indigo.PluginBase):
             heating_logic.set_override_minutes(self._override_minutes(values_dict))
             heating_logic.set_hand_hold_minutes(values_dict.get(
                 "handHoldMinutes", heating_logic.HAND_HOLD_DEFAULT_MINS))
+            self._apply_floor_settings(values_dict)
             # Force an immediate cycle so any change (interval, sources, alerts)
             # takes effect now rather than at the next scheduled cycle.
             self._request_cycle()
@@ -1509,7 +1534,8 @@ class Plugin(indigo.PluginBase):
             floor_heat_device          = DEV_EN_SUITE_FLOOR_THERMOSTAT_ID,
             special_rules              = en_suite_rules,
             ha_device_id               = DEV_EN_SUITE_ID,
-            floor_heat_restore_enabled = morning_active,
+            floor_heat_restore_enabled = (morning_active
+                                          or bool(self.store.get("en_suite_floor_early"))),
             overheat_target_override   = self._en_suite_overheat_target(),
             **common,
         )
@@ -1952,8 +1978,9 @@ class Plugin(indigo.PluginBase):
             _log(f"[Summer] Could not turn off En Suite floor heat: {e}", level="WARNING")
 
         # Clear any lingering En Suite morning mode so it can't fight the lockout
-        if self.store.get("en_suite_morning_active"):
+        if self.store.get("en_suite_morning_active") or self.store.get("en_suite_floor_early"):
             self.store["en_suite_morning_active"] = False
+            self.store["en_suite_floor_early"]    = False
             self._save_state()
 
     def _start_summer_force(self, hours=24):
@@ -2568,6 +2595,13 @@ class Plugin(indigo.PluginBase):
           - Turned OFF here at 10am cancel (so Indigo schedules for this are redundant)
           - Also turned OFF inside process_room_temperature() when window opens
 
+        1.31.0: the floor alone starts earlier, at heating_logic.floor_start_hour()
+        (4am unless changed), because from cold it needs two hours to warm up. The
+        radiator's morning still starts at 6am. store["en_suite_floor_early"] records
+        that the floor was switched on ahead of the morning, so it is switched off
+        again if the morning then does not start (away, a cancelled day) or the
+        plugin was not running at 6am.
+
         Cheap-out fast paths so the check is essentially free outside the
         morning window — _tick() runs this every POLL_SLEEP_SECS.
         """
@@ -2590,9 +2624,18 @@ class Plugin(indigo.PluginBase):
             self._save_state()
             self._fire_event("enSuiteMorningCancelled")
 
-        # Outside 06:00-10:00 and 00:00 (midnight reset) the rest of the
-        # function is a no-op — return early to avoid pointless work.
-        in_morning_window = 6 <= hour < 10
+        # A floor switched on early and still marked so outside the early start to
+        # 10:00 was left behind (the plugin was not running at 6am). Off, unless a
+        # morning is running, which owns the floor.
+        floor_start = heating_logic.floor_start_hour()
+        if self.store.get("en_suite_floor_early") and not (floor_start <= hour < 10):
+            self.store["en_suite_floor_early"] = False
+            self._en_suite_floor_off("early floor heating ended")
+            self._save_state()
+
+        # Outside the early start to 10:00, and 00:00 (midnight reset), the rest of
+        # the function is a no-op — return early to avoid pointless work.
+        in_morning_window = min(floor_start, 6) <= hour < 10
         is_midnight       = hour == 0
         if not (in_morning_window or is_midnight):
             return
@@ -2610,6 +2653,27 @@ class Plugin(indigo.PluginBase):
             self._en_suite_floor_off()
             self._save_state()
             self._fire_event("enSuiteMorningCancelled")
+        if away and self.store.get("en_suite_floor_early"):
+            self.store["en_suite_floor_early"] = False
+            _log("[EnSuiteMorning] Away mode is on - early floor heating stopped")
+            self._en_suite_floor_off("away")
+            self._save_state()
+
+        # Early floor start (1.31.0): from the floor's start hour until 6am the floor
+        # heating alone is on. Not while away, and not while the window is open - it
+        # starts on the first tick after the window shuts.
+        if (floor_start <= hour < 6
+                and not away
+                and not self.store.get("en_suite_floor_early")
+                and not _contact_is_open(DEV_EN_SUITE_WINDOW_ID)):
+            self.store["en_suite_floor_early"] = True
+            _log(f"[EnSuiteMorning] {_hour_words(hour)} — floor heating on early, ahead of "
+                 f"the 6am morning schedule")
+            try:
+                heating_logic.floor_heat_on()
+            except Exception as e:
+                _log(f"[EnSuiteMorning] Floor heat on error: {e}", level="ERROR")
+            self._save_state()
 
         # Auto-start: 06:00-09:59, not already active, not cancelled by window today.
         # Not while the window is open (1.18.1): the window interlock would switch the
@@ -2635,6 +2699,14 @@ class Plugin(indigo.PluginBase):
                 _log(f"[EnSuiteMorning] Floor heat on error: {e}", level="ERROR")
             self._save_state()
             self._fire_event("enSuiteMorningStarted")
+
+        # 6am or later: the early start is over. A morning that started keeps the
+        # floor; one that did not (cancelled today, window open, away) gives it up.
+        if self.store.get("en_suite_floor_early") and hour >= 6:
+            self.store["en_suite_floor_early"] = False
+            if not self.store["en_suite_morning_active"]:
+                self._en_suite_floor_off("the morning schedule did not start")
+            self._save_state()
 
         # Reset cancelled_date at midnight so tomorrow auto-starts again.
         # Must persist to disk — otherwise a plugin restart before the next
@@ -2671,6 +2743,14 @@ class Plugin(indigo.PluginBase):
             return
         self._floor_missing_warned = False
         heating_logic.floor_heat_off("window open")
+
+    def _apply_floor_settings(self, prefs):
+        """Hand the two floor settings to heating_logic; blank or wrong gives the
+        defaults (20 degrees from 4am)."""
+        heating_logic.set_floor_heat_temp(prefs.get(
+            "enSuiteFloorTemp", heating_logic.FLOOR_HEAT_ON_TEMP))
+        heating_logic.set_floor_start_hour(prefs.get(
+            "enSuiteFloorStartHour", heating_logic.EN_SUITE_FLOOR_START_HOUR))
 
     def _en_suite_floor_off(self, reason="morning schedule ended"):
         """Turn the En Suite floor heating off, the one way every path does it -
@@ -3242,6 +3322,9 @@ class Plugin(indigo.PluginBase):
             # En Suite morning: carried on if still within 06:00-09:59, otherwise
             # the floor heating it switched on is switched off.
             self._restore_en_suite_morning(st.get("en_suite_morning_active"))
+            # An early floor start is carried over as saved; the 30-second morning
+            # check then keeps it, hands it to the morning or switches it off.
+            self.store["en_suite_floor_early"] = bool(st.get("en_suite_floor_early"))
 
             self.store["en_suite_morning_cancelled_date"] = st.get("en_suite_morning_cancelled_date")
             self.store["timetable_alert_key"] = st.get("timetable_alert_key", "") or ""
@@ -3349,6 +3432,7 @@ class Plugin(indigo.PluginBase):
             "summer_force_active":          self.store.get("summer_force_active", False),
             "summer_force_expiry":          force_exp.isoformat() if force_exp else None,
             "en_suite_morning_active":      self.store["en_suite_morning_active"],
+            "en_suite_floor_early":         bool(self.store.get("en_suite_floor_early")),
             "en_suite_morning_cancelled_date": self.store.get("en_suite_morning_cancelled_date"),
             "timetable_alert_key":          self.store.get("timetable_alert_key", ""),
             "en_suite_drying_active":          self.store.get("en_suite_drying_active", False),
@@ -3662,6 +3746,9 @@ class Plugin(indigo.PluginBase):
             expiry = self.store.get("timed_boost_expiry")
             _log(f"  Timed boost expiry:  {_local_clock(expiry) if expiry else 'N/A'}")
         _log(f"  En Suite morning:    {self.store['en_suite_morning_active']}")
+        _log(f"  En Suite floor:      heats to {heating_logic.floor_heat_temp():.0f} degrees "
+             f"from {_hour_words(heating_logic.floor_start_hour())}"
+             f"{' (on early now)' if self.store.get('en_suite_floor_early') else ''}")
         _log(f"  Summer shut-off:     {self._summer_status_str()}")
         if self.overheat:
             rooms = self.overheat.get_overheating_rooms()

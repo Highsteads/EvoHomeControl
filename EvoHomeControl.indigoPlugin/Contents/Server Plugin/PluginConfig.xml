@@ -89,6 +89,27 @@
         <Label>When you set a room from the Indigo client, the Home app or a dashboard, the plugin leaves it alone for this long and then puts the room back on its plan. 60 is the usual value. 0 means until the room's plan next changes, or midnight if that is sooner. A room changed at the Evohome controller, on a valve or in the Evohome app is not affected.</Label>
     </Field>
 
+    <Field id="sep_floor" type="separator"/>
+    <Field id="lbl_floor" type="label">
+        <Label>En Suite underfloor heating</Label>
+    </Field>
+    <Field id="enSuiteFloorStartHour" type="menu" defaultValue="4">
+        <Label>Switch the floor on at:</Label>
+        <List>
+            <Option value="2">2am</Option>
+            <Option value="3">3am</Option>
+            <Option value="4">4am</Option>
+            <Option value="5">5am</Option>
+            <Option value="6">6am, with the morning schedule</Option>
+        </List>
+    </Field>
+    <Field id="enSuiteFloorTemp" type="textfield" defaultValue="20">
+        <Label>Heat the floor to (degrees):</Label>
+    </Field>
+    <Field id="lbl_floor_help" type="label" fontSize="small" alignWithControl="true">
+        <Label>The floor goes off at 10am, or when the En Suite window is opened. From cold it warms about 3 degrees an hour, so an early start gives it time before the morning shower. The temperature is what the floor thermostat's own sensor reads, a whole number from 5 to 27; 20 is the usual value.</Label>
+    </Field>
+
     <Field id="sep_snow" type="separator"/>
     <Field id="lbl_snow" type="label">
         <Label>SNOW FORECAST</Label>

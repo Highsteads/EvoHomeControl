@@ -23,7 +23,7 @@ I wrote this plugin for my own house, and it shows. The twelve rooms, the window
 - **Boosts the living areas** — the dining room, the living room and the hall kitchen — to 22 degrees for one or two hours from a menu item or a control page button, then puts them back.
 - **Knows when you are away or out,** from Indigo variables, and holds the house at a safe, cheaper temperature.
 - **Shuts the heating off for summer** between dates you choose, with a one-click way to have it back for 24 hours.
-- **Looks after the En Suite** — a warm room from 6am on winter mornings with the underfloor heating on, and a morning drying run in summer to deal with wet towels.
+- **Looks after the En Suite** — a warm room from 6am on winter mornings, with the underfloor heating on from 4am, and a morning drying run in summer to deal with wet towels.
 
 ## Where to go next
 

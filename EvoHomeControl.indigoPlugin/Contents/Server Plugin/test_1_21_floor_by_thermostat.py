@@ -87,9 +87,9 @@ class TestTheHelpers(unittest.TestCase):
         self.assertFalse(hl.floor_heat_is_heating(FakeDevice({"hvacOperationModeIsHeat": True,
                                                               "setpointHeat": 8.0})))
         self.assertFalse(hl.floor_heat_is_heating(FakeDevice({"hvacOperationModeIsHeat": "True",
-                                                              "setpointHeat": 14.0})))
+                                                              "setpointHeat": hl.FLOOR_HEAT_ON_TEMP})))
         self.assertTrue(hl.floor_heat_is_heating(FakeDevice({"hvacOperationModeIsHeat": True,
-                                                             "setpointHeat": 14.0})))
+                                                             "setpointHeat": hl.FLOOR_HEAT_ON_TEMP})))
 
     def test_a_missing_thermostat_sends_nothing(self):
         del _indigo.devices[hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID]

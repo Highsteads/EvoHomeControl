@@ -163,7 +163,7 @@ class TestEnSuiteWindowInterlock(unittest.TestCase):
         # 1.21.0: the floor is turned off through its thermostat; the switch only powers it.
         self.therm = types.SimpleNamespace(id=hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID, states={
             "hvacOperationModeIsHeat": True, "hvacOperationModeIsOff": False,
-            "setpointHeat": 14.0})
+            "setpointHeat": hl.FLOOR_HEAT_ON_TEMP})
         _indigo.devices[hl.DEV_EN_SUITE_FLOOR_THERMOSTAT_ID] = self.therm
         self.modes = []
         self._saved_thermo = _indigo.thermostat
