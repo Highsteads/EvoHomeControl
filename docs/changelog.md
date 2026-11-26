@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.34.1 - 26 November 2026
+
+- **The snow forecast line is logged once, not every five minutes.** While snow stayed in the forecast, the Event Log repeated "Snow forecast detected, applying +1.0 degC heating boost" at every heating cycle, twelve times an hour. It now appears once when snow comes into the forecast. The boost itself and the hourly weather summary are unchanged.
+
 ## 1.34.0 - 26 November 2026
 
 - **A gentler overheat rule is on trial in two rooms.** The usual rule turns a radiator down by 6 degrees for at least 45 minutes as a room nears or passes its target. Over two weeks it did that about 36 times a day across the house, and rooms usually fell 0.4 to 2.3 degrees under target before the radiator was let back on. The Dining Room and the Living Room Door radiator now get their target and are left alone. Only after half an hour more than 1.5 degrees above target is the setting lowered, by 1 degree, and it goes back as soon as the room is within half a degree. Every other room keeps the usual rule while the two are compared.

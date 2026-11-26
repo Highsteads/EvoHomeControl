@@ -4,8 +4,8 @@
 # Description: EvoHome Heating Controller — Indigo plugin main class
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
-# Date:        25-11-2026 UK
-# Version:     1.34.0
+# Date:        26-11-2026 UK
+# Version:     1.34.1
 #
 # v1.34.0 (26-11-2026): a gentler overheat rule on trial in two rooms (CliveS: "Yes, trial it").
 #   heating_logic.GENTLE_OVERHEAT_ROOMS = Dining Room and Living Room Door: check_overheating hands
@@ -704,7 +704,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.34.0"
+PLUGIN_VERSION  = "1.34.1"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1420,9 +1420,11 @@ class Plugin(indigo.PluginBase):
         if snow_forecast and as_bool(self.pluginPrefs.get("snowHeatingEnabled", True), True):
             snow_boost   = _safe_float(self.pluginPrefs.get("snowHeatingBoost", "1.0"), 1.0)
             temp_offset += snow_boost
-            _log(f"[Snow] Forecast detected — applying +{snow_boost:.1f}degC heating boost")
-            # Fire only on rising edge (was no snow last cycle, snow this cycle)
+            # Fire only on rising edge (was no snow last cycle, snow this cycle).
+            # The log line follows the same edge: it used to repeat every
+            # 5-minute cycle (12 an hour) for as long as snow stayed forecast.
             if not self.store.get("_snow_event_fired"):
+                _log(f"[Snow] Forecast detected — applying +{snow_boost:.1f}degC heating boost")
                 self._fire_event("snowForecastDetected")
                 self.store["_snow_event_fired"] = True
         elif not snow_forecast:
