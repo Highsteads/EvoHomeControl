@@ -2,7 +2,7 @@
 
 **Runs a Honeywell Evohome house room by room from Indigo, around the clock, with no cloud involved.**
 
-**Version:** 1.33.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
+**Version:** 1.34.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2025.2 or later and my RAMSES ESP plugin
 
 **[Read the full guide](https://highsteads.github.io/EvoHomeControl/)** — setting up, how each room's temperature is decided, and what to do when something goes wrong.
 
@@ -47,6 +47,8 @@ It needs:
 The [full guide](https://highsteads.github.io/EvoHomeControl/) goes through each step, explains every setting, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.34.0** - A gentler overheat rule is on trial in the Dining Room and at the Living Room Door radiator. Those two get their target and are left alone; the setting is lowered by 1 degree only after half an hour well above target, with no 45-minute wait.
 
 **v1.33.0** - The En Suite morning is 22 degrees, up from 20, and the overheat rule leaves it alone between 6am and 10am. That rule had been turning the radiator down to 14 for 45 minutes as soon as the room reached its target, which was shower time.
 

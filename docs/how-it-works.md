@@ -72,6 +72,10 @@ It turns the radiator back up once the room has stopped warming and settled back
 
 If a room stays warm after its radiator has been turned down for three checks in a row, the warmth is probably coming from the sun or from inside the house. The plugin's log calls that **Above Target (solar gain)** rather than **Overheat**. Nothing tells the plugin whether the valve really closed, though. Since 1.25.9 it writes that to the log and the overheat status, and sends no message (see below).
 
+### The gentler rule, on trial
+
+Since 1.34.0 the Dining Room and the Living Room Door radiator use a gentler rule instead. They get their target and are left alone, because the valve closes by itself when the room reaches its setting. Only after half an hour more than 1.5 degrees above target is the setting lowered, by 1 degree, and it goes back as soon as the room is within half a degree of target. The trial is to see whether those rooms hold a steadier temperature than they did with the 45 minute turn-down.
+
 ### Overheating alerts
 
 Since 1.25.9 these are switched off. A room is only counted as overheating after its radiator has been turned down, and it can stay warm for hours after that, so the messages were almost always about a room that was cooling. The plugin now logs one line and shows the room in the overheat status, and sends no Pushover message, email or all-clear. To switch them back on, set `ALERT_WHEN_RADIATOR_DOWN = True` in `overheat_monitor.py`. The rest of this section describes what happens when they are on.

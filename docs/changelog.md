@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.34.0 - 26 November 2026
+
+- **A gentler overheat rule is on trial in two rooms.** The usual rule turns a radiator down by 6 degrees for at least 45 minutes as a room nears or passes its target. Over two weeks it did that about 36 times a day across the house, and rooms usually fell 0.4 to 2.3 degrees under target before the radiator was let back on. The Dining Room and the Living Room Door radiator now get their target and are left alone. Only after half an hour more than 1.5 degrees above target is the setting lowered, by 1 degree, and it goes back as soon as the room is within half a degree. Every other room keeps the usual rule while the two are compared.
+
 ## 1.33.0 - 26 November 2026
 
 - **The En Suite morning is 22 degrees.** From 6am to 10am the radiator is set to 22, up from 20.

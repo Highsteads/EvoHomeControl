@@ -5,7 +5,13 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        25-11-2026 UK
-# Version:     1.33.0
+# Version:     1.34.0
+#
+# v1.34.0 (26-11-2026): a gentler overheat rule on trial in two rooms (CliveS: "Yes, trial it").
+#   heating_logic.GENTLE_OVERHEAT_ROOMS = Dining Room and Living Room Door: check_overheating hands
+#   them to _gentle_overheat, which leaves the target alone and lowers it by GENTLE_BACKOFF (1) only
+#   after GENTLE_SUSTAIN_MINUTES (30) more than GENTLE_TRIGGER (1.5) above target, back at once within
+#   GENTLE_RELEASE (0.5). No coast, no early closing, no 45-minute wait. The other rooms are unchanged.
 #
 # v1.33.0 (26-11-2026): the En Suite morning is 22 degrees and is not cut for overheating (CliveS:
 #   "Exempt it and increase the temperature to 22c during this time"). heating_logic
@@ -698,7 +704,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.33.0"
+PLUGIN_VERSION  = "1.34.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never

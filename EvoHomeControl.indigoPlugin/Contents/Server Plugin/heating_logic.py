@@ -191,6 +191,28 @@ ROOM_SPECIFIC_RATE_THRESHOLDS = {
 # Rooms excluded from complex overheat logic (stateless threshold check only)
 OVERHEAT_EXCLUDED_ROOMS = {"Bedroom 3"}
 
+# ---------------------------------------------------------------------------
+# THE GENTLE RULE, ON TRIAL (1.34.0, CliveS 26-11-2026: "Yes, trial it")
+# ---------------------------------------------------------------------------
+# He asked for "a better way to keep the temperature stable instead of reducing to
+# 12/14c for 45 minutes". MEASURED 12 to 26-11-2026 from the SQL Logger history of the
+# twelve radiators: about 500 cuts of 6 degrees in 14 days (an upper figure; a plan step
+# of that size is counted too), nine rooms in a cut at once at 12:53 on 26-11, and a
+# usual low of 0.4 to 2.3 below target before the valve was let open again. The valve
+# closes by itself at its setting, so the cut cannot cool a room faster; what it adds is
+# the wait. That is reasoned from the rule, and this trial is the proof or otherwise.
+#
+# A room named here gets its target and is left alone. Only when it has stayed more than
+# GENTLE_TRIGGER above target for GENTLE_SUSTAIN_MINUTES is its setting lowered, by
+# GENTLE_BACKOFF, and it goes back the moment the room is within GENTLE_RELEASE of
+# target: no coast, no early closing, no fixed wait. Compare these two rooms' swing with
+# Notes/Overheat-rule-options-2026-11-26.md before widening or dropping it.
+GENTLE_OVERHEAT_ROOMS  = {"Dining Room", "Living Room Door"}
+GENTLE_TRIGGER         = 1.5
+GENTLE_SUSTAIN_MINUTES = 30
+GENTLE_BACKOFF         = 1.0
+GENTLE_RELEASE         = 0.5
+
 # Message codes that trigger an immediate event-log entry on non-hourly runs
 # 1=window open  2=both windows  3=door open  4=door+window  5=slide door closed
 # 17=overheat (radiator contributing)  19=window/door closed  20=window open (reduced)
@@ -1224,6 +1246,34 @@ def _release_overheat_hold(overheat_monitor, room_name, current_temp):
         pass
 
 
+def _gentle_overheat(current_temp, target_temp, room_data, run_interval_mins):
+    """The gentle rule (see GENTLE_OVERHEAT_ROOMS). Same return as check_overheating."""
+    amount = current_temp - target_temp
+    # Nothing of the standard rule's state may linger and act if the room leaves the trial.
+    room_data["is_coasting"]  = False
+    room_data["temp_history"] = [current_temp]
+    lowered = max(OVERHEAT_MIN_SETPOINT, target_temp - GENTLE_BACKOFF)
+    if room_data.get("gentle_active"):
+        if amount <= GENTLE_RELEASE:
+            room_data["gentle_active"]      = False
+            room_data["gentle_over_cycles"] = 0
+            room_data["off_since_cycle"]    = 0
+            return False, target_temp, 0.0
+        room_data["off_since_cycle"] = room_data.get("off_since_cycle", 0) + 1
+        return True, lowered, amount
+    if amount > GENTLE_TRIGGER:
+        cycles = room_data.get("gentle_over_cycles", 0) + 1
+        room_data["gentle_over_cycles"] = cycles
+        if cycles >= max(1, GENTLE_SUSTAIN_MINUTES // run_interval_mins):
+            room_data["gentle_active"]   = True
+            room_data["off_since_cycle"] = 1
+            return True, lowered, amount
+    else:
+        room_data["gentle_over_cycles"] = 0
+    room_data["off_since_cycle"] = 0
+    return False, target_temp, 0.0
+
+
 def check_overheating(current_temp, target_temp, room_name,
                       overheat_monitor, run_interval_mins=5, boost=False):
     """
@@ -1255,6 +1305,9 @@ def check_overheating(current_temp, target_temp, room_name,
             adjusted = max(OVERHEAT_MIN_SETPOINT, target_temp - OVERHEAT_BACKOFF)
             return True, adjusted, overheat_amount
         return False, target_temp, 0.0
+
+    if room_name in GENTLE_OVERHEAT_ROOMS:
+        return _gentle_overheat(current_temp, target_temp, room_data, run_interval_mins)
 
     # An explicit boost asks for its target, not an early coast below it. Retire
     # the previous schedule's hold while below target. At/above target the existing
