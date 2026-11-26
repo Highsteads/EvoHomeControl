@@ -5,7 +5,10 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        26-11-2026 UK
-# Version:     1.34.1
+# Version:     1.34.2
+#
+# v1.34.2 (26-11-2026): the hourly "** SNOW FORECAST **" line is INFO, not WARNING (CliveS: not wanted
+#   in the Event Log). With the dump pref off it stays out of the Event Log; the daily log keeps it.
 #
 # v1.34.1 (26-11-2026): the "[Snow] Forecast detected" Event Log line is written once when snow
 #   enters the forecast (the same rising edge as the snowForecastDetected event), not every 5-minute
@@ -708,7 +711,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.34.1"
+PLUGIN_VERSION  = "1.34.2"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -3058,12 +3061,11 @@ class Plugin(indigo.PluginBase):
             formatted = f"{log_stamp.now_stamp()} {msg}"
             # A fault must never be silenced by a verbosity pref: WARNING and
             # above always reach the event log, because Log_Error_Watch.py reads
-            # the event log and nothing else. This guard is load-bearing today,
-            # not merely defensive: the SNOW FORECAST line in
-            # _log_weather_section is emitted at WARNING, and it is the only
-            # line in this header above INFO. Without the guard it would go
-            # quiet whenever the dump pref is off, which is the default.
-            # test_event_log_volume.py pins both halves of that claim.
+            # the event log and nothing else. No line in this header is above
+            # INFO today (the SNOW FORECAST line was demoted to INFO in 1.34.2,
+            # at CliveS's request), so the guard is defensive: a fault line added
+            # here later must still not go quiet when the dump pref is off, which
+            # is the default. test_event_log_volume.py pins both halves.
             if echo or _to_level(level) >= logging.WARNING:
                 indigo.server.log(log_stamp.stamp(msg), level=_to_level(level))
             else:
@@ -3190,7 +3192,7 @@ class Plugin(indigo.PluginBase):
             count     = len(snow_forecast)
             mm_str    = f", {total_mm:.1f}mm total" if total_mm > 0.0 else ""
             _b(f"** SNOW FORECAST: starts {first['time_str']}, "
-               f"{count}h affected{mm_str} **", level="WARNING")
+               f"{count}h affected{mm_str} **")
 
         if outdoor_temp is not None:
             _b(f"Temperature Offset            {temp_offset:+.1f}degC")

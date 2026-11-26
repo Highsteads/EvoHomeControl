@@ -7,6 +7,10 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.34.2 - 26 November 2026
+
+- **The hourly snow forecast line is gone from the Event Log.** The hourly weather summary used to add a "SNOW FORECAST" warning whenever snow was forecast. It is now an ordinary line, so it shows only when the hourly dump is switched on, and the daily log file still records it. The heating boost is unchanged.
+
 ## 1.34.1 - 26 November 2026
 
 - **The snow forecast line is logged once, not every five minutes.** While snow stayed in the forecast, the Event Log repeated "Snow forecast detected, applying +1.0 degC heating boost" at every heating cycle, twelve times an hour. It now appears once when snow comes into the forecast. The boost itself and the hourly weather summary are unchanged.

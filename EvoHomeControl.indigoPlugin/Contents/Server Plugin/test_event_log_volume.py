@@ -449,17 +449,13 @@ class TestFaultsStillReachTheEventLog(EventLogTestCase):
         )
         self.assertTrue(self.events.containing("Error updating Bathroom"))
 
-    def test_real_snow_forecast_line_survives_the_quiet_gate(self):
-        """The header's ONE genuine above-INFO line, driven for real.
+    def test_snow_forecast_line_is_quiet_with_the_dump_off(self):
+        """The hourly SNOW FORECAST line is INFO since 1.34.2 (CliveS did not want it).
 
-        The two tests above stub _log_weather_section and hand _b a synthetic
-        WARNING, so they prove the gate and not the caller. This one runs the
-        shipped _log_weather_section with a snow forecast in the store and the
-        dump pref off - the state the plugin is actually in on a snowy morning.
-        weather=None skips the OWM and sunrise blocks, leaving the outdoor
-        temperature line (INFO, so quiet) beside the snow line (WARNING, loud).
+        Runs the shipped _log_weather_section with a snow forecast in the store
+        and the dump pref off: the line stays out of the Event Log but is still
+        kept in the daily log buffer.
         """
-        import logging
         p = make_plugin()                       # dump OFF
         p.weather = None
         p.store["log_buffer"]   = []
@@ -470,20 +466,16 @@ class TestFaultsStillReachTheEventLog(EventLogTestCase):
 
         p._log_hourly_header(5.0, 0.0, menu_mode=True)
 
-        snow = [(m, lv) for m, lv in self.events.lines if "SNOW FORECAST" in m]
-        self.assertEqual(len(snow), 1)
-        self.assertEqual(snow[0][1], logging.WARNING)
-        self.assertIn("3.5mm total", snow[0][0])
-        # ...while the routine INFO lines beside it stayed out of the event log.
-        self.assertEqual(self.events.containing("Temperature"), [])
-        self.assertTrue([ln for ln in p.store["log_buffer"] if "Temperature" in ln])
+        self.assertEqual(self.events.containing("SNOW FORECAST"), [])
+        self.assertTrue([ln for ln in p.store["log_buffer"]
+                         if "SNOW FORECAST" in ln and "3.5mm total" in ln])
 
-    def test_the_snow_line_is_the_only_header_line_above_info(self):
+    def test_no_header_line_is_above_info(self):
         """Pins the factual claim made by the comment on _b's gate.
 
-        The comment tells the next reader that the snow line is the only
-        above-INFO line in this header, which is why the gate cannot be
-        simplified away. Adding a second WARNING here is fine - but the comment
+        The comment tells the next reader that no line in this header is
+        above INFO (the snow line was demoted in 1.34.2) and that the gate is
+        therefore defensive. Adding a WARNING here is fine - but the comment
         must be corrected in the same edit, and this test is what forces that.
         """
         import ast
@@ -512,10 +504,9 @@ class TestFaultsStillReachTheEventLog(EventLogTestCase):
 
         loud = [c for c in calls
                 if plugin_mod._to_level(_level_of(c)) >= logging.WARNING]
-        self.assertEqual(len(loud), 1,
-                         "the comment on _b names ONE above-INFO line; found "
+        self.assertEqual(loud, [],
+                         "the comment on _b says no header line is above INFO; found "
                          f"{[ (c.lineno, _text_of(c)) for c in loud ]}")
-        self.assertIn("SNOW FORECAST", _text_of(loud[0]))
 
 
 # ===========================================================================
