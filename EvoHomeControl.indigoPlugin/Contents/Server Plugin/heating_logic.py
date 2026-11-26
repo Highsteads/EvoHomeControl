@@ -205,7 +205,14 @@ ALERT_LOG_MESSAGES = {1, 2, 3, 4, 5, 17, 19, 20, 21, 22, 23, 25}
 # (message 24) - which left the room at 16 on a 14.5 degC morning. The skip is gone,
 # and the morning is exempt from the mild-weather cut-off (OUTDOOR_TEMP_TRIGGER) as the
 # drying run is. Its message code 24 is retired; do not reuse it.
-EN_SUITE_MORNING_TEMP = 20.0
+#
+# 1.33.0 (CliveS, 26-11-2026): 22 again, and the morning is exempt from the overheat
+# hold. MEASURED that morning, the first with the boiler at 60 degC flow: the room
+# reached 20.1 at 08:21 for the first time in ten mornings, the overheat rule then set
+# the radiator to 14 from 08:25 to 09:10 (target less OVERHEAT_BACKOFF, held for
+# OVERHEAT_MIN_OFF_MINUTES), and the room was back at 19.1 by 09:30. The valve shuts
+# by itself at its setting, as for a boost, so nothing is lost by leaving it alone.
+EN_SUITE_MORNING_TEMP = 22.0
 
 # ---------------------------------------------------------------------------
 # EN SUITE DRYING RUN
@@ -1798,6 +1805,11 @@ def process_room_temperature(
         # When En Suite morning schedule is active, pass EN_SUITE_MORNING_TEMP
         # so the room is only flagged as overheating above that, not its plan value.
         overheat_target_override=None,
+        # True while this room must be left at its target whatever the overheat rule
+        # would do - the En Suite morning (1.33.0). The valve closes itself at its
+        # setting; the rule's 6 degree cut for 45 minutes emptied the room of heat at
+        # shower time.
+        overheat_exempt=False,
         # Force this room's line into the hourly full event-log dump. When None
         # (caller did not specify) fall back to the legacy minute == 0 gate.
         # The plugin passes the clock-hour-change flag here so the dump is not
@@ -2000,7 +2012,7 @@ def process_room_temperature(
         # on a 22 degC boost is not falsely suppressed.
         if boost_applies:
             overheat_target = schedules.BOOST_TARGETS[room_name]
-        if wins:
+        if wins or overheat_exempt:
             # A boost asks for its temperature for as long as it runs (1.30.0). The
             # valve shuts by itself at 22, so turning the setting down as well only made
             # the Heating page show 14 or 16 in a room that had been boosted.

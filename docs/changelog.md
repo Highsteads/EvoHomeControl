@@ -7,6 +7,11 @@ nav_order: 12
 
 The newest version is at the top.
 
+## 1.33.0 - 26 November 2026
+
+- **The En Suite morning is 22 degrees.** From 6am to 10am the radiator is set to 22, up from 20.
+- **The overheat rule leaves the En Suite morning alone.** When a room passes its target, the plugin turns its radiator down by 6 degrees and holds it there for 45 minutes. In the En Suite that happened at 8:25am on the first morning the room reached 20, and by 9:30am it was back at 19. Between 6am and 10am the radiator now stays at its setting; the valve shuts by itself when the room gets there. An open window still closes it.
+
 ## 1.32.0 - 25 November 2026
 
 - **The Boost variable follows the timed boost's rules.** With Boost set to `yes`, every boosted room is set to 22 degrees and stays there until you set it back to `no`. A room that is already warm is no longer turned down to 14 or 16 degrees, and a mild day outside or both-out mode no longer lowers it.

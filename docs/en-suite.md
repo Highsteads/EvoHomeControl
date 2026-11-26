@@ -11,14 +11,16 @@ The En Suite has a radiator and electric underfloor heating, and two rules of it
 
 This runs every morning outside the [summer shut-off](summer-shut-off.md), whatever the weather.
 
-- **At 6am** the radiator is set to **20 degrees** and the underfloor heating thermostat is set to heat to 14 degrees, enough to take the chill off the tiles. The floor's start time and temperature are both [settings](settings.md); with an earlier start the floor alone comes on first, and is switched off at 6am if the morning does not start. If the plugin starts later than 6am, the schedule starts then instead.
+- **At 6am** the radiator is set to **22 degrees** and the underfloor heating thermostat is set to heat to 14 degrees, enough to take the chill off the tiles. The floor's start time and temperature are both [settings](settings.md); with an earlier start the floor alone comes on first, and is switched off at 6am if the morning does not start. If the plugin starts later than 6am, the schedule starts then instead.
 - **Opening the window ends it for the day.** I take opening the window to mean the shower is over. Within 30 seconds the underfloor heating is switched off and the radiator goes down to 8 degrees, even if somebody has set it by hand. After that the room follows its normal plan. If the window is already open at 6am, the morning waits and starts once the window is shut.
 - **At 10am** it ends, and the underfloor heating thermostat is turned off. If the plugin was not running at 10am, it turns it off as soon as it starts again.
 - **Away mode** stops it. The morning does not start while away mode is on, and one already running ends within 30 seconds of away mode being switched on, with the underfloor heating switched off. If away mode is switched off before 10am, the morning starts then.
 
 ### Mild mornings
 
-The morning runs however warm it is outside. The rule that turns every radiator down above 14 degrees outside does not apply to the En Suite between 6am and 10am, so the room is ready for the shower on a mild morning too. If the room is already at 20 degrees the valve simply stays shut. The 20 degrees is fixed in the plugin rather than a setting.
+The morning runs however warm it is outside. The rule that turns every radiator down above 14 degrees outside does not apply to the En Suite between 6am and 10am, so the room is ready for the shower on a mild morning too. If the room is already at 22 degrees the valve simply stays shut. The 22 degrees is fixed in the plugin rather than a setting.
+
+The [overheat rule](how-it-works.md), which turns a radiator down for 45 minutes once its room passes the target, does not apply to the En Suite between 6am and 10am either.
 
 ### How the underfloor heating is switched
 

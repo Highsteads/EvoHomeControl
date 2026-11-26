@@ -5,7 +5,14 @@
 #              Converted from EvoHome_Radiator_Update.py v8.14
 # Author:      CliveS & Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2 & Codex GPT-6; Codex GPT-6 (1.23.0)
 # Date:        25-11-2026 UK
-# Version:     1.32.0
+# Version:     1.33.0
+#
+# v1.33.0 (26-11-2026): the En Suite morning is 22 degrees and is not cut for overheating (CliveS:
+#   "Exempt it and increase the temperature to 22c during this time"). heating_logic
+#   EN_SUITE_MORNING_TEMP 22 (20 since 1.20.0); process_room_temperature takes overheat_exempt, which
+#   skips check_overheating and releases any hold, as a boost does; _run_heating_cycle passes it True
+#   while store en_suite_morning_active. Measured that morning: 20.1 reached at 08:21, the overheat
+#   rule then held 14 from 08:25 to 09:10, and the room read 19.1 at 09:30.
 #
 # v1.32.0 (25-11-2026): the Boost variable follows the timed boost's rules (CliveS: "make the global Boost
 #   variable follow the same rules"). heating_logic.boost_wins(room, is_boost, timed_active, timed_rooms,
@@ -691,7 +698,7 @@ _MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Constants
 # ---------------------------------------------------------------------------
 PLUGIN_NAME     = "EvoHome Heating Controller"
-PLUGIN_VERSION  = "1.32.0"
+PLUGIN_VERSION  = "1.33.0"
 POLL_SLEEP_SECS = 30   # runConcurrentThread inner sleep
 
 # En Suite humidity reading — used only to LOG what the drying run achieved, never
@@ -1553,6 +1560,7 @@ class Plugin(indigo.PluginBase):
             floor_heat_restore_enabled = (morning_active
                                           or bool(self.store.get("en_suite_floor_early"))),
             overheat_target_override   = self._en_suite_overheat_target(),
+            overheat_exempt            = morning_active,
             **common,
         )
         self._note_en_suite_morning_cancelled(morning_active)
