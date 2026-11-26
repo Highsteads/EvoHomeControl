@@ -7,6 +7,10 @@
 # Date:        26-11-2026 UK
 # Version:     1.34.1
 #
+# v1.34.1 (26-11-2026): the "[Snow] Forecast detected" Event Log line is written once when snow
+#   enters the forecast (the same rising edge as the snowForecastDetected event), not every 5-minute
+#   cycle. The heating boost is unchanged.
+#
 # v1.34.0 (26-11-2026): a gentler overheat rule on trial in two rooms (CliveS: "Yes, trial it").
 #   heating_logic.GENTLE_OVERHEAT_ROOMS = Dining Room and Living Room Door: check_overheating hands
 #   them to _gentle_overheat, which leaves the target alone and lowers it by GENTLE_BACKOFF (1) only
